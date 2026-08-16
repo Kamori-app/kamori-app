@@ -576,18 +576,15 @@ async fn account_recovery_returns_current_space_keys_and_revokes_old_credentials
         .fetch_one(&app.state.pool)
         .await
         .expect("load registered user");
-    let workspace_id = Uuid::new_v4();
+    let workspace_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM workspaces WHERE owner_user_id = $1 AND kind = 'personal' AND deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_one(&app.state.pool)
+    .await
+    .expect("load signup personal workspace");
     let space_id = Uuid::new_v4();
     let device_id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO workspaces (id, owner_user_id, kind, encrypted_metadata) VALUES ($1, $2, 'personal', $3)",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .bind(vec![1_u8])
-    .execute(&app.state.pool)
-    .await
-    .expect("insert workspace");
     sqlx::query(
         "INSERT INTO security_spaces (id, workspace_id, owner_user_id, created_by, encrypted_metadata) VALUES ($1, $2, $3, $3, $4)",
     )
