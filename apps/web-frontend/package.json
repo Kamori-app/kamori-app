@@ -9,8 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "sync": "svelte-kit sync",
-    "check": "svelte-check --tsgo --tsconfig ./tsconfig.json",
-    "lint": "svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "lint": "bun run check",
     "test:unit": "bun test src/lib/nav/section-nav.test.mjs src/lib/auth/cookie-csrf.test.mjs src/lib/auth/session-flow.test.mjs",
     "test": "bun run check && bun run test:unit"
   },

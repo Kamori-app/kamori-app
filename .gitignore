@@ -138,6 +138,11 @@ yarn.lock
 **/build/
 **/dist/
 
+# Tauri validates frontendDist during Rust-only checks on a clean checkout.
+!apps/dav-bridge-desktop/dist/
+apps/dav-bridge-desktop/dist/*
+!apps/dav-bridge-desktop/dist/.gitkeep
+
 # Vite cache
 **/.vite/
 **/vite.config.js.timestamp-*

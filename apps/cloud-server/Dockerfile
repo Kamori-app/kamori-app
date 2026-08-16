@@ -6,7 +6,7 @@ WORKDIR /workspace
 # receives its current security updates instead of stale revision pins.
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates pkg-config \
+    ca-certificates libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
@@ -15,7 +15,7 @@ RUN cargo build --locked -p cloud-server --release
 FROM debian:bookworm-slim AS runtime
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+    ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home kamori
 
