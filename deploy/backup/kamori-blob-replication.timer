@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kamori encrypted blob replication schedule
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=30m
+Persistent=true
+Unit=kamori-blob-replication.service
+
+[Install]
+WantedBy=timers.target

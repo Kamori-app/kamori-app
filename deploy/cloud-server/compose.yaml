@@ -1,0 +1,78 @@
+services:
+  edge:
+    image: ${EDGE_IMAGE:?EDGE_IMAGE is required}
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /config:noexec,nosuid,size=8m
+      - /data:noexec,nosuid,size=8m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      cloud:
+        condition: service_healthy
+      web:
+        condition: service_started
+      admin:
+        condition: service_started
+
+  cloud:
+    image: ${CLOUD_IMAGE:?CLOUD_IMAGE is required}
+    env_file:
+      - /etc/kamori/cloud.env
+    volumes:
+      - /etc/kamori/postgres-ca.crt:/run/secrets/postgres-ca.crt:ro
+      - /etc/kamori/postgres-client.crt:/run/secrets/postgres-client.crt:ro
+      - /etc/kamori/postgres-client.key:/run/secrets/postgres-client.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cloud-server", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  web:
+    image: ${WEB_IMAGE:?WEB_IMAGE is required}
+    environment:
+      ORIGIN: https://app.kamori.app
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+      XFF_DEPTH: "2"
+      BODY_SIZE_LIMIT: 1M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=32m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  admin:
+    image: ${ADMIN_IMAGE:?ADMIN_IMAGE is required}
+    environment:
+      ORIGIN: https://admin.kamori.app
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+      XFF_DEPTH: "2"
+      BODY_SIZE_LIMIT: 1M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=32m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

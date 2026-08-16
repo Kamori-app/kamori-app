@@ -1,0 +1,22 @@
+[default]
+description = "Least-privilege app command set for the main desktop bridge window."
+permissions = ["allow-main-window-commands"]
+
+[[permission]]
+identifier = "allow-main-window-commands"
+description = "Allows only the app IPC commands used by the desktop bridge UI."
+commands.allow = [
+  "configure_backend",
+  "apply_window_preferences",
+  "password_login",
+  "passkey_login_start",
+  "passkey_login_finish",
+  "start_local_server",
+  "stop_local_server",
+  "local_server_status",
+  "sync_now",
+  "create_collection",
+  "list_collections",
+  "dashboard_snapshot",
+  "logout"
+]

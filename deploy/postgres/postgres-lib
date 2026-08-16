@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+load_postgres_env() {
+  local env_file=${1:-/etc/kamori/postgres.env}
+  test -r "$env_file"
+  # shellcheck disable=SC1090
+  source "$env_file"
+  : "${POSTGRES_VERSION:?POSTGRES_VERSION is required}"
+  : "${POSTGRES_PRIMARY_IP:?POSTGRES_PRIMARY_IP is required}"
+  : "${POSTGRES_STANDBY_IP:?POSTGRES_STANDBY_IP is required}"
+  : "${POSTGRES_DATA_DIR:?POSTGRES_DATA_DIR is required}"
+  : "${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}"
+  : "${POSTGRES_REPLICATION_PASSWORD:?POSTGRES_REPLICATION_PASSWORD is required}"
+  : "${POSTGRES_JOBS_PASSWORD:?POSTGRES_JOBS_PASSWORD is required}"
+  : "${PGBACKREST_S3_ENDPOINT:?PGBACKREST_S3_ENDPOINT is required}"
+  : "${PGBACKREST_S3_REGION:?PGBACKREST_S3_REGION is required}"
+  : "${PGBACKREST_S3_BUCKET:?PGBACKREST_S3_BUCKET is required}"
+  : "${PGBACKREST_S3_KEY_ID:?PGBACKREST_S3_KEY_ID is required}"
+  : "${PGBACKREST_S3_APPLICATION_KEY:?PGBACKREST_S3_APPLICATION_KEY is required}"
+  : "${PGBACKREST_CIPHER_PASS:?PGBACKREST_CIPHER_PASS is required}"
+  if [[ ! "$POSTGRES_DATA_DIR" =~ ^/mnt/HC_Volume_[A-Za-z0-9._-]+/postgresql/[0-9]+/main$ ]]; then
+    echo "POSTGRES_DATA_DIR must point inside an explicit Hetzner volume mount" >&2
+    exit 1
+  fi
+  export POSTGRES_VERSION POSTGRES_PRIMARY_IP POSTGRES_STANDBY_IP POSTGRES_DATA_DIR
+}
+
+install_postgres_packages() {
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    "postgresql-${POSTGRES_VERSION}" "postgresql-client-${POSTGRES_VERSION}" \
+    pgbackrest rsync ca-certificates
+}
+
+require_tls_material() {
+  test -r /etc/kamori/tls/postgres.crt
+  test -r /etc/kamori/tls/postgres.key
+  test -r /etc/kamori/tls/postgres-ca.crt
+  install -o postgres -g postgres -m 0644 /etc/kamori/tls/postgres.crt \
+    "/etc/postgresql/${POSTGRES_VERSION}/main/server.crt"
+  install -o postgres -g postgres -m 0600 /etc/kamori/tls/postgres.key \
+    "/etc/postgresql/${POSTGRES_VERSION}/main/server.key"
+  install -o postgres -g postgres -m 0644 /etc/kamori/tls/postgres-ca.crt \
+    "/etc/postgresql/${POSTGRES_VERSION}/main/root.crt"
+}
+
+prepare_primary_data_directory() {
+  local packaged_data="/var/lib/postgresql/${POSTGRES_VERSION}/main"
+  systemctl stop postgresql.service || true
+  install -d -o postgres -g postgres -m 0700 "$POSTGRES_DATA_DIR"
+  if [[ ! -r "$POSTGRES_DATA_DIR/PG_VERSION" ]]; then
+    if [[ -r "$packaged_data/PG_VERSION" ]]; then
+      rsync -aHAX "$packaged_data/" "$POSTGRES_DATA_DIR/"
+    else
+      runuser -u postgres -- "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/initdb" \
+        --auth-local=peer --auth-host=scram-sha-256 --data-checksums \
+        --pgdata="$POSTGRES_DATA_DIR"
+    fi
+  fi
+  chown -R postgres:postgres "$POSTGRES_DATA_DIR"
+  chmod 0700 "$POSTGRES_DATA_DIR"
+}
+
+write_pgbackrest_config() {
+  install -d -o postgres -g postgres -m 0750 /etc/pgbackrest
+  install -d -o postgres -g postgres -m 0750 /var/log/pgbackrest /var/lib/pgbackrest
+  local temporary
+  temporary=$(mktemp /etc/pgbackrest/pgbackrest.conf.XXXXXX)
+  cat > "$temporary" <<EOF
+[global]
+repo1-type=s3
+repo1-path=/kamori-postgres
+repo1-s3-endpoint=${PGBACKREST_S3_ENDPOINT}
+repo1-s3-region=${PGBACKREST_S3_REGION}
+repo1-s3-bucket=${PGBACKREST_S3_BUCKET}
+repo1-s3-key=${PGBACKREST_S3_KEY_ID}
+repo1-s3-key-secret=${PGBACKREST_S3_APPLICATION_KEY}
+repo1-s3-uri-style=path
+repo1-storage-verify-tls=y
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=${PGBACKREST_CIPHER_PASS}
+repo1-retention-full=5
+repo1-retention-diff=30
+start-fast=y
+process-max=2
+log-level-console=info
+log-level-file=detail
+
+[kamori]
+pg1-path=${POSTGRES_DATA_DIR}
+EOF
+  chown postgres:postgres "$temporary"
+  chmod 0600 "$temporary"
+  mv "$temporary" /etc/pgbackrest/pgbackrest.conf
+}
+
+write_postgres_config() {
+  local node_ip=$1
+  local archive_mode=$2
+  local conf_dir="/etc/postgresql/${POSTGRES_VERSION}/main"
+  cat > "$conf_dir/conf.d/90-kamori.conf" <<EOF
+data_directory = '${POSTGRES_DATA_DIR}'
+listen_addresses = '127.0.0.1,${node_ip}'
+password_encryption = 'scram-sha-256'
+ssl = on
+ssl_cert_file = '${conf_dir}/server.crt'
+ssl_key_file = '${conf_dir}/server.key'
+ssl_ca_file = '${conf_dir}/root.crt'
+ssl_min_protocol_version = 'TLSv1.3'
+wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 10
+wal_log_hints = on
+archive_mode = '${archive_mode}'
+archive_command = 'pgbackrest --stanza=kamori archive-push %p'
+archive_timeout = '60s'
+hot_standby = on
+shared_preload_libraries = 'pg_stat_statements'
+track_commit_timestamp = on
+log_connections = on
+log_disconnections = on
+log_line_prefix = '%m [%p] %q%u@%d '
+EOF
+  cat > "$conf_dir/pg_hba.conf" <<EOF
+local   all          postgres                              peer
+local   all          all                                   scram-sha-256
+hostssl kamori       kamori_app         10.42.0.0/16       scram-sha-256 clientcert=verify-ca
+hostssl kamori       kamori_jobs        10.42.0.0/16       scram-sha-256 clientcert=verify-ca
+hostssl replication  kamori_replication 10.42.0.0/16       scram-sha-256 clientcert=verify-ca
+EOF
+  chown postgres:postgres "$conf_dir/conf.d/90-kamori.conf" "$conf_dir/pg_hba.conf"
+  chmod 0640 "$conf_dir/conf.d/90-kamori.conf" "$conf_dir/pg_hba.conf"
+}

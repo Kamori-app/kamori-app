@@ -1,0 +1,116 @@
+groups:
+  - name: kamori-service
+    rules:
+      - alert: KamoriAppNodeUnavailable
+        expr: up{job="kamori-cloud"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kamori application node is unavailable
+
+      - alert: KamoriElevatedServerErrors
+        expr: sum(increase(kamori_http_responses_5xx_total[10m])) / clamp_min(sum(increase(kamori_http_requests_total[10m])), 1) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 2% of Kamori requests return server errors
+
+      - alert: KamoriRegistrationCapacityWarning
+        expr: max(kamori_active_accounts) / max(kamori_beta_account_limit) >= 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Beta account capacity reached 80 percent
+
+      - alert: KamoriRegistrationCapacityCritical
+        expr: max(kamori_active_accounts) / max(kamori_beta_account_limit) >= 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Beta account capacity reached 95 percent
+
+      - alert: KamoriBlobEgressTenTerabytes
+        expr: max(kamori_blob_egress_month_bytes) >= 10000000000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Monthly blob delivery reached 10 TB
+
+      - alert: KamoriBlobEgressFourteenTerabytes
+        expr: max(kamori_blob_egress_month_bytes) >= 14000000000000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Monthly blob delivery reached 14 TB
+
+      - alert: KamoriBlobEgressSafetyStopNear
+        expr: max(kamori_blob_egress_month_bytes) / max(kamori_blob_egress_nonessential_stop_bytes) >= 0.97
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Nonessential blob egress safety stop is imminent
+
+      - alert: KamoriBlobEgressEmergencyReserveLow
+        expr: max(kamori_blob_egress_month_bytes) >= 18000000000000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Monthly egress reached 18 TB; only the protected core reserve remains
+
+      - alert: KamoriBlobEgressEmergencyThreshold
+        expr: max(kamori_blob_egress_month_bytes) >= max(kamori_blob_egress_emergency_breaker_bytes)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Monthly egress crossed the 19 TB emergency threshold
+
+      - alert: KamoriPendingBlobStuck
+        expr: max(kamori_pending_blobs) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: A blob upload has remained pending
+
+      - alert: KamoriObjectCleanupStale
+        expr: max(kamori_object_cleanup_last_success_timestamp_seconds) == 0 or time() - max(kamori_object_cleanup_last_success_timestamp_seconds) > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Object cleanup has not completed successfully for ten minutes
+
+      - alert: KamoriPostgresBackupStale
+        expr: max(kamori_postgres_backup_last_success_timestamp_seconds) == 0 or time() - max(kamori_postgres_backup_last_success_timestamp_seconds) > 129600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL backup has no success in the last 36 hours
+
+      - alert: KamoriBlobReplicationStale
+        expr: max(kamori_blob_replication_last_success_timestamp_seconds) == 0 or time() - max(kamori_blob_replication_last_success_timestamp_seconds) > 129600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Cross-provider ciphertext replication has no success in the last 36 hours
+
+  - name: kamori-hosts
+    rules:
+      - alert: KamoriHostDiskNearlyFull
+        expr: 1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 0.85
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kamori host filesystem is over 85 percent full

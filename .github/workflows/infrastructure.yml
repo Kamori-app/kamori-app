@@ -1,0 +1,43 @@
+name: Hosted infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Pulumi operation
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - up
+
+concurrency:
+  group: hosted-infrastructure-beta
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pulumi:
+    name: Pulumi ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    environment: beta
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: infra/go.mod
+          cache-dependency-path: infra/go.sum
+      - uses: pulumi/actions@v6
+        with:
+          command: ${{ inputs.command }}
+          stack-name: ${{ vars.PULUMI_STACK }}
+          work-dir: infra
+          comment-on-pr: false
+          refresh: true
+          upsert: false
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}

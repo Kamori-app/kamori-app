@@ -1,0 +1,33 @@
+{
+  "name": "dav-bridge-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "test": "svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "lint": "svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "svelte": "^5.56.9"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.4",
+    "@typescript/native": "npm:typescript@7",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "svelte-check": "^4.7.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6",
+    "vite": "^8.2.1"
+  }
+}

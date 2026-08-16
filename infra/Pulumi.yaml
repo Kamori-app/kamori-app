@@ -1,0 +1,3 @@
+name: kamori-hosted
+runtime: go
+description: Kamori hosted MVP infrastructure on Hetzner with B2 and Hetzner S3-compatible storage

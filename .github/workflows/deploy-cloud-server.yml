@@ -1,0 +1,128 @@
+name: Deploy cloud server
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-server-beta
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: Build immutable image
+    runs-on: ubuntu-latest
+    outputs:
+      cloud-image: ${{ steps.reference.outputs.cloud-image }}
+      web-image: ${{ steps.reference.outputs.web-image }}
+      admin-image: ${{ steps.reference.outputs.admin-image }}
+      edge-image: ${{ steps.reference.outputs.edge-image }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: cloud
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/cloud-server/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kamori-cloud:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web-frontend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kamori-web:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: admin
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/admin-frontend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kamori-admin:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: edge
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/edge/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kamori-edge:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: reference
+        env:
+          CLOUD_DIGEST: ${{ steps.cloud.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          ADMIN_DIGEST: ${{ steps.admin.outputs.digest }}
+          EDGE_DIGEST: ${{ steps.edge.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "cloud-image=ghcr.io/${OWNER,,}/kamori-cloud@${CLOUD_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "web-image=ghcr.io/${OWNER,,}/kamori-web@${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "admin-image=ghcr.io/${OWNER,,}/kamori-admin@${ADMIN_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "edge-image=ghcr.io/${OWNER,,}/kamori-edge@${EDGE_DIGEST}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Rolling beta deployment
+    needs: image
+    runs-on: [self-hosted, linux, x64, kamori-beta]
+    environment: beta
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned host keys
+        env:
+          KNOWN_HOSTS: ${{ secrets.BETA_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+      - name: Install deployment bundle
+        env:
+          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
+          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+        run: |
+          for host in "$APP_ONE" "$APP_TWO"; do
+            scp -r deploy/cloud-server "$host:/tmp/kamori-cloud-release"
+            ssh "$host" 'sudo /tmp/kamori-cloud-release/bootstrap-host /tmp/kamori-cloud-release'
+          done
+      - name: Authenticate nodes to GHCR
+        env:
+          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
+          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+          GHCR_USER: ${{ secrets.GHCR_READ_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          for host in "$APP_ONE" "$APP_TWO"; do
+            printf '%s' "$GHCR_TOKEN" | ssh "$host" "sudo docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+          done
+      - name: Migrate and roll app nodes
+        env:
+          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
+          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+          CLOUD_IMAGE: ${{ needs.image.outputs.cloud-image }}
+          WEB_IMAGE: ${{ needs.image.outputs.web-image }}
+          ADMIN_IMAGE: ${{ needs.image.outputs.admin-image }}
+          EDGE_IMAGE: ${{ needs.image.outputs.edge-image }}
+        run: |
+          ssh "$APP_ONE" "sudo env RUN_MIGRATIONS=1 /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          ssh "$APP_TWO" "sudo /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+      - name: Verify public readiness
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-all-errors https://api.kamori.app/health/ready
+          curl --fail --silent --show-error --retry 10 --retry-all-errors https://app.kamori.app/
+          curl --fail --silent --show-error --retry 10 --retry-all-errors https://admin.kamori.app/

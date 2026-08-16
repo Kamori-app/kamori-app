@@ -1,0 +1,23 @@
+[Unit]
+Description=Kamori cloud server container
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kamori/release
+ExecStart=/usr/bin/docker compose --env-file /etc/kamori/release.env up --no-build --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/kamori/release.env down --timeout 30
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
+TimeoutStopSec=45s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/run /var/lib/docker /opt/kamori/release
+
+[Install]
+WantedBy=multi-user.target

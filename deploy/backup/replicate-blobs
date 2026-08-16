@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+env_file=${KAMORI_BACKUP_ENV:-/etc/kamori/backup.env}
+test -r "$env_file"
+# shellcheck disable=SC1090
+source "$env_file"
+: "${PRIMARY_S3_ENDPOINT:?PRIMARY_S3_ENDPOINT is required}"
+: "${PRIMARY_S3_REGION:?PRIMARY_S3_REGION is required}"
+: "${PRIMARY_S3_BUCKET:?PRIMARY_S3_BUCKET is required}"
+: "${PRIMARY_S3_KEY_ID:?PRIMARY_S3_KEY_ID is required}"
+: "${PRIMARY_S3_APPLICATION_KEY:?PRIMARY_S3_APPLICATION_KEY is required}"
+: "${DR_S3_ENDPOINT:?DR_S3_ENDPOINT is required}"
+: "${DR_S3_REGION:?DR_S3_REGION is required}"
+: "${DR_S3_BUCKET:?DR_S3_BUCKET is required}"
+: "${DR_S3_ACCESS_KEY:?DR_S3_ACCESS_KEY is required}"
+: "${DR_S3_SECRET_KEY:?DR_S3_SECRET_KEY is required}"
+: "${JOBS_DATABASE_URL:?JOBS_DATABASE_URL is required}"
+sample_count=${BLOB_VERIFY_SAMPLE_COUNT:-20}
+if [[ ! "$sample_count" =~ ^[0-9]+$ ]] || (( sample_count < 1 || sample_count > 1000 )); then
+  echo "BLOB_VERIFY_SAMPLE_COUNT must be between 1 and 1000" >&2
+  exit 1
+fi
+
+exec 9>/run/lock/kamori-blob-replication.lock
+flock -n 9 || { echo "blob replication is already running" >&2; exit 1; }
+
+export RCLONE_CONFIG_PRIMARY_TYPE=s3
+export RCLONE_CONFIG_PRIMARY_PROVIDER=Other
+export RCLONE_CONFIG_PRIMARY_ACCESS_KEY_ID=$PRIMARY_S3_KEY_ID
+export RCLONE_CONFIG_PRIMARY_SECRET_ACCESS_KEY=$PRIMARY_S3_APPLICATION_KEY
+export RCLONE_CONFIG_PRIMARY_ENDPOINT=$PRIMARY_S3_ENDPOINT
+export RCLONE_CONFIG_PRIMARY_REGION=$PRIMARY_S3_REGION
+export RCLONE_CONFIG_PRIMARY_ACL=private
+export RCLONE_CONFIG_DR_TYPE=s3
+export RCLONE_CONFIG_DR_PROVIDER=Other
+export RCLONE_CONFIG_DR_ACCESS_KEY_ID=$DR_S3_ACCESS_KEY
+export RCLONE_CONFIG_DR_SECRET_ACCESS_KEY=$DR_S3_SECRET_KEY
+export RCLONE_CONFIG_DR_ENDPOINT=$DR_S3_ENDPOINT
+export RCLONE_CONFIG_DR_REGION=$DR_S3_REGION
+export RCLONE_CONFIG_DR_ACL=private
+
+heartbeat() {
+  local status=$1
+  local detail=$2
+  psql "$JOBS_DATABASE_URL" --set=ON_ERROR_STOP=1 \
+    --set=status="$status" --set=detail="$detail" <<'SQL' || true
+INSERT INTO operator_job_heartbeats (
+  job_name, status, details, last_started_at, last_succeeded_at, updated_at
+) VALUES (
+  'blob_replication', :'status', jsonb_build_object('summary', :'detail'), now(),
+  CASE WHEN :'status' = 'ok' THEN now() ELSE NULL END, now()
+)
+ON CONFLICT (job_name) DO UPDATE SET
+  status = EXCLUDED.status,
+  details = EXCLUDED.details,
+  last_started_at = CASE WHEN EXCLUDED.status = 'running' THEN now()
+                         ELSE operator_job_heartbeats.last_started_at END,
+  last_succeeded_at = CASE WHEN EXCLUDED.status = 'ok' THEN now()
+                           ELSE operator_job_heartbeats.last_succeeded_at END,
+  updated_at = now();
+SQL
+}
+
+work_dir=$(mktemp -d /tmp/kamori-blob-replication.XXXXXX)
+cleanup() { find "$work_dir" -mindepth 1 -delete; rmdir "$work_dir"; }
+trap cleanup EXIT
+heartbeat running "copy and inventory verification started"
+
+if ! rclone copy "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
+  --immutable --check-first --transfers 4 --checkers 8 --retries 5 \
+  --low-level-retries 20 --log-level INFO; then
+  heartbeat failed "ciphertext copy failed"
+  exit 1
+fi
+if ! rclone check "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
+  --one-way --size-only --checkers 16; then
+  heartbeat failed "size inventory check failed"
+  exit 1
+fi
+
+rclone lsf "primary:${PRIMARY_S3_BUCKET}" --recursive --files-only --format ps \
+  | LC_ALL=C sort > "$work_dir/primary.inventory"
+rclone lsf "dr:${DR_S3_BUCKET}" --recursive --files-only --format ps \
+  | LC_ALL=C sort > "$work_dir/dr.inventory"
+awk 'NR == FNR { destination[$0] = 1; next } !destination[$0] { print }' \
+  "$work_dir/dr.inventory" "$work_dir/primary.inventory" > "$work_dir/missing.inventory"
+if [[ -s "$work_dir/missing.inventory" ]]; then
+  heartbeat failed "DR inventory is missing primary objects"
+  exit 1
+fi
+
+cut -d';' -f1 "$work_dir/primary.inventory" | shuf -n "$sample_count" > "$work_dir/sample"
+while IFS= read -r object_key; do
+  [[ -n "$object_key" ]] || continue
+  primary_hash=$(rclone cat "primary:${PRIMARY_S3_BUCKET}/${object_key}" | sha256sum | cut -d' ' -f1)
+  dr_hash=$(rclone cat "dr:${DR_S3_BUCKET}/${object_key}" | sha256sum | cut -d' ' -f1)
+  if [[ "$primary_hash" != "$dr_hash" ]]; then
+    heartbeat failed "sampled ciphertext hash mismatch"
+    exit 1
+  fi
+done < "$work_dir/sample"
+
+primary_count=$(wc -l < "$work_dir/primary.inventory")
+heartbeat ok "copy verified; primary object count ${primary_count}; sampled ${sample_count} hashes"

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 4 ]]; then
+  echo "usage: deploy-cloud-server CLOUD_IMAGE WEB_IMAGE ADMIN_IMAGE EDGE_IMAGE" >&2
+  exit 2
+fi
+
+cloud_image=$1
+web_image=$2
+admin_image=$3
+edge_image=$4
+for image in "$cloud_image" "$web_image" "$admin_image" "$edge_image"; do
+  if [[ ! "$image" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]; then
+    echo "deployment requires immutable GHCR digests" >&2
+    exit 2
+  fi
+done
+
+exec 9>/run/lock/kamori-cloud-deploy.lock
+flock -n 9 || { echo "another deployment is active" >&2; exit 1; }
+
+release_file=/etc/kamori/release.env
+env_file=/etc/kamori/cloud.env
+previous_release=
+if [[ -r "$release_file" ]]; then
+  previous_release=$(mktemp /etc/kamori/release.env.previous.XXXXXX)
+  cp "$release_file" "$previous_release"
+fi
+
+test -r "$env_file"
+for image in "$cloud_image" "$web_image" "$admin_image" "$edge_image"; do
+  /usr/bin/docker pull "$image"
+done
+
+if [[ "${RUN_MIGRATIONS:-0}" == "1" ]]; then
+  /usr/bin/docker run --rm \
+    --network host \
+    --env-file "$env_file" \
+    "$cloud_image" migrate
+fi
+
+temporary_release=$(mktemp /etc/kamori/release.env.XXXXXX)
+{
+  printf 'CLOUD_IMAGE=%s\n' "$cloud_image"
+  printf 'WEB_IMAGE=%s\n' "$web_image"
+  printf 'ADMIN_IMAGE=%s\n' "$admin_image"
+  printf 'EDGE_IMAGE=%s\n' "$edge_image"
+} > "$temporary_release"
+chmod 0600 "$temporary_release"
+mv "$temporary_release" "$release_file"
+systemctl restart kamori-cloud.service
+
+healthy=0
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error --max-time 3 \
+    --header 'Host: api.kamori.app' http://127.0.0.1:8080/health/ready >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$healthy" == "1" ]]; then
+  if [[ -n "$previous_release" ]]; then
+    rm -f "$previous_release"
+  fi
+  echo "deployed immutable application release"
+  exit 0
+fi
+
+echo "new release failed readiness; rolling back" >&2
+if [[ -n "$previous_release" ]]; then
+  mv "$previous_release" "$release_file"
+  systemctl restart kamori-cloud.service
+else
+  systemctl stop kamori-cloud.service || true
+fi
+journalctl -u kamori-cloud.service --since '-5 minutes' --no-pager -n 100 >&2 || true
+exit 1

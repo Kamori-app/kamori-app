@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Kamori bridge app preview</title>
+  <desc id="desc">Illustrative screenshot-style panel of the Kamori bridge app status screen.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f7f5f1" />
+      <stop offset="100%" stop-color="#efe7dc" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg2)" />
+  <rect x="24" y="24" width="1152" height="672" rx="20" fill="#ffffff" stroke="#e2d7c9" />
+  <rect x="56" y="56" width="1088" height="64" rx="14" fill="#f6f0e7" />
+  <rect x="80" y="76" width="260" height="24" rx="8" fill="#4c3c31" opacity="0.9" />
+  <rect x="920" y="76" width="200" height="24" rx="12" fill="#4f9f5d" />
+  <circle cx="940" cy="88" r="6" fill="#d9ffe0" />
+  <rect x="56" y="148" width="530" height="516" rx="16" fill="#fbf8f3" stroke="#e6dccf" />
+  <rect x="84" y="178" width="260" height="24" rx="8" fill="#4c3c31" opacity="0.85" />
+  <rect x="84" y="220" width="470" height="14" rx="7" fill="#e5ddd2" />
+  <rect x="84" y="246" width="420" height="14" rx="7" fill="#e5ddd2" />
+  <rect x="84" y="286" width="470" height="94" rx="14" fill="#ffffff" stroke="#e4d9ca" />
+  <rect x="106" y="314" width="230" height="16" rx="8" fill="#4c3c31" opacity="0.75" />
+  <rect x="106" y="342" width="420" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="84" y="404" width="470" height="94" rx="14" fill="#ffffff" stroke="#e4d9ca" />
+  <rect x="106" y="432" width="200" height="16" rx="8" fill="#4c3c31" opacity="0.75" />
+  <rect x="106" y="460" width="420" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="84" y="534" width="180" height="44" rx="12" fill="#2f8f76" />
+  <rect x="614" y="148" width="530" height="516" rx="16" fill="#fbf8f3" stroke="#e6dccf" />
+  <rect x="642" y="178" width="210" height="24" rx="8" fill="#4c3c31" opacity="0.85" />
+  <rect x="642" y="220" width="470" height="146" rx="14" fill="#ffffff" stroke="#e4d9ca" />
+  <rect x="666" y="250" width="160" height="18" rx="9" fill="#4f9f5d" />
+  <rect x="666" y="280" width="420" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="666" y="304" width="380" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="642" y="392" width="470" height="220" rx="14" fill="#ffffff" stroke="#e4d9ca" />
+  <rect x="666" y="422" width="220" height="16" rx="8" fill="#4c3c31" opacity="0.75" />
+  <rect x="666" y="452" width="420" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="666" y="476" width="420" height="12" rx="6" fill="#e5ddd2" />
+  <rect x="666" y="500" width="350" height="12" rx="6" fill="#e5ddd2" />
+</svg>

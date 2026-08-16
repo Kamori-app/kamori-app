@@ -1,0 +1,29 @@
+app-id: app.kamori.desktop
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: kamori
+finish-args:
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --talk-name=org.freedesktop.secrets
+modules:
+  - name: kamori
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 kamori /app/bin/kamori
+      - install -Dm644 app.kamori.desktop.desktop /app/share/applications/app.kamori.desktop.desktop
+      - install -Dm644 app.kamori.desktop.metainfo.xml /app/share/metainfo/app.kamori.desktop.metainfo.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/app.kamori.desktop.png
+    sources:
+      - type: file
+        path: dist/kamori
+      - type: file
+        path: app.kamori.desktop.desktop
+      - type: file
+        path: app.kamori.desktop.metainfo.xml
+      - type: file
+        path: dist/icon.png

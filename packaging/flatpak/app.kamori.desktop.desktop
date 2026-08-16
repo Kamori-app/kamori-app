@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Kamori
+Comment=Encrypted personal information manager and local DAV bridge
+Exec=kamori
+Icon=app.kamori.desktop
+Terminal=false
+Type=Application
+Categories=Office;Calendar;ContactManagement;
+StartupNotify=true

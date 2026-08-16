@@ -1,0 +1,12 @@
+route:
+  receiver: operator-placeholder
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+# This receiver intentionally sends nowhere. The beta release gate requires
+# replacing it with an operator-owned webhook or email receiver and firing a
+# synthetic alert before registration is opened.
+receivers:
+  - name: operator-placeholder

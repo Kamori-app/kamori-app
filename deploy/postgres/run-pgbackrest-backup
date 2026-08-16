@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source /usr/local/lib/kamori/postgres-lib
+load_postgres_env
+backup_type=diff
+if [[ $(date -u +%u) == 7 ]]; then
+  backup_type=full
+fi
+
+heartbeat() {
+  local status=$1
+  local detail=$2
+  runuser -u postgres -- psql --dbname=kamori --set=ON_ERROR_STOP=1 \
+    --set=status="$status" --set=detail="$detail" <<'SQL' || true
+INSERT INTO operator_job_heartbeats (
+  job_name, status, details, last_started_at, last_succeeded_at, updated_at
+) VALUES (
+  'postgres_backup', :'status', jsonb_build_object('summary', :'detail'), now(),
+  CASE WHEN :'status' = 'ok' THEN now() ELSE NULL END, now()
+)
+ON CONFLICT (job_name) DO UPDATE SET
+  status = EXCLUDED.status,
+  details = EXCLUDED.details,
+  last_started_at = CASE WHEN EXCLUDED.status = 'running' THEN now()
+                         ELSE operator_job_heartbeats.last_started_at END,
+  last_succeeded_at = CASE WHEN EXCLUDED.status = 'ok' THEN now()
+                           ELSE operator_job_heartbeats.last_succeeded_at END,
+  updated_at = now();
+SQL
+}
+
+heartbeat running "${backup_type} backup started"
+if runuser -u postgres -- pgbackrest --stanza=kamori --type="$backup_type" backup; then
+  runuser -u postgres -- pgbackrest --stanza=kamori check
+  heartbeat ok "${backup_type} backup and archive check completed"
+else
+  heartbeat failed "${backup_type} backup failed; inspect pgBackRest logs"
+  exit 1
+fi

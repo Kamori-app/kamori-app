@@ -1,0 +1,8 @@
+rust_input: crate::frb_api
+rust_root: packages/crypto-core-lib
+rust_output: packages/crypto-core-lib/src/frb_generated.rs
+rust_features:
+  - frb
+dart_output: apps/dav-bridge-mobile/lib/src/rust/gen
+dart_root: apps/dav-bridge-mobile
+auto_upgrade_dependency: false

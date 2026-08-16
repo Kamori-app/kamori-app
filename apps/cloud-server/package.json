@@ -1,0 +1,13 @@
+{
+  "name": "cloud-server",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "../../scripts/cargo-with-sccache.sh run -p cloud-server",
+    "build": "../../scripts/cargo-with-sccache.sh build -p cloud-server",
+    "lint": "../../scripts/cargo-with-sccache.sh clippy -p cloud-server --all-targets -- -D warnings",
+    "test": "../../scripts/cargo-with-sccache.sh test -p cloud-server",
+    "fast": "../../scripts/cargo-with-sccache.sh check -p cloud-server --tests"
+  }
+}

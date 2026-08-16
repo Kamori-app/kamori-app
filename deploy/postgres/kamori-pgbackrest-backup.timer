@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kamori PostgreSQL backup schedule
+
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
+RandomizedDelaySec=20m
+Persistent=true
+Unit=kamori-pgbackrest-backup.service
+
+[Install]
+WantedBy=timers.target
