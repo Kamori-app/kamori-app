@@ -64,7 +64,8 @@ FRB codegen:
 - Naming:
   - Rust modules/files: `snake_case`
   - Dart types: `PascalCase`
-  - SQL migrations: `YYYYMMDD_NNNN_description.sql`
+  - SQL migrations: `YYYYMMDDNNNN_description.sql` (SQLx treats the numeric prefix
+    before the first underscore as the migration version, so it must be unique).
 
 ## Testing Guidelines
 - Add Rust unit tests near implementation with `#[cfg(test)]` and explicit names (for example, `rejects_invalid_nonce`).
