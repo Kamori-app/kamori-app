@@ -46,8 +46,10 @@ attachments, and enterprise policy are not MVP features.
 - Registration is disabled by default and additionally protected by a strict,
   operator-configurable active-account cap.
 
-All active application endpoints use MessagePack. Binary protocol values stay
-binary rather than JSON number arrays.
+All active application endpoints use MessagePack with human-readable Serde
+semantics for cross-language types. UUIDs are canonical lowercase hyphenated
+strings; binary protocol values stay MessagePack `bin` values rather than JSON
+number arrays.
 
 ## 3. Devices, keys, and recovery
 

@@ -33,7 +33,8 @@ where
             )
         })?;
 
-        let value = rmp_serde::from_slice(&bytes).map_err(|_error| {
+        let mut deserializer = rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
+        let value = T::deserialize(&mut deserializer).map_err(|_error| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse::new(
@@ -51,8 +52,14 @@ where
     T: Serialize,
 {
     fn into_response(self) -> Response {
-        match rmp_serde::to_vec_named(&self.0) {
-            Ok(body) => (
+        let mut body = Vec::new();
+        let result = self.0.serialize(
+            &mut rmp_serde::Serializer::new(&mut body)
+                .with_struct_map()
+                .with_human_readable(),
+        );
+        match result {
+            Ok(()) => (
                 [(
                     header::CONTENT_TYPE,
                     HeaderValue::from_static("application/msgpack"),
@@ -67,5 +74,51 @@ where
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
+
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct BrowserContract {
+        id: Uuid,
+        #[serde(with = "serde_bytes")]
+        public_key: Vec<u8>,
+    }
+
+    #[derive(Deserialize)]
+    struct BrowserWireContract {
+        id: String,
+        #[serde(with = "serde_bytes")]
+        public_key: Vec<u8>,
+    }
+
+    #[test]
+    fn human_readable_msgpack_uses_uuid_strings_and_binary_bytes() {
+        let expected = BrowserContract {
+            id: Uuid::parse_str("f26f4239-754e-4653-81b8-5b6112514a16").expect("uuid"),
+            public_key: vec![1, 2, 3, 4],
+        };
+        let mut encoded = Vec::new();
+        expected
+            .serialize(
+                &mut rmp_serde::Serializer::new(&mut encoded)
+                    .with_struct_map()
+                    .with_human_readable(),
+            )
+            .expect("encode browser contract");
+
+        let wire: BrowserWireContract =
+            rmp_serde::from_slice(&encoded).expect("decode browser wire contract");
+        assert_eq!(wire.id, "f26f4239-754e-4653-81b8-5b6112514a16");
+        assert_eq!(wire.public_key, [1, 2, 3, 4]);
+
+        let mut deserializer =
+            rmp_serde::Deserializer::new(encoded.as_slice()).with_human_readable();
+        let decoded = BrowserContract::deserialize(&mut deserializer).expect("decode contract");
+        assert_eq!(decoded, expected);
     }
 }

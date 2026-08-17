@@ -145,6 +145,10 @@ apps/dav-bridge-desktop/dist/*
 
 # Vite cache
 **/.vite/
+
+# Local acceptance runtime secrets, databases, and browser artifacts
+tests/acceptance/.runtime/
+tests/acceptance/artifacts/
 **/vite.config.js.timestamp-*
 **/vite.config.ts.timestamp-*
 

@@ -270,10 +270,19 @@ struct CloudRefreshResponse {
 }
 
 fn encode_msgpack<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    rmp_serde::to_vec_named(value).context("serialize msgpack payload")
+    let mut bytes = Vec::new();
+    value
+        .serialize(
+            &mut rmp_serde::Serializer::new(&mut bytes)
+                .with_struct_map()
+                .with_human_readable(),
+        )
+        .context("serialize msgpack payload")?;
+    Ok(bytes)
 }
 
 async fn decode_msgpack<T: DeserializeOwned>(response: reqwest::Response) -> Result<T> {
     let bytes = response.bytes().await.context("read msgpack body bytes")?;
-    rmp_serde::from_slice(&bytes).context("decode msgpack payload")
+    let mut deserializer = rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
+    T::deserialize(&mut deserializer).context("decode msgpack payload")
 }

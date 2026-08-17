@@ -26,14 +26,24 @@ pub(super) fn endpoint(base: &str, path: &str) -> String {
 }
 
 pub(super) fn encode_msgpack<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
-    rmp_serde::to_vec_named(value).map_err(|error| error.to_string())
+    let mut bytes = Vec::new();
+    value
+        .serialize(
+            &mut rmp_serde::Serializer::new(&mut bytes)
+                .with_struct_map()
+                .with_human_readable(),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(bytes)
 }
 
 pub(super) async fn decode_msgpack<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> Result<T, String> {
     let bytes = response.bytes().await.map_err(|error| error.to_string())?;
-    rmp_serde::from_slice(&bytes).map_err(|error| error.to_string())
+    let mut deserializer =
+        rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
+    T::deserialize(&mut deserializer).map_err(|error| error.to_string())
 }
 
 pub(super) async fn refresh_mobile_tokens(

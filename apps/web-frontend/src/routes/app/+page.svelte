@@ -97,13 +97,23 @@
         }
 
         // `?start=signup` enables deep-link onboarding from landing CTA.
-        const params = new URLSearchParams(window.location.search);
-        if (params.get("start") === "signup" && !$appState.accessToken) {
-            signUpOpen = true;
-            appState.update((state) => ({
-                ...state,
-                notice: "Get started: 1) Create account, 2) Install bridge app on your device, 3) Connect your DAV client to the local endpoint.",
-            }));
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("start") === "signup") {
+            if (!$appState.accessToken) {
+                signUpOpen = true;
+                appState.update((state) => ({
+                    ...state,
+                    notice: "Get started: 1) Create account, 2) Install bridge app on your device, 3) Connect your DAV client to the local endpoint.",
+                }));
+            }
+            // Treat onboarding deep links as one-shot commands. Keeping the
+            // parameter would reopen Sign Up after authentication or reload.
+            url.searchParams.delete("start");
+            window.history.replaceState(
+                window.history.state,
+                "",
+                `${url.pathname}${url.search}${url.hash}`,
+            );
         }
     });
 </script>

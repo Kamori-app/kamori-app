@@ -332,7 +332,10 @@ Where:
 - `test` = full `cargo test -p cloud-server` (first cold run can be slow).
 
 Transport note:
-- Active API endpoints use MessagePack (`application/msgpack`).
+- Active API endpoints use MessagePack (`application/msgpack`). UUIDs use
+  canonical lowercase hyphenated strings, while byte fields remain MessagePack
+  `bin` values. Rust clients must use matching human-readable `rmp-serde`
+  serializer and deserializer configuration.
 
 ## Build
 

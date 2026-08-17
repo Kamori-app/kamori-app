@@ -65,6 +65,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+Production-like browser acceptance tests require a running Podman or Docker
+engine:
+
+```bash
+bun run acceptance:smoke
+bun run acceptance:full
+```
+
+The stack, coverage, generated-secret lifecycle, and troubleshooting workflow
+are documented in [tests/acceptance/README.md](tests/acceptance/README.md).
+
 Targeted applications:
 
 ```bash

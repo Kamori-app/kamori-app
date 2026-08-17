@@ -68,6 +68,7 @@
     let trashedCollections: CollectionEntry[] = [];
 
     let inviteTtlMinutes = "60";
+    let inviteRole: "editor" | "reader" = "editor";
     let inviteCodeIssued = "";
     let inviteCodeToRedeem = "";
     let inviteNotePlaintext = "";
@@ -459,6 +460,9 @@
         );
         if (!collection) {
             throw new Error("Choose a collection first.");
+        }
+        if (collection.role === "reader") {
+            throw new Error("Reader access does not allow changes.");
         }
         const spaceKey = await loadSpaceKey(collection.id, collection.keyEpoch);
         if (!spaceKey) {
@@ -998,7 +1002,7 @@
                     $appState.cloudBaseUrl,
                     {
                         space_id: collection.id,
-                        role: "editor",
+                        role: inviteRole,
                         invite_code_hash: inviteCodeHash,
                         encrypted_key_package: encryptedGroupKey,
                         encrypted_note: encryptedNote,
@@ -1466,6 +1470,16 @@
 
             <select
                 class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
+                aria-label="Invite role"
+                bind:value={inviteRole}
+            >
+                <option value="editor">Editor</option>
+                <option value="reader">Reader</option>
+            </select>
+
+            <select
+                class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
+                aria-label="Invite expiry"
                 bind:value={inviteTtlMinutes}
             >
                 {#each inviteTtlOptions as option}

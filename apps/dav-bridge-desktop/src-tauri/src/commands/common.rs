@@ -96,7 +96,15 @@ pub(super) fn to_ui_error(err: impl std::fmt::Display) -> String {
 
 /// Encodes a payload into MessagePack bytes.
 pub(super) fn encode_msgpack<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
-    rmp_serde::to_vec_named(value).map_err(to_ui_error)
+    let mut bytes = Vec::new();
+    value
+        .serialize(
+            &mut rmp_serde::Serializer::new(&mut bytes)
+                .with_struct_map()
+                .with_human_readable(),
+        )
+        .map_err(to_ui_error)?;
+    Ok(bytes)
 }
 
 /// Decodes a MessagePack response into the expected model.
@@ -104,7 +112,8 @@ pub(super) async fn decode_msgpack<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> Result<T, String> {
     let bytes = response.bytes().await.map_err(to_ui_error)?;
-    rmp_serde::from_slice(&bytes).map_err(to_ui_error)
+    let mut deserializer = rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
+    T::deserialize(&mut deserializer).map_err(to_ui_error)
 }
 
 /// Revokes a body-transport refresh session without depending on a live access token.

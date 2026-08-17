@@ -120,7 +120,14 @@ async fn post_msgpack<T: Serialize>(
     payload: &T,
     extra_headers: &HeaderMap,
 ) -> Response {
-    let body = rmp_serde::to_vec_named(payload).expect("encode msgpack request");
+    let mut body = Vec::new();
+    payload
+        .serialize(
+            &mut rmp_serde::Serializer::new(&mut body)
+                .with_struct_map()
+                .with_human_readable(),
+        )
+        .expect("encode msgpack request");
     let mut builder = Request::builder()
         .method("POST")
         .uri(path)
@@ -144,7 +151,8 @@ async fn split_response(response: Response) -> (StatusCode, HeaderMap, Vec<u8>) 
 }
 
 fn decode_msgpack<T: DeserializeOwned>(body: &[u8]) -> T {
-    rmp_serde::from_slice(body).expect("decode msgpack response")
+    let mut deserializer = rmp_serde::Deserializer::new(body).with_human_readable();
+    T::deserialize(&mut deserializer).expect("decode msgpack response")
 }
 
 fn decode_json<T: DeserializeOwned>(body: &[u8]) -> T {
