@@ -37,6 +37,12 @@ abstract class RustBridgeApi {
   /// Clears refresh token from Rust runtime memory.
   Future<void> clearRefreshToken();
 
+  /// Revokes one server refresh session without requiring a live access token.
+  Future<bool> revokeRefreshSession({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  });
+
   /// Configures authenticated offline synchronization without a local server.
   Future<void> configureSync({
     required String cloudBaseUrl,

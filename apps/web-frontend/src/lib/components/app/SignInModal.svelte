@@ -237,7 +237,11 @@
                 if (spaceKey.length !== 32) {
                     throw new Error("A recovered space key has an invalid length.");
                 }
-                await storeSpaceKey(packageEntry.space_id, spaceKey);
+                await storeSpaceKey(
+                    packageEntry.space_id,
+                    packageEntry.key_epoch,
+                    spaceKey,
+                );
                 spaceKey.fill(0);
             }
             await resetWebCredentialsAfterRecovery(username);

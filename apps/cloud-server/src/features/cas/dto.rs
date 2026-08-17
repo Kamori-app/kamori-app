@@ -19,16 +19,6 @@ pub struct CasUploadResponse {
     pub stored: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CasDownloadResponse {
-    pub blob_id: Uuid,
-    #[serde(with = "serde_bytes")]
-    pub ciphertext_sha256: Vec<u8>,
-    pub size_padded: u64,
-    #[serde(with = "serde_bytes")]
-    pub data: Vec<u8>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

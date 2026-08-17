@@ -6,9 +6,10 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use super::dto::{
-    CreateSpaceRequest, DeviceKeyPackage, RecoverySpaceKeyPackage, SpaceDeviceSummary,
-    SpaceMemberSummary, SpaceRole, SpaceSummary,
+    CreateSpaceRequest, DeviceKeyPackage, MemberRecoveryKeyPackage, RecoverySpaceKeyPackage,
+    SpaceDeviceSummary, SpaceMemberSummary, SpaceRole, SpaceSummary,
 };
+use crypto_core_lib::operation_envelope::OperationEnvelopeV1;
 
 pub(crate) async fn create_space(
     pool: &PgPool,
@@ -42,6 +43,19 @@ pub(crate) async fn create_space(
     )
     .bind(Uuid::new_v4())
     .bind(request.space_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO security_space_epochs (
+            space_id, key_epoch, rotation_id, status, created_by, committed_at
+        ) VALUES ($1, 1, $2, 'committed', $3, now())
+        "#,
+    )
+    .bind(request.space_id)
+    .bind(Uuid::new_v4())
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
@@ -442,15 +456,35 @@ pub(crate) enum RevokeMemberResult {
     PackageCoverageMismatch,
 }
 
+pub(crate) struct MemberRotation<'a> {
+    pub(crate) actor_id: Uuid,
+    pub(crate) space_id: Uuid,
+    pub(crate) target_user_id: Uuid,
+    pub(crate) expected_key_epoch: u32,
+    pub(crate) new_key_epoch: u32,
+    pub(crate) rotation_id: Uuid,
+    pub(crate) new_encrypted_metadata: &'a [u8],
+    pub(crate) packages: &'a [DeviceKeyPackage],
+    pub(crate) recovery_packages: &'a [MemberRecoveryKeyPackage],
+    pub(crate) snapshots: &'a [OperationEnvelopeV1],
+}
+
 pub(crate) async fn revoke_member_and_rotate(
     pool: &PgPool,
-    actor_id: Uuid,
-    space_id: Uuid,
-    target_user_id: Uuid,
-    expected_key_epoch: u32,
-    new_key_epoch: u32,
-    packages: &[DeviceKeyPackage],
+    rotation: MemberRotation<'_>,
 ) -> anyhow::Result<RevokeMemberResult> {
+    let MemberRotation {
+        actor_id,
+        space_id,
+        target_user_id,
+        expected_key_epoch,
+        new_key_epoch,
+        rotation_id,
+        new_encrypted_metadata,
+        packages,
+        recovery_packages,
+        snapshots,
+    } = rotation;
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
         r#"
@@ -523,6 +557,57 @@ pub(crate) async fn revoke_member_and_rotate(
         return Ok(RevokeMemberResult::PackageCoverageMismatch);
     }
 
+    let remaining_users: HashSet<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT user_id FROM security_space_members
+        WHERE space_id = $1 AND user_id <> $2 AND status = 'active'
+        "#,
+    )
+    .bind(space_id)
+    .bind(target_user_id)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+    let supplied_recovery: HashMap<Uuid, &[u8]> = recovery_packages
+        .iter()
+        .map(|package| (package.user_id, package.encrypted_key_package.as_slice()))
+        .collect();
+    if supplied_recovery.len() != recovery_packages.len()
+        || supplied_recovery.keys().copied().collect::<HashSet<_>>() != remaining_users
+    {
+        tx.rollback().await?;
+        return Ok(RevokeMemberResult::PackageCoverageMismatch);
+    }
+
+    let expected_streams: HashSet<Uuid> =
+        sqlx::query_scalar("SELECT DISTINCT stream_id FROM operation_log WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+    let supplied_streams: HashSet<Uuid> = snapshots.iter().map(|item| item.stream_id).collect();
+    if supplied_streams.len() != snapshots.len() || supplied_streams != expected_streams {
+        tx.rollback().await?;
+        return Ok(RevokeMemberResult::PackageCoverageMismatch);
+    }
+
+    let epoch = i32::try_from(new_key_epoch)?;
+    sqlx::query(
+        r#"
+        INSERT INTO security_space_epochs (
+            space_id, key_epoch, rotation_id, status, created_by
+        ) VALUES ($1, $2, $3, 'preparing', $4)
+        "#,
+    )
+    .bind(space_id)
+    .bind(epoch)
+    .bind(rotation_id)
+    .bind(actor_id)
+    .execute(&mut *tx)
+    .await?;
+
     sqlx::query(
         "UPDATE security_space_members SET status = 'revoked', revoked_at = now() WHERE space_id = $1 AND user_id = $2 AND status = 'active'",
     )
@@ -531,7 +616,6 @@ pub(crate) async fn revoke_member_and_rotate(
     .execute(&mut *tx)
     .await?;
 
-    let epoch = i32::try_from(new_key_epoch)?;
     for (device_id, encrypted_package) in supplied {
         let inserted = sqlx::query(
             r#"
@@ -555,6 +639,61 @@ pub(crate) async fn revoke_member_and_rotate(
             anyhow::bail!("remaining device became inactive during key rotation");
         }
     }
+    for (user_id, encrypted_package) in supplied_recovery {
+        sqlx::query(
+            r#"
+            INSERT INTO security_space_recovery_keys (
+                space_id, user_id, key_epoch, encrypted_key_package
+            ) VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(space_id)
+        .bind(user_id)
+        .bind(epoch)
+        .bind(encrypted_package)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for snapshot in snapshots {
+        let sequence: i64 = sqlx::query_scalar(
+            "UPDATE security_spaces SET next_sequence = next_sequence + 1 WHERE id = $1 RETURNING next_sequence",
+        )
+        .bind(space_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO operation_log (
+                space_id, space_seq, stream_id, client_op_id, author_device_id,
+                key_epoch, envelope_kind, cipher_suite, nonce, ciphertext, signature
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'snapshot', $7, $8, $9, $10)
+            "#,
+        )
+        .bind(space_id)
+        .bind(sequence)
+        .bind(snapshot.stream_id)
+        .bind(snapshot.client_op_id)
+        .bind(snapshot.author_device_id)
+        .bind(epoch)
+        .bind(snapshot.cipher_suite.as_db_value())
+        .bind(&snapshot.nonce)
+        .bind(&snapshot.ciphertext)
+        .bind(&snapshot.signature)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE security_space_invites
+        SET revoked_at = now()
+        WHERE space_id = $1 AND revoked_at IS NULL AND used_count < max_uses
+        "#,
+    )
+    .bind(space_id)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         "UPDATE security_space_members SET key_epoch = $2 WHERE space_id = $1 AND status = 'active'",
     )
@@ -562,11 +701,37 @@ pub(crate) async fn revoke_member_and_rotate(
     .bind(epoch)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("UPDATE security_spaces SET current_key_epoch = $2 WHERE id = $1")
-        .bind(space_id)
-        .bind(epoch)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE security_spaces SET current_key_epoch = $2, encrypted_metadata = $3 WHERE id = $1",
+    )
+    .bind(space_id)
+    .bind(epoch)
+    .bind(new_encrypted_metadata)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE security_space_epochs
+        SET status = 'superseded', superseded_at = now()
+        WHERE space_id = $1 AND key_epoch = $2
+        "#,
+    )
+    .bind(space_id)
+    .bind(current_epoch)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE security_space_epochs
+        SET status = 'committed', committed_at = now()
+        WHERE space_id = $1 AND key_epoch = $2 AND rotation_id = $3
+        "#,
+    )
+    .bind(space_id)
+    .bind(epoch)
+    .bind(rotation_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(RevokeMemberResult::Revoked)
 }

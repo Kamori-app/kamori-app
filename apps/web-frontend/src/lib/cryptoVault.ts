@@ -8,7 +8,11 @@ import {
   type WebDeviceIdentity,
 } from "$lib/opaqueClient";
 import type { OperationEnvelopeV1 } from "$lib/opaqueClient";
-import type { MaterializedPimItem } from "$lib/pim";
+import type {
+  MaterializedOperationState,
+  MaterializedPimItem,
+  MaterializedPimState,
+} from "$lib/pim";
 
 const DATABASE_NAME = "kamori-web-vault";
 const DATABASE_VERSION = 4;
@@ -261,16 +265,29 @@ export const resetWebCredentialsAfterRecovery = async (username: string): Promis
   }
 };
 
-export const storeSpaceKey = async (spaceId: string, key: Uint8Array): Promise<void> => {
+export const storeSpaceKey = async (
+  spaceId: string,
+  keyEpoch: number,
+  key: Uint8Array,
+): Promise<void> => {
   if (key.length !== 32) {
     throw new Error("Space key must be 32 bytes.");
   }
+  if (!Number.isSafeInteger(keyEpoch) || keyEpoch <= 0) {
+    throw new Error("Space key epoch must be positive.");
+  }
   const encrypted = await encryptVaultBytes(requireMasterKey(), key);
-  await writeValue(SPACE_KEY_STORE, `${activeUsername}:${spaceId}`, encrypted);
+  await writeValue(SPACE_KEY_STORE, `${activeUsername}:${spaceId}:${keyEpoch}`, encrypted);
 };
 
-export const loadSpaceKey = async (spaceId: string): Promise<Uint8Array | null> => {
-  const encrypted = await readValue<Uint8Array>(SPACE_KEY_STORE, `${activeUsername}:${spaceId}`);
+export const loadSpaceKey = async (
+  spaceId: string,
+  keyEpoch: number,
+): Promise<Uint8Array | null> => {
+  const encrypted = await readValue<Uint8Array>(
+    SPACE_KEY_STORE,
+    `${activeUsername}:${spaceId}:${keyEpoch}`,
+  );
   return encrypted ? decryptVaultBytes(requireMasterKey(), encrypted) : null;
 };
 
@@ -334,24 +351,34 @@ export const removeQueuedOperationEnvelope = async (clientOpId: string): Promise
 };
 
 /** Persists the decrypted PIM projection only as master-key-encrypted bytes. */
-export const storeMaterializedPimItems = async (
+export const storeMaterializedPimState = async (
   items: MaterializedPimItem[],
+  operations: MaterializedOperationState[],
 ): Promise<void> => {
-  const encrypted = await encryptVaultBytes(requireMasterKey(), encode(items));
+  const state: MaterializedPimState = { version: 2, items, operations };
+  const encrypted = await encryptVaultBytes(requireMasterKey(), encode(state));
   await writeValue(PIM_STATE_STORE, activeUsername, encrypted);
 };
 
 /** Restores the encrypted PIM projection for the active account. */
-export const loadMaterializedPimItems = async (): Promise<MaterializedPimItem[]> => {
+export const loadMaterializedPimState = async (): Promise<MaterializedPimState> => {
   const encrypted = await readValue<Uint8Array>(PIM_STATE_STORE, activeUsername);
   if (!encrypted) {
-    return [];
+    return { version: 2, items: [], operations: [] };
   }
   const decoded = decode(await decryptVaultBytes(requireMasterKey(), encrypted));
-  if (!Array.isArray(decoded)) {
+  if (Array.isArray(decoded)) {
+    return {
+      version: 2,
+      items: decoded as MaterializedPimItem[],
+      operations: [],
+    };
+  }
+  const state = decoded as Partial<MaterializedPimState>;
+  if (state.version !== 2 || !Array.isArray(state.items) || !Array.isArray(state.operations)) {
     throw new Error("Stored PIM projection is invalid.");
   }
-  return decoded as MaterializedPimItem[];
+  return state as MaterializedPimState;
 };
 
 export const lockWebVault = (): void => {

@@ -49,15 +49,19 @@ export interface OpaqueSigninFinishResponse {
   preauth_token?: string | null;
 }
 
-export interface PasskeyLoginStartResponse {
+export interface BrowserLoginStartResponse {
   flow_id: string;
-  challenge: number[];
-  public_key_credential_request_options: number[];
+  device_secret: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in_seconds: number;
+  poll_interval_seconds: number;
 }
 
-export interface PasskeyLoginFinishResponse {
-  username: string;
-  access_token: string;
+export interface BrowserLoginPollResponse {
+  status: "pending" | "approved";
+  username?: string | null;
+  access_token?: string | null;
   refresh_token?: string | null;
   refresh_token_id?: string | null;
 }
@@ -84,13 +88,13 @@ export const api = {
       totpCode,
     }),
 
-  passkeyLoginStart: () =>
-    invoke<PasskeyLoginStartResponse>("passkey_login_start"),
+  browserLoginStart: () =>
+    invoke<BrowserLoginStartResponse>("browser_login_start"),
 
-  passkeyLoginFinish: (credential: number[], flowId: string) =>
-    invoke<PasskeyLoginFinishResponse>("passkey_login_finish", {
+  browserLoginPoll: (flowId: string, deviceSecret: string) =>
+    invoke<BrowserLoginPollResponse>("browser_login_poll", {
       flowId,
-      credential,
+      deviceSecret,
     }),
 
   startLocalServer: () => invoke<LocalServerStatus>("start_local_server"),

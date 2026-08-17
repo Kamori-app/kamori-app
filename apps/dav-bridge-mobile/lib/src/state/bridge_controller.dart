@@ -80,6 +80,7 @@ class BridgeController extends Notifier<BridgeState> {
 
   Future<void> restorePersistedSession() async {
     try {
+      await _retryPendingRevocation();
       final snapshot = await _syncRuntimeStorage.read();
       if (snapshot == null) {
         return;
@@ -159,6 +160,26 @@ class BridgeController extends Notifier<BridgeState> {
   Future<void> logout() async {
     state = state.copyWith(isBusy: true, clearError: true);
     try {
+      String? serverWarning;
+      final refreshToken = await _refreshTokenStorage.read(
+        cloudBaseUrl: state.cloudBaseUrl,
+      );
+      if (refreshToken != null) {
+        try {
+          await _rustBridge.revokeRefreshSession(
+            cloudBaseUrl: state.cloudBaseUrl,
+            refreshToken: refreshToken,
+          );
+          await _refreshTokenStorage.deleteQueuedRevocation();
+        } catch (error) {
+          await _refreshTokenStorage.queueRevocation(
+            cloudBaseUrl: state.cloudBaseUrl,
+            refreshToken: refreshToken,
+          );
+          serverWarning =
+              'Signed out locally. Server session revocation will retry when online.';
+        }
+      }
       await _clearRefreshTokenState();
       await _syncRuntimeStorage.delete();
       await _cancelPeriodicSync();
@@ -172,10 +193,21 @@ class BridgeController extends Notifier<BridgeState> {
         clearLastSyncAt: true,
         calendarProjectionEnabled: false,
         contactsProjectionEnabled: false,
+        error: serverWarning,
       );
     } catch (error) {
       state = state.copyWith(isBusy: false, error: 'Logout failed: $error');
     }
+  }
+
+  Future<void> _retryPendingRevocation() async {
+    final pending = await _refreshTokenStorage.readQueuedRevocation();
+    if (pending == null || pending.refreshToken.trim().isEmpty) return;
+    await _rustBridge.revokeRefreshSession(
+      cloudBaseUrl: pending.cloudBaseUrl,
+      refreshToken: pending.refreshToken,
+    );
+    await _refreshTokenStorage.deleteQueuedRevocation();
   }
 
   /// Triggers immediate manual sync.

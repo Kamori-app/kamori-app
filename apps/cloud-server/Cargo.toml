@@ -46,6 +46,7 @@ jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc
 redis = { version = "1.6", features = ["tokio-comp"] }
 async-trait = "0.1"
 object_store = { version = "0.14.1", default-features = false, features = ["aws"] }
+futures-util = "0.3"
 
 [features]
 default = ["webauthn"]

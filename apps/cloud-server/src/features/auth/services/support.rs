@@ -296,6 +296,6 @@ mod tests {
     fn recovery_code_normalization_rejects_non_base32_chars() {
         let err = normalize_recovery_code("abcd-efgh-ijkl-mno*").expect_err("must fail");
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert_eq!(err.1.0.error, "recovery_code must be base32");
+        assert_eq!(err.1.0.message, "recovery_code must be base32");
     }
 }

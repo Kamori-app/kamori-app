@@ -2,9 +2,10 @@
 
 use uuid::Uuid;
 
+use crate::features::auth::{dto::ReauthAction, services::consume_reauth_token};
 use crate::{
     features::{
-        common::{ApiError, bad_request, conflict, internal_error, unauthenticated},
+        common::{ApiError, bad_request, conflict, internal_error},
         users::{
             dto::{
                 ConsentSettings, DeleteMeRequest, DeleteMeResponse, DeletionStatusResponse,
@@ -25,17 +26,14 @@ pub(crate) async fn delete_me(
     if payload.confirmation != format!("DELETE {username}") {
         return Err(bad_request("account deletion confirmation does not match"));
     }
-    let proof = state
-        .validate_token(&payload.reauth_token)
-        .map_err(|_| unauthenticated("fresh reauthentication is required"))?;
-    if proof.kind != crate::platform::jwt::TokenKind::Reauth
-        || proof.user_id != user_id
-        || proof.username.as_deref() != Some(username)
-    {
-        return Err(unauthenticated(
-            "reauthentication proof does not match account",
-        ));
-    }
+    consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        user_id,
+        username,
+        ReauthAction::DeleteAccount,
+    )
+    .await?;
     let deleted = delete_user(&state.pool, user_id)
         .await
         .map_err(internal_error)?;

@@ -1,13 +1,18 @@
 //! Fresh OPAQUE and TOTP verification for destructive operations.
 
 use axum::http::HeaderMap;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256};
+use std::time::Duration;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 use crate::{
     features::{
         auth::{
             dto::{
-                ReauthFinishRequest, ReauthFinishResponse, ReauthStartRequest, ReauthStartResponse,
+                ReauthAction, ReauthFinishRequest, ReauthFinishResponse, ReauthStartRequest,
+                ReauthStartResponse,
             },
             repositories::{consume_totp_backup_code, get_user_by_username},
         },
@@ -43,7 +48,16 @@ pub(crate) async fn start(
         .login_start(
             &principal.username,
             &payload.opaque_start_request,
-            &password_file,
+            Some(&password_file),
+        )
+        .await
+        .map_err(internal_error)?;
+    state
+        .state_store
+        .put(
+            &reauth_flow_key(opaque.flow_id),
+            payload.action.as_str().as_bytes(),
+            Duration::from_secs(5 * 60),
         )
         .await
         .map_err(internal_error)?;
@@ -76,6 +90,16 @@ pub(crate) async fn finish(
         )
         .await
         .map_err(|_| unauthenticated("password reauthentication failed"))?;
+
+    let expected_action = state
+        .state_store
+        .take(&reauth_flow_key(payload.opaque_flow_id))
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthenticated("reauthentication flow expired or was already used"))?;
+    if expected_action.as_slice() != payload.action.as_str().as_bytes() {
+        return Err(unauthenticated("reauthentication action mismatch"));
+    }
 
     if state.config.enable_totp
         && let Some(ciphertext) = user.totp_secret_ciphertext.as_deref()
@@ -119,5 +143,55 @@ pub(crate) async fn finish(
     let reauth_token = state
         .issue_reauth_token(principal.user_id, &principal.username)
         .map_err(internal_error)?;
+    state
+        .state_store
+        .put(
+            &reauth_token_key(&reauth_token),
+            payload.action.as_str().as_bytes(),
+            Duration::from_secs(5 * 60),
+        )
+        .await
+        .map_err(internal_error)?;
     Ok(ReauthFinishResponse { reauth_token })
+}
+
+pub(crate) async fn consume_reauth_token(
+    state: &AppState,
+    token: &str,
+    user_id: Uuid,
+    username: &str,
+    expected_action: ReauthAction,
+) -> Result<(), ApiError> {
+    let proof = state
+        .validate_token(token)
+        .map_err(|_| unauthenticated("fresh reauthentication is required"))?;
+    if proof.kind != crate::platform::jwt::TokenKind::Reauth
+        || proof.user_id != user_id
+        || proof.username.as_deref() != Some(username)
+    {
+        return Err(unauthenticated(
+            "reauthentication proof does not match account",
+        ));
+    }
+    let action = state
+        .state_store
+        .take(&reauth_token_key(token))
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthenticated("reauthentication proof expired or was already used"))?;
+    if action.as_slice() != expected_action.as_str().as_bytes() {
+        return Err(unauthenticated(
+            "reauthentication proof has the wrong scope",
+        ));
+    }
+    Ok(())
+}
+
+fn reauth_flow_key(flow_id: Uuid) -> String {
+    format!("auth:reauth:flow:{flow_id}")
+}
+
+fn reauth_token_key(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    format!("auth:reauth:token:{}", URL_SAFE_NO_PAD.encode(digest))
 }

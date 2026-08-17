@@ -13,6 +13,22 @@ abstract class RefreshTokenStorage {
   Future<String?> read({required String cloudBaseUrl});
 
   Future<void> delete({required String cloudBaseUrl});
+
+  Future<void> queueRevocation({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  });
+
+  Future<PendingRefreshRevocation?> readQueuedRevocation();
+
+  Future<void> deleteQueuedRevocation();
+}
+
+class PendingRefreshRevocation {
+  const PendingRefreshRevocation(this.cloudBaseUrl, this.refreshToken);
+
+  final String cloudBaseUrl;
+  final String refreshToken;
 }
 
 /// Android Keystore / iOS Keychain-backed refresh token storage.
@@ -21,6 +37,7 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
       : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _refreshTokenKeyPrefix = 'kamori.refresh_token.';
+  static const String _revocationKey = 'kamori.pending_revocation.v1';
   static const AndroidOptions _androidOptions = AndroidOptions();
   static const IOSOptions _iosOptions = IOSOptions(
     accessibility: KeychainAccessibility.first_unlock_this_device,
@@ -68,9 +85,50 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
     );
   }
 
-  String _storageKey(String cloudBaseUrl) {
+  @override
+  Future<void> queueRevocation({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  }) async {
+    await _storage.write(
+      key: _revocationKey,
+      value: jsonEncode(<String, String>{
+        'cloudBaseUrl': cloudBaseUrl,
+        'refreshToken': refreshToken,
+      }),
+      aOptions: _androidOptions,
+      iOptions: _iosOptions,
+    );
+  }
+
+  @override
+  Future<PendingRefreshRevocation?> readQueuedRevocation() async {
+    final encoded = await _storage.read(
+      key: _revocationKey,
+      aOptions: _androidOptions,
+      iOptions: _iosOptions,
+    );
+    if (encoded == null) return null;
+    final value = jsonDecode(encoded) as Map<String, dynamic>;
+    final baseUrl = value['cloudBaseUrl'] as String?;
+    final token = value['refreshToken'] as String?;
+    if (baseUrl == null || token == null || token.isEmpty) return null;
+    return PendingRefreshRevocation(baseUrl, token);
+  }
+
+  @override
+  Future<void> deleteQueuedRevocation() => _storage.delete(
+        key: _revocationKey,
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+      );
+
+  String _storageKey(
+    String cloudBaseUrl, [
+    String prefix = _refreshTokenKeyPrefix,
+  ]) {
     final normalized = cloudBaseUrl.trim().toLowerCase();
     final digest = sha256.convert(utf8.encode(normalized)).toString();
-    return '$_refreshTokenKeyPrefix$digest';
+    return '$prefix$digest';
   }
 }

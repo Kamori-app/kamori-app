@@ -63,6 +63,37 @@ impl PimOperationV1 {
     }
 }
 
+/// Full per-stream checkpoint used for epoch rotation and new-device recovery.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PimSnapshotV1 {
+    pub schema_version: u16,
+    pub covers_through_space_seq: u64,
+    pub resource_kind: PimResourceKind,
+    pub resource_id: Uuid,
+    pub projection_resource_id: String,
+    pub head_operation_id: Uuid,
+    pub deleted: bool,
+    #[serde(with = "serde_bytes")]
+    pub materialized_projection: Vec<u8>,
+}
+
+impl PimSnapshotV1 {
+    pub const SCHEMA_VERSION: u16 = 1;
+
+    pub fn encode(&self) -> anyhow::Result<Vec<u8>> {
+        Ok(rmp_serde::to_vec_named(self)?)
+    }
+
+    pub fn decode(bytes: &[u8]) -> anyhow::Result<Self> {
+        let snapshot: Self = rmp_serde::from_slice(bytes)?;
+        anyhow::ensure!(
+            snapshot.schema_version == Self::SCHEMA_VERSION,
+            "unsupported PIM snapshot schema version"
+        );
+        Ok(snapshot)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +125,21 @@ mod tests {
         });
         let encoded = operation.encode().expect("encode");
         assert_eq!(PimOperationV1::decode(&encoded).expect("decode"), operation);
+    }
+
+    #[test]
+    fn snapshot_msgpack_roundtrip_is_stable() {
+        let snapshot = PimSnapshotV1 {
+            schema_version: PimSnapshotV1::SCHEMA_VERSION,
+            covers_through_space_seq: 42,
+            resource_kind: PimResourceKind::CalendarEvent,
+            resource_id: Uuid::from_u128(5),
+            projection_resource_id: "event.ics".to_string(),
+            head_operation_id: Uuid::from_u128(4),
+            deleted: false,
+            materialized_projection: b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".to_vec(),
+        };
+        let encoded = snapshot.encode().expect("encode snapshot");
+        assert_eq!(PimSnapshotV1::decode(&encoded).expect("decode"), snapshot);
     }
 }

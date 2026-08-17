@@ -129,59 +129,25 @@ pub(crate) async fn mark_blob_ready(
     Ok(())
 }
 
-pub(crate) enum FindDownloadResult {
-    Found(CasRow),
-    AccessDenied,
-    NotFound,
-}
-
-pub(crate) async fn find_download_blob(
-    pool: &PgPool,
-    actor_id: Uuid,
-    space_id: Uuid,
-    blob_id: Uuid,
-) -> anyhow::Result<FindDownloadResult> {
-    let mut tx = pool.begin().await?;
-    if authorized_owner(&mut tx, actor_id, space_id, false)
-        .await?
-        .is_none()
-    {
-        return Ok(FindDownloadResult::AccessDenied);
-    }
-    let row = sqlx::query(
-        r#"
-        SELECT id, ciphertext_sha256, size_padded, object_key
-        FROM space_blobs
-        WHERE id = $1 AND space_id = $2 AND status = 'ready'
-        "#,
-    )
-    .bind(blob_id)
-    .bind(space_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(row) = row else {
-        return Ok(FindDownloadResult::NotFound);
-    };
-    Ok(FindDownloadResult::Found(CasRow {
-        blob_id: row.try_get("id")?,
-        ciphertext_sha256: row.try_get("ciphertext_sha256")?,
-        size_padded: row.try_get("size_padded")?,
-        object_key: row.try_get("object_key")?,
-    }))
-}
-
 pub(crate) enum ReserveDownloadResult {
-    Reserved(CasRow),
+    Reserved(DownloadReservation),
     AccessDenied,
     NotFound,
     OwnerQuotaExceeded,
+    ConcurrentLimitExceeded,
     GlobalQuotaExceeded,
+}
+
+pub(crate) struct DownloadReservation {
+    pub(crate) id: Uuid,
+    pub(crate) blob: CasRow,
 }
 
 pub(crate) struct EgressLimits {
     pub(crate) owner_monthly: i64,
     pub(crate) owner_rolling_24h: i64,
     pub(crate) global_nonessential_stop: i64,
+    pub(crate) owner_concurrent_downloads: i64,
 }
 
 pub(crate) async fn reserve_download(
@@ -200,6 +166,20 @@ pub(crate) async fn reserve_download(
         return Ok(ReserveDownloadResult::AccessDenied);
     };
     lock_owner_quota(&mut tx, owner_id).await?;
+    let active_downloads: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*)::bigint FROM blob_egress_reservations
+        WHERE owner_user_id = $1
+          AND completed_at IS NULL
+          AND reserved_at >= now() - interval '1 hour'
+        "#,
+    )
+    .bind(owner_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if active_downloads >= limits.owner_concurrent_downloads {
+        return Ok(ReserveDownloadResult::ConcurrentLimitExceeded);
+    }
     let row = sqlx::query(
         r#"
         SELECT id, ciphertext_sha256, size_padded, object_key
@@ -223,7 +203,9 @@ pub(crate) async fn reserve_download(
 
     let owner_month: i64 = sqlx::query_scalar(
         r#"
-        SELECT COALESCE(sum(bytes_reserved), 0)::bigint
+        SELECT COALESCE(sum(
+            CASE WHEN completed_at IS NULL THEN bytes_reserved ELSE bytes_delivered END
+        ), 0)::bigint
         FROM blob_egress_reservations
         WHERE owner_user_id = $1
           AND reserved_at >= date_trunc('month', now())
@@ -234,7 +216,9 @@ pub(crate) async fn reserve_download(
     .await?;
     let owner_24h: i64 = sqlx::query_scalar(
         r#"
-        SELECT COALESCE(sum(bytes_reserved), 0)::bigint
+        SELECT COALESCE(sum(
+            CASE WHEN completed_at IS NULL THEN bytes_reserved ELSE bytes_delivered END
+        ), 0)::bigint
         FROM blob_egress_reservations
         WHERE owner_user_id = $1
           AND reserved_at >= now() - interval '24 hours'
@@ -250,7 +234,9 @@ pub(crate) async fn reserve_download(
     }
     let global_month: i64 = sqlx::query_scalar(
         r#"
-        SELECT COALESCE(sum(bytes_reserved), 0)::bigint
+        SELECT COALESCE(sum(
+            CASE WHEN completed_at IS NULL THEN bytes_reserved ELSE bytes_delivered END
+        ), 0)::bigint
         FROM blob_egress_reservations
         WHERE reserved_at >= date_trunc('month', now())
         "#,
@@ -260,6 +246,7 @@ pub(crate) async fn reserve_download(
     if global_month.saturating_add(blob.size_padded) > limits.global_nonessential_stop {
         return Ok(ReserveDownloadResult::GlobalQuotaExceeded);
     }
+    let reservation_id = Uuid::new_v4();
     sqlx::query(
         r#"
         INSERT INTO blob_egress_reservations (
@@ -267,7 +254,7 @@ pub(crate) async fn reserve_download(
         ) VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(reservation_id)
     .bind(owner_id)
     .bind(actor_id)
     .bind(space_id)
@@ -276,7 +263,30 @@ pub(crate) async fn reserve_download(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(ReserveDownloadResult::Reserved(blob))
+    Ok(ReserveDownloadResult::Reserved(DownloadReservation {
+        id: reservation_id,
+        blob,
+    }))
+}
+
+pub(crate) async fn finalize_download_reservation(
+    pool: &PgPool,
+    reservation_id: Uuid,
+    bytes_delivered: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE blob_egress_reservations
+        SET bytes_delivered = LEAST(bytes_reserved, GREATEST(0, $2)),
+            completed_at = COALESCE(completed_at, now())
+        WHERE id = $1
+        "#,
+    )
+    .bind(reservation_id)
+    .bind(bytes_delivered)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn authorized_owner(

@@ -13,7 +13,7 @@ use crate::{
     },
     features::auth::{
         repositories::{
-            list_refresh_sessions, revoke_refresh_token_by_hash_for_user,
+            RefreshRotation, list_refresh_sessions, revoke_refresh_token_by_hash,
             revoke_refresh_token_by_id_for_user, rotate_refresh_token,
         },
         transport::{
@@ -56,10 +56,15 @@ pub(crate) async fn refresh(
     let client = client_metadata_from_headers(headers);
     let rotated = rotate_refresh_token(
         &state.pool,
-        &token_hash,
-        client.user_agent.as_deref(),
-        client.ip_address.as_deref(),
-        OffsetDateTime::now_utc() + state.refresh_token_ttl(),
+        RefreshRotation {
+            current_token_hash: &token_hash,
+            current_token: &refresh_token,
+            rotation_request_id: payload.rotation_request_id,
+            rotation_key: &state.config.refresh_rotation_key,
+            user_agent: client.user_agent.as_deref(),
+            ip_address: client.ip_address.as_deref(),
+            expires_at: OffsetDateTime::now_utc() + state.refresh_token_ttl(),
+        },
     )
     .await?;
 
@@ -91,7 +96,6 @@ pub(crate) async fn logout(
     headers: &HeaderMap,
     payload: LogoutRequest,
 ) -> Result<Response, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
     let refresh_transport = refresh_transport_from_headers(headers)?;
 
     if matches!(refresh_transport, RefreshTransport::Cookie) {
@@ -116,7 +120,7 @@ pub(crate) async fn logout(
         false
     } else {
         let token_hash = hash_refresh_token(&refresh_token)?;
-        revoke_refresh_token_by_hash_for_user(&state.pool, user_id, &token_hash).await?
+        revoke_refresh_token_by_hash(&state.pool, &token_hash).await?
     };
 
     let mut response = MsgPack(LogoutResponse { revoked }).into_response();

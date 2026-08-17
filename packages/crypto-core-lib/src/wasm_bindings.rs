@@ -278,6 +278,7 @@ pub fn recovery_phrase_to_master_key(phrase: String) -> Result<Vec<u8>, JsValue>
 }
 
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn seal_operation_envelope(
     space_id: String,
     stream_id: String,

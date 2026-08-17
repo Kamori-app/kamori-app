@@ -23,6 +23,8 @@ pub struct PasswordChangeStartResponse {
 /// Password change finish request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasswordChangeFinishRequest {
+    /// One-time proof scoped to password change.
+    pub reauth_token: String,
     /// OPAQUE client finish message bytes for new password registration flow.
     #[serde(with = "serde_bytes")]
     pub opaque_finish_request: Vec<u8>,
@@ -100,6 +102,7 @@ mod tests {
         assert_eq!(start_back.opaque_start_request, vec![1, 2, 3, 4]);
 
         let finish = PasswordChangeFinishRequest {
+            reauth_token: "reauth.jwt".to_string(),
             opaque_finish_request: vec![9, 8, 7, 6],
             encrypted_master_key: vec![1, 2, 3],
         };
@@ -107,6 +110,7 @@ mod tests {
         let finish_back: PasswordChangeFinishRequest =
             rmp_serde::from_slice(&finish_bin).expect("msgpack deserialize");
         assert_eq!(finish_back.opaque_finish_request, vec![9, 8, 7, 6]);
+        assert_eq!(finish_back.reauth_token, "reauth.jwt");
         assert_eq!(finish_back.encrypted_master_key, vec![1, 2, 3]);
     }
 

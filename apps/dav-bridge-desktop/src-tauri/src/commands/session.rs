@@ -6,20 +6,7 @@ use crate::{
     state::DesktopState,
 };
 
-use super::common::{
-    MSGPACK_CONTENT_TYPE, clear_refresh_token_secure, decode_msgpack, encode_msgpack, endpoint,
-    to_ui_error,
-};
-
-#[derive(serde::Serialize)]
-struct LogoutRequest {
-    refresh_token: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct LogoutResponse {
-    revoked: bool,
-}
+use super::common::{clear_refresh_token_secure, revoke_refresh_session, to_ui_error};
 
 /// Returns a dashboard snapshot used by SPA cards.
 #[tauri::command]
@@ -33,30 +20,10 @@ pub async fn dashboard_snapshot(
 #[tauri::command]
 pub async fn logout(state: State<'_, DesktopState>) -> Result<LogoutResult, String> {
     let cloud_base_url = state.cloud_base_url().await;
-    let access_token = state.access_token.read().await.clone();
     let refresh_token = state.refresh_token().await;
-    let server_result = match (access_token, refresh_token.clone()) {
-        (Some(access_token), Some(refresh_token)) => {
-            let body = encode_msgpack(&LogoutRequest {
-                refresh_token: Some(refresh_token),
-            })?;
-            async {
-                let response = reqwest::Client::new()
-                    .post(endpoint(&cloud_base_url, "/auth/logout"))
-                    .bearer_auth(access_token)
-                    .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
-                    .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
-                    .body(body)
-                    .send()
-                    .await
-                    .map_err(to_ui_error)?
-                    .error_for_status()
-                    .map_err(to_ui_error)?;
-                decode_msgpack::<LogoutResponse>(response).await
-            }
-            .await
-        }
-        _ => Ok(LogoutResponse { revoked: false }),
+    let server_result = match refresh_token.as_deref() {
+        Some(refresh_token) => revoke_refresh_session(&cloud_base_url, refresh_token).await,
+        None => Ok(false),
     };
 
     if let Some(handle) = state.sync_task.lock().await.take() {
@@ -74,7 +41,7 @@ pub async fn logout(state: State<'_, DesktopState>) -> Result<LogoutResult, Stri
     *state.device_identity.write().await = None;
     *state.dav_credentials.write().await = None;
     let (server_session_revoked, server_warning) = match server_result {
-        Ok(response) => (response.revoked, None),
+        Ok(revoked) => (revoked, None),
         Err(error) => (
             false,
             Some(format!(

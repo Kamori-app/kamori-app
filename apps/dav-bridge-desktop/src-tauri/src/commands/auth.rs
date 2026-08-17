@@ -1,22 +1,24 @@
 //! Authentication IPC commands for desktop bridge.
 use crate::{
     models::{
-        OpaqueSigninFinishResponse, OpaqueSigninStartResponse, PasskeyLoginFinishResponse,
-        PasskeyLoginStartResponse,
+        BrowserLoginPollResponse, BrowserLoginStartResponse, OpaqueSigninFinishResponse,
+        OpaqueSigninStartResponse,
     },
     state::{CollectionRecord, DesktopState},
 };
 use crypto_core_lib::{EncryptedGroupKey, account_keys, secret_vault};
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters, CredentialResponse};
 use rand_core::OsRng;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
 use super::common::{
-    DesktopOpaqueSuite, MSGPACK_CONTENT_TYPE, OpaqueSigninFinishRequest, OpaqueSigninStartRequest,
-    PasskeyLoginFinishRequest, PasskeyLoginStartRequest, decode_msgpack, encode_msgpack, endpoint,
+    BrowserLoginPollRequest, BrowserLoginStartRequest, DesktopOpaqueSuite, MSGPACK_CONTENT_TYPE,
+    OpaqueSigninFinishRequest, OpaqueSigninStartRequest, decode_msgpack, encode_msgpack, endpoint,
     load_account_master_key_secure, load_or_create_dav_credentials, load_or_create_device_secrets,
-    store_account_master_key_secure, store_refresh_token_secure, to_ui_error,
+    revoke_refresh_session, store_account_master_key_secure, store_refresh_token_secure,
+    to_ui_error,
 };
 
 #[derive(serde::Serialize)]
@@ -262,10 +264,20 @@ pub async fn password_login(
             .refresh_token
             .clone()
             .ok_or_else(|| "missing refresh token in signin response".to_string())?;
-        store_refresh_token_secure(&base, &refresh_token)?;
         let master_key = account_keys::unwrap(&login.export_key, &response.encrypted_master_key)
             .map_err(to_ui_error)?;
-        provision_device_and_spaces(state.inner(), &base, &username, &token, &master_key).await?;
+        if let Err(error) =
+            provision_device_and_spaces(state.inner(), &base, &username, &token, &master_key).await
+        {
+            let cleanup = revoke_refresh_session(&base, &refresh_token).await;
+            return Err(match cleanup {
+                Ok(_) => error,
+                Err(cleanup_error) => format!(
+                    "{error}; the incomplete server session could not be revoked: {cleanup_error}"
+                ),
+            });
+        }
+        store_refresh_token_secure(&base, &refresh_token)?;
         state.set_access_token(Some(token)).await;
         state.set_refresh_token(Some(refresh_token)).await;
         return Ok(response);
@@ -278,21 +290,16 @@ pub async fn password_login(
     Err("Password login failed.".to_string())
 }
 
-/// Starts OPAQUE signin flow against cloud `/auth/signin/start`.
+/// Starts device authorization and opens the trusted web origin in the system browser.
 #[tauri::command]
-pub async fn opaque_signin_start(
+pub async fn browser_login_start(
+    app: AppHandle,
     state: State<'_, DesktopState>,
-    username: String,
-    opaque_start_request: Vec<u8>,
-) -> Result<OpaqueSigninStartResponse, String> {
+) -> Result<BrowserLoginStartResponse, String> {
     let base = state.cloud_base_url().await;
-    let url = endpoint(&base, "/auth/signin/start");
+    let url = endpoint(&base, "/auth/device-authorization/start");
 
-    let request = OpaqueSigninStartRequest {
-        username,
-        opaque_start_request,
-    };
-
+    let request = BrowserLoginStartRequest {};
     let body = encode_msgpack(&request)?;
     let response = reqwest::Client::new()
         .post(url)
@@ -304,95 +311,29 @@ pub async fn opaque_signin_start(
         .map_err(to_ui_error)?
         .error_for_status()
         .map_err(to_ui_error)?;
-    decode_msgpack(response).await
-}
-
-/// Finishes OPAQUE signin and stores issued tokens when available.
-#[tauri::command]
-pub async fn opaque_signin_finish(
-    state: State<'_, DesktopState>,
-    username: String,
-    opaque_flow_id: Uuid,
-    opaque_finish_request: Vec<u8>,
-    totp_code: Option<String>,
-    preauth_token: Option<String>,
-) -> Result<OpaqueSigninFinishResponse, String> {
-    let base = state.cloud_base_url().await;
-    let url = endpoint(&base, "/auth/signin/finish");
-
-    let request = OpaqueSigninFinishRequest {
-        username,
-        opaque_flow_id,
-        opaque_finish_request,
-        totp_code,
-        preauth_token,
-    };
-
-    let body = encode_msgpack(&request)?;
-    let response = reqwest::Client::new()
-        .post(url)
-        .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
-        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
-        .body(body)
-        .send()
-        .await
-        .map_err(to_ui_error)?
-        .error_for_status()
+    let response: BrowserLoginStartResponse = decode_msgpack(response).await?;
+    app.opener()
+        .open_url(&response.verification_uri, None::<&str>)
         .map_err(to_ui_error)?;
-    let response: OpaqueSigninFinishResponse = decode_msgpack(response).await?;
-
-    if let Some(token) = response.access_token.clone() {
-        let refresh_token = response
-            .refresh_token
-            .clone()
-            .ok_or_else(|| "missing refresh token in signin response".to_string())?;
-        store_refresh_token_secure(&base, &refresh_token)?;
-        state.set_access_token(Some(token)).await;
-        state.set_refresh_token(Some(refresh_token)).await;
-    }
-
     Ok(response)
 }
 
-/// Starts passkey login flow against cloud `/auth/passkey/login/start`.
+/// Polls one external-browser authorization without exposing tokens to the browser URL.
 #[tauri::command]
-pub async fn passkey_login_start(
-    state: State<'_, DesktopState>,
-) -> Result<PasskeyLoginStartResponse, String> {
-    let base = state.cloud_base_url().await;
-    let url = endpoint(&base, "/auth/passkey/login/start");
-
-    let request = PasskeyLoginStartRequest {};
-    let body = encode_msgpack(&request)?;
-    let response = reqwest::Client::new()
-        .post(url)
-        .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
-        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
-        .body(body)
-        .send()
-        .await
-        .map_err(to_ui_error)?
-        .error_for_status()
-        .map_err(to_ui_error)?;
-    decode_msgpack(response).await
-}
-
-/// Finishes passkey login and stores returned access/refresh tokens.
-#[tauri::command]
-pub async fn passkey_login_finish(
+pub async fn browser_login_poll(
     state: State<'_, DesktopState>,
     flow_id: String,
-    credential: Vec<u8>,
-) -> Result<PasskeyLoginFinishResponse, String> {
+    device_secret: String,
+) -> Result<BrowserLoginPollResponse, String> {
     let base = state.cloud_base_url().await;
-    let url = endpoint(&base, "/auth/passkey/login/finish");
+    let url = endpoint(&base, "/auth/device-authorization/token");
 
     let flow_id =
         Uuid::parse_str(flow_id.trim()).map_err(|error| format!("invalid flow_id: {error}"))?;
 
-    let request = PasskeyLoginFinishRequest {
+    let request = BrowserLoginPollRequest {
         flow_id,
-        credential,
+        device_secret,
     };
     let body = encode_msgpack(&request)?;
     let response = reqwest::Client::new()
@@ -405,25 +346,49 @@ pub async fn passkey_login_finish(
         .map_err(to_ui_error)?
         .error_for_status()
         .map_err(to_ui_error)?;
-    let response: PasskeyLoginFinishResponse = decode_msgpack(response).await?;
+    let response: BrowserLoginPollResponse = decode_msgpack(response).await?;
+    if response.status == "pending" {
+        return Ok(response);
+    }
+    let username = response
+        .username
+        .as_deref()
+        .ok_or_else(|| "browser authorization returned no username".to_string())?;
+    let access_token = response
+        .access_token
+        .as_deref()
+        .ok_or_else(|| "browser authorization returned no access token".to_string())?;
     let refresh_token = response
         .refresh_token
         .clone()
-        .ok_or_else(|| "missing refresh token in passkey response".to_string())?;
-    let master_key = load_account_master_key_secure(&base, &response.username)?;
-    provision_device_and_spaces(
-        state.inner(),
-        &base,
-        &response.username,
-        &response.access_token,
-        &master_key,
-    )
-    .await?;
+        .ok_or_else(|| "browser authorization returned no refresh token".to_string())?;
+    let master_key = match load_account_master_key_secure(&base, username) {
+        Ok(master_key) => master_key,
+        Err(error) => {
+            let cleanup = revoke_refresh_session(&base, &refresh_token).await;
+            return Err(match cleanup {
+                Ok(_) => error,
+                Err(cleanup_error) => format!(
+                    "{error}; the incomplete server session could not be revoked: {cleanup_error}"
+                ),
+            });
+        }
+    };
+    if let Err(error) =
+        provision_device_and_spaces(state.inner(), &base, username, access_token, &master_key).await
+    {
+        let cleanup = revoke_refresh_session(&base, &refresh_token).await;
+        return Err(match cleanup {
+            Ok(_) => error,
+            Err(cleanup_error) => format!(
+                "{error}; the incomplete server session could not be revoked: {cleanup_error}"
+            ),
+        });
+    }
     store_refresh_token_secure(&base, &refresh_token)?;
 
-    state
-        .set_access_token(Some(response.access_token.clone()))
-        .await;
+    state.set_access_token(Some(access_token.to_string())).await;
+    state.set_username(Some(username.to_string())).await;
     state.set_refresh_token(Some(refresh_token)).await;
     Ok(response)
 }

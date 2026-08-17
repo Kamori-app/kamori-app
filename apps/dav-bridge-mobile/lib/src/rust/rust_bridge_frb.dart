@@ -133,6 +133,18 @@ class FrbRustBridgeApi implements RustBridgeApi {
     await frb_api.mobileClearRefreshToken();
   }
 
+  @override
+  Future<bool> revokeRefreshSession({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  }) async {
+    await _ensureInitialized();
+    return frb_api.mobileRevokeRefreshSession(
+      cloudBaseUrl: cloudBaseUrl,
+      refreshToken: refreshToken,
+    );
+  }
+
   /// Configures the authenticated offline sync runtime.
   @override
   Future<void> configureSync({

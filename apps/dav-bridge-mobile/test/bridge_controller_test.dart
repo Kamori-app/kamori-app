@@ -147,6 +147,13 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   }
 
   @override
+  Future<bool> revokeRefreshSession({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  }) async =>
+      true;
+
+  @override
   Future<void> configureSync({
     required String cloudBaseUrl,
     required String sqlitePath,
@@ -270,6 +277,7 @@ class _FakeLocalCacheKeyStorage implements LocalCacheKeyStorage {
 
 class _FakeRefreshTokenStorage implements RefreshTokenStorage {
   final Map<String, String> _tokens = <String, String>{};
+  PendingRefreshRevocation? _pending;
 
   @override
   Future<void> write({
@@ -287,6 +295,22 @@ class _FakeRefreshTokenStorage implements RefreshTokenStorage {
   @override
   Future<void> delete({required String cloudBaseUrl}) async {
     _tokens.remove(cloudBaseUrl);
+  }
+
+  @override
+  Future<void> queueRevocation({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  }) async {
+    _pending = PendingRefreshRevocation(cloudBaseUrl, refreshToken);
+  }
+
+  @override
+  Future<PendingRefreshRevocation?> readQueuedRevocation() async => _pending;
+
+  @override
+  Future<void> deleteQueuedRevocation() async {
+    _pending = null;
   }
 }
 

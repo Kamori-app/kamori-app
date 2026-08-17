@@ -11,30 +11,15 @@ DR bucket. Kubernetes is intentionally not used.
 
 ## Bootstrap
 
+Follow the complete [production secret procedure](../SECRETS.md). It creates a
+passphrase-encrypted `production` stack, generates the persistent OPAQUE setup,
+separates infrastructure and runtime object-store credentials, configures the
+GitHub `production` Environment, previews the plan, and validates a two-node
+deployment. Never put a secret directly on a command line.
+
 Create or import a Hetzner managed certificate after `api.kamori.app` points to
 the load balancer, then configure its numeric ID. Bucket application keys must
 be limited to the named bucket before they are stored as Pulumi secrets.
-
-```bash
-cd infra
-pulumi stack init beta
-pulumi config set kamori:sshKeys key-name-1,key-name-2
-pulumi config set kamori:adminCidrs 203.0.113.10/32
-pulumi config set kamori:tlsCertificateIds 123456
-pulumi config set kamori:b2Endpoint s3.eu-central-003.backblazeb2.com
-pulumi config set kamori:b2Region eu-central-003
-pulumi config set kamori:b2Bucket kamori-beta-primary
-pulumi config set kamori:b2PostgresBackupBucket kamori-beta-postgres
-pulumi config set kamori:hetznerObjectEndpoint fsn1.your-objectstorage.com
-pulumi config set kamori:hetznerObjectRegion fsn1
-pulumi config set kamori:hetznerObjectBucket kamori-beta-dr
-pulumi config set --secret kamori:hcloudToken '...'
-pulumi config set --secret kamori:b2InfraKeyId '...'
-pulumi config set --secret kamori:b2InfraApplicationKey '...'
-pulumi config set --secret kamori:hetznerObjectAccessKey '...'
-pulumi config set --secret kamori:hetznerObjectSecretKey '...'
-pulumi preview
-```
 
 The certificate IDs must cover the apex, app, API, and admin hostnames. DNS is
 kept outside this stack until its authoritative provider is chosen; the
@@ -45,8 +30,9 @@ The B2 Pulumi credential needs bucket-management rights and is used only by the
 protected infrastructure workflow. Create separate bucket-scoped runtime keys
 for the API, PostgreSQL backup, and replication jobs; never put the Pulumi key
 on a host. The example IP is documentation-only. Restrict `adminCidrs` to current operator
-addresses; never use `0.0.0.0/0` for SSH. Production secrets belong in the
-GitHub environment and Pulumi encrypted config, not committed stack files.
+addresses; never use `0.0.0.0/0` for SSH. Application and provider secrets stay
+in encrypted Pulumi config. GitHub stores only the credential that unlocks that
+config and the Pulumi backend token.
 
 ## Application rollout
 

@@ -26,18 +26,20 @@ where
         let bytes = Bytes::from_request(req, state).await.map_err(|_error| {
             (
                 StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "invalid msgpack request body".to_string(),
-                }),
+                Json(ErrorResponse::new(
+                    "invalid_request",
+                    "invalid msgpack request body",
+                )),
             )
         })?;
 
-        let value = rmp_serde::from_slice(&bytes).map_err(|error| {
+        let value = rmp_serde::from_slice(&bytes).map_err(|_error| {
             (
                 StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("failed to decode msgpack body: {error}"),
-                }),
+                Json(ErrorResponse::new(
+                    "invalid_request",
+                    "failed to decode msgpack body",
+                )),
             )
         })?;
         Ok(Self(value))
@@ -58,13 +60,12 @@ where
                 body,
             )
                 .into_response(),
-            Err(error) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("failed to encode msgpack response: {error}"),
-                }),
-            )
-                .into_response(),
+            Err(error) => {
+                let response =
+                    ErrorResponse::new("internal_error", "failed to encode server response");
+                tracing::error!(request_id = %response.request_id, %error, "msgpack response encoding failed");
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
+            }
         }
     }
 }

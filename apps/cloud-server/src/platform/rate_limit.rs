@@ -48,13 +48,7 @@ fn is_credential_endpoint(path: &str) -> bool {
 }
 
 fn error_response(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        Json(ErrorResponse {
-            error: message.to_string(),
-        }),
-    )
-        .into_response()
+    (status, Json(ErrorResponse::new("rate_limited", message))).into_response()
 }
 
 pub async fn enforce(State(state): State<AppState>, request: Request, next: Next) -> Response {

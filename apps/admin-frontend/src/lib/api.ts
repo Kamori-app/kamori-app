@@ -68,7 +68,7 @@ const request = async <T>(
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
-      message = (decode(bytes) as { error?: string }).error ?? message;
+      message = (decode(bytes) as { message?: string }).message ?? message;
     } catch {
       // Keep status fallback.
     }

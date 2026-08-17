@@ -29,6 +29,23 @@ const cookieRefreshWithCsrfOptions = () => {
   };
 };
 
+const refreshRotationRequestId = async (): Promise<string> => {
+  const csrf = (document.cookie ?? "")
+    .split(";")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${CSRF_COOKIE_NAME}=`))
+    ?.slice(CSRF_COOKIE_NAME.length + 1);
+  if (!csrf) return crypto.randomUUID();
+  const input = new TextEncoder().encode(`kamori.refresh-request.v1\0${csrf}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+  digest[6] = (digest[6] & 0x0f) | 0x40;
+  digest[8] = (digest[8] & 0x3f) | 0x80;
+  const hex = Array.from(digest.slice(0, 16), (value) =>
+    value.toString(16).padStart(2, "0"),
+  ).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 /**
  * Cloud API request/response contracts for MessagePack endpoints.
  *
@@ -64,6 +81,7 @@ export interface PasswordChangeStartResponse {
 }
 
 export interface PasswordChangeFinishRequest {
+  reauth_token: string;
   opaque_finish_request: Uint8Array;
   encrypted_master_key: Uint8Array;
 }
@@ -146,6 +164,7 @@ export interface PasskeyLoginFinishResponse {
 
 export interface RefreshRequest {
   refresh_token?: string | null;
+  rotation_request_id: string;
 }
 
 export interface RefreshResponse {
@@ -160,6 +179,14 @@ export interface LogoutRequest {
 
 export interface LogoutResponse {
   revoked: boolean;
+}
+
+export interface DeviceAuthorizationApproveRequest {
+  user_code: string;
+}
+
+export interface DeviceAuthorizationApproveResponse {
+  approved: boolean;
 }
 
 export interface SessionSummary {
@@ -313,6 +340,8 @@ export interface ReauthStartResponse {
   totp_required: boolean;
 }
 
+export type ReauthAction = "change_password" | "delete_account" | "recovery_settings";
+
 export interface StoredOperation {
   space_seq: number;
   received_at_unix_ms: number;
@@ -432,11 +461,11 @@ export const cloudApi = {
       COOKIE_REFRESH_TRANSPORT_OPTIONS,
     ),
 
-  refresh: (baseUrl: string) =>
+  refresh: async (baseUrl: string) =>
     postMsgpack<RefreshRequest, RefreshResponse>(
       baseUrl,
       "/auth/refresh",
-      {},
+      { rotation_request_id: await refreshRotationRequestId() },
       undefined,
       cookieRefreshWithCsrfOptions(),
     ),
@@ -448,6 +477,21 @@ export const cloudApi = {
       {},
       accessToken,
       cookieRefreshWithCsrfOptions(),
+    ),
+
+  approveDeviceAuthorization: (
+    baseUrl: string,
+    userCode: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<
+      DeviceAuthorizationApproveRequest,
+      DeviceAuthorizationApproveResponse
+    >(
+      baseUrl,
+      "/auth/device-authorization/approve",
+      { user_code: userCode },
+      accessToken,
     ),
 
   listSessions: (baseUrl: string, accessToken: string) =>
@@ -748,15 +792,16 @@ export const cloudApi = {
   reauthStart: (
     baseUrl: string,
     opaqueStartRequest: Uint8Array,
+    action: ReauthAction,
     accessToken: string,
   ) =>
     postMsgpack<
-      { opaque_start_request: Uint8Array },
+      { opaque_start_request: Uint8Array; action: ReauthAction },
       ReauthStartResponse
     >(
       baseUrl,
       "/auth/reauth/start",
-      { opaque_start_request: opaqueStartRequest },
+      { opaque_start_request: opaqueStartRequest, action },
       accessToken,
     ),
 
@@ -765,10 +810,11 @@ export const cloudApi = {
     opaqueFlowId: string,
     opaqueFinishRequest: Uint8Array,
     totpCode: string | null,
+    action: ReauthAction,
     accessToken: string,
   ) =>
     postMsgpack<
-      { opaque_flow_id: string; opaque_finish_request: Uint8Array; totp_code: string | null },
+      { opaque_flow_id: string; opaque_finish_request: Uint8Array; totp_code: string | null; action: ReauthAction },
       { reauth_token: string }
     >(
       baseUrl,
@@ -777,6 +823,7 @@ export const cloudApi = {
         opaque_flow_id: opaqueFlowId,
         opaque_finish_request: opaqueFinishRequest,
         totp_code: totpCode,
+        action,
       },
       accessToken,
     ),

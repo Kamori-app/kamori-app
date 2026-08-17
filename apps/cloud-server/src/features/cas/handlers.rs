@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     features::{
         cas::{
-            dto::{CasDownloadResponse, CasUploadRequest, CasUploadResponse},
+            dto::{CasUploadRequest, CasUploadResponse},
             services,
         },
         common::{ApiError, MsgPack},
@@ -32,8 +32,6 @@ pub async fn cas_download(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((space_id, blob_id)): Path<(Uuid, Uuid)>,
-) -> Result<MsgPack<CasDownloadResponse>, ApiError> {
-    Ok(MsgPack(
-        services::cas_download(&state, &headers, space_id, blob_id).await?,
-    ))
+) -> Result<axum::response::Response, ApiError> {
+    services::cas_download(&state, &headers, space_id, blob_id).await
 }

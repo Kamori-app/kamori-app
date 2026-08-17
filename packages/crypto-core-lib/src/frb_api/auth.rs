@@ -9,7 +9,8 @@ use super::{
     },
     types::{
         MobileLoginResult, MobileSigninFinishRequest, MobileSigninFinishResponse,
-        MobileSigninStartRequest, MobileSigninStartResponse,
+        MobileSigninStartRequest, MobileSigninStartResponse, MobileLogoutRequest,
+        MobileLogoutResponse,
     },
 };
 use crate::account_keys;
@@ -141,4 +142,27 @@ pub(super) async fn mobile_clear_refresh_token_impl() {
     }
     super::state::MOBILE_COLLECTION_KEYS.lock().await.clear();
     *super::state::MOBILE_DEVICE_SECRETS.lock().await = None;
+}
+
+pub(super) async fn mobile_revoke_refresh_session_impl(
+    cloud_base_url: String,
+    refresh_token: String,
+) -> Result<bool, String> {
+    let refresh_token = refresh_token.trim().to_owned();
+    if refresh_token.is_empty() {
+        return Err("refresh token is required".to_string());
+    }
+    let response = mobile_http_client()?
+        .post(endpoint(&cloud_base_url, "/auth/logout"))
+        .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
+        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
+        .body(encode_msgpack(&MobileLogoutRequest {
+            refresh_token: Some(refresh_token),
+        })?)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    Ok(decode_msgpack::<MobileLogoutResponse>(response).await?.revoked)
 }

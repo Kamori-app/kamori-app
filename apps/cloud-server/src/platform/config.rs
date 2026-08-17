@@ -28,6 +28,12 @@ pub struct Config {
     pub admin_totp_kek: [u8; 32],
     /// Independent 256-bit key used only to encrypt consumer TOTP seeds.
     pub auth_totp_kek: [u8; 32],
+    /// Path to the base64-encoded, deployment-owned OPAQUE server setup.
+    pub opaque_server_setup_path: Option<String>,
+    /// Explicitly permits an ephemeral OPAQUE setup outside tests.
+    pub allow_ephemeral_opaque_setup: bool,
+    /// Dedicated key used to derive idempotent refresh-token replacements.
+    pub refresh_rotation_key: [u8; 32],
     /// JWT signing secret (HS256).
     pub jwt_secret: String,
     /// JWT issuer string.
@@ -84,6 +90,10 @@ pub struct Config {
     pub owner_monthly_egress_bytes: u64,
     /// Per-owner blob egress ceiling in a rolling 24-hour window.
     pub owner_rolling_24h_egress_bytes: u64,
+    /// Maximum simultaneous blob streams charged to one owning account.
+    pub owner_concurrent_blob_downloads: u64,
+    /// Per-stream delivery rate; two default streams remain below 20 Mbit/s per owner.
+    pub blob_download_bytes_per_second: u64,
     /// Global monthly point where nonessential blob delivery stops.
     pub global_nonessential_egress_stop_bytes: u64,
     /// Absolute global monthly emergency breaker for blob delivery.
@@ -182,6 +192,20 @@ impl Config {
             .map_err(|_| anyhow::anyhow!("{name} must decode to exactly 32 bytes"))
     }
 
+    fn load_base64_key_file(name: &str, path_name: &str, test_byte: u8) -> Result<[u8; 32]> {
+        if let Ok(path) = env::var(path_name) {
+            let encoded = std::fs::read_to_string(path.trim())
+                .map_err(|error| anyhow::anyhow!("failed to read {path_name}: {error}"))?;
+            let decoded = STANDARD
+                .decode(encoded.trim())
+                .map_err(|_| anyhow::anyhow!("{path_name} must contain standard base64"))?;
+            return decoded
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("{path_name} must contain exactly 32 decoded bytes"));
+        }
+        Self::load_base64_key(name, test_byte)
+    }
+
     /// Loads configuration from environment variables.
     pub fn load() -> Result<Self> {
         let _ = dotenvy::dotenv();
@@ -213,6 +237,22 @@ impl Config {
             .unwrap_or_else(|_| "Kamori Admin".to_string());
         let admin_totp_kek = Self::load_admin_totp_kek()?;
         let auth_totp_kek = Self::load_base64_key("KAMORI_AUTH_TOTP_KEK", 0x24)?;
+        let opaque_server_setup_path = env::var("KAMORI_OPAQUE_SERVER_SETUP_FILE")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let allow_ephemeral_opaque_setup =
+            Self::parse_bool_env("KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP", cfg!(test));
+        if opaque_server_setup_path.is_none() && !allow_ephemeral_opaque_setup {
+            bail!(
+                "KAMORI_OPAQUE_SERVER_SETUP_FILE must point to a persistent setup; ephemeral OPAQUE is allowed only with KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP=true"
+            );
+        }
+        let refresh_rotation_key = Self::load_base64_key_file(
+            "KAMORI_REFRESH_ROTATION_KEY",
+            "KAMORI_REFRESH_ROTATION_KEY_FILE",
+            0x63,
+        )?;
 
         let jwt_secret = match env::var("KAMORI_JWT_SECRET") {
             Ok(value) => value,
@@ -337,6 +377,10 @@ impl Config {
             Self::parse_positive_u64_env("KAMORI_OWNER_MONTHLY_EGRESS_BYTES", 10_000_000_000)?;
         let owner_rolling_24h_egress_bytes =
             Self::parse_positive_u64_env("KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES", 2_000_000_000)?;
+        let owner_concurrent_blob_downloads =
+            Self::parse_positive_u64_env("KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS", 2)?;
+        let blob_download_bytes_per_second =
+            Self::parse_positive_u64_env("KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND", 1_250_000)?;
         let global_nonessential_egress_stop_bytes = Self::parse_positive_u64_env(
             "KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES",
             16_000_000_000_000,
@@ -402,6 +446,9 @@ impl Config {
             admin_webauthn_rp_name,
             admin_totp_kek,
             auth_totp_kek,
+            opaque_server_setup_path,
+            allow_ephemeral_opaque_setup,
+            refresh_rotation_key,
             jwt_secret,
             jwt_issuer,
             jwt_audience,
@@ -430,6 +477,8 @@ impl Config {
             account_storage_bytes,
             owner_monthly_egress_bytes,
             owner_rolling_24h_egress_bytes,
+            owner_concurrent_blob_downloads,
+            blob_download_bytes_per_second,
             global_nonessential_egress_stop_bytes,
             global_emergency_egress_breaker_bytes,
             object_store_endpoint,

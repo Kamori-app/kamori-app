@@ -81,7 +81,7 @@ mod tests {
         let headers = HeaderMap::new();
         let err = validate_cookie_request_origin(&config, &headers).expect_err("must fail");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
-        assert_eq!(err.1.0.error, "origin or referer is required");
+        assert_eq!(err.1.0.message, "origin or referer is required");
     }
 
     #[test]
@@ -94,7 +94,7 @@ mod tests {
         );
         let err = validate_cookie_request_origin(&config, &headers).expect_err("must fail");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
-        assert_eq!(err.1.0.error, "origin mismatch");
+        assert_eq!(err.1.0.message, "origin mismatch");
     }
 
     #[test]
@@ -124,7 +124,7 @@ mod tests {
 
         let err = validate_cookie_csrf(&config, &headers).expect_err("must fail");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
-        assert_eq!(err.1.0.error, "csrf token mismatch");
+        assert_eq!(err.1.0.message, "csrf token mismatch");
     }
 
     #[test]

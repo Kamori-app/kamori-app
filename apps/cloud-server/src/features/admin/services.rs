@@ -535,13 +535,13 @@ fn validate_setting(key: &str, value: &Value) -> Result<(), ApiError> {
         },
         "max_blob_bytes" => match value.as_u64() {
             Some(value)
-                if (1024 * 1024..=1024 * 1024 * 1024).contains(&value)
+                if (1024 * 1024..=25 * 1024 * 1024).contains(&value)
                     && value.is_multiple_of(1024 * 1024) =>
             {
                 Ok(())
             }
             _ => Err(bad_request(
-                "max_blob_bytes must be 1 MiB aligned and at most 1 GiB",
+                "max_blob_bytes must be 1 MiB aligned and at most 25 MiB",
             )),
         },
         "account_storage_bytes"

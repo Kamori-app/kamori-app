@@ -164,12 +164,24 @@ pub(crate) async fn revoke_member(
     if request.expected_key_epoch == 0 || request.new_key_epoch == 0 {
         return Err(bad_request("key epochs must be positive"));
     }
+    if request.new_encrypted_metadata.is_empty() || request.new_encrypted_metadata.len() > 64 * 1024
+    {
+        return Err(bad_request("new encrypted space metadata has invalid size"));
+    }
     if request.remaining_device_packages.iter().any(|package| {
         package.key_epoch != request.new_key_epoch
             || package.encrypted_key_package.is_empty()
             || package.encrypted_key_package.len() > 64 * 1024
     }) {
         return Err(bad_request("encrypted member key package has invalid size"));
+    }
+    if request.remaining_recovery_packages.iter().any(|package| {
+        package.key_epoch != request.new_key_epoch
+            || !(49..=64 * 1024).contains(&package.encrypted_key_package.len())
+    }) {
+        return Err(bad_request(
+            "encrypted recovery key package has invalid size",
+        ));
     }
     let unique_users = request
         .remaining_device_packages
@@ -181,16 +193,64 @@ pub(crate) async fn revoke_member(
             "remaining device key packages contain duplicates",
         ));
     }
+    let unique_recovery_users = request
+        .remaining_recovery_packages
+        .iter()
+        .map(|package| package.user_id)
+        .collect::<HashSet<_>>();
+    if unique_recovery_users.len() != request.remaining_recovery_packages.len() {
+        return Err(bad_request(
+            "remaining recovery packages contain duplicates",
+        ));
+    }
+
+    let mut snapshot_streams = HashSet::new();
+    let mut snapshot_ids = HashSet::new();
+    for snapshot in &request.snapshots {
+        if snapshot.space_id != space_id
+            || snapshot.key_epoch != request.new_key_epoch
+            || snapshot.envelope_kind != crypto_core_lib::operation_envelope::EnvelopeKind::Snapshot
+            || snapshot.nonce.len() != snapshot.cipher_suite.nonce_len()
+            || snapshot.signature.len() != 64
+            || snapshot.ciphertext.is_empty()
+            || snapshot.ciphertext.len() > 25 * 1024 * 1024
+            || !snapshot_streams.insert(snapshot.stream_id)
+            || !snapshot_ids.insert(snapshot.client_op_id)
+        {
+            return Err(bad_request("rotation snapshot envelope is invalid"));
+        }
+        let authorization = crate::features::operations::repositories::load_append_authorization(
+            &state.pool,
+            actor_id,
+            snapshot,
+        )
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthorized("snapshot author device is not active"))?;
+        if !authorization.can_write || authorization.current_key_epoch != request.expected_key_epoch
+        {
+            return Err(conflict("snapshot author authorization or epoch changed"));
+        }
+        snapshot
+            .verify(&authorization.signing_public_key)
+            .map_err(|_| bad_request("rotation snapshot signature is invalid"))?;
+    }
 
     use repositories::RevokeMemberResult;
     match repositories::revoke_member_and_rotate(
         &state.pool,
-        actor_id,
-        space_id,
-        user_id,
-        request.expected_key_epoch,
-        request.new_key_epoch,
-        &request.remaining_device_packages,
+        repositories::MemberRotation {
+            actor_id,
+            space_id,
+            target_user_id: user_id,
+            expected_key_epoch: request.expected_key_epoch,
+            new_key_epoch: request.new_key_epoch,
+            rotation_id: request.rotation_id,
+            new_encrypted_metadata: &request.new_encrypted_metadata,
+            packages: &request.remaining_device_packages,
+            recovery_packages: &request.remaining_recovery_packages,
+            snapshots: &request.snapshots,
+        },
     )
     .await
     .map_err(internal_error)?
@@ -204,7 +264,7 @@ pub(crate) async fn revoke_member(
         RevokeMemberResult::TargetNotFound => Err(bad_request("active member not found")),
         RevokeMemberResult::CannotRevokeOwner => Err(bad_request("space owner cannot be revoked")),
         RevokeMemberResult::PackageCoverageMismatch => Err(bad_request(
-            "new epoch must include exactly one key package for every enrolled remaining device",
+            "new epoch must cover every remaining device, recovery identity, and active stream",
         )),
     }
 }

@@ -47,6 +47,37 @@ pub(crate) async fn get_user_by_username(
     map_user_row(&row)
 }
 
+/// Fetches an active user without exposing absence through repository errors.
+pub(crate) async fn find_user_by_username(
+    pool: &PgPool,
+    username: &str,
+) -> Result<Option<UserRow>, ApiError> {
+    let row = sqlx::query(
+        r#"SELECT id, username, opaque_record, totp_secret_ciphertext,
+                  encrypted_master_key, public_key_bundle
+           FROM users
+           WHERE username = $1 AND deleted_at IS NULL AND suspended_at IS NULL"#,
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal_error)?;
+    row.as_ref().map(map_user_row).transpose()
+}
+
+pub(crate) async fn find_active_username_by_id(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Option<String>, ApiError> {
+    sqlx::query_scalar(
+        "SELECT username FROM users WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal_error)
+}
+
 pub(super) fn map_user_row(row: &sqlx::postgres::PgRow) -> Result<UserRow, ApiError> {
     let id: Uuid = row.try_get("id").map_err(internal_error)?;
     let username: String = row.try_get("username").map_err(internal_error)?;

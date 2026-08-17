@@ -19,8 +19,20 @@ async fn main() -> anyhow::Result<()> {
             }
             app::bootstrap::admin_bootstrap(&username).await
         }
+        Some("opaque-setup") => match (args.next().as_deref(), args.next()) {
+            (Some("generate"), None) => {
+                use base64::Engine as _;
+                let setup = platform::security::opaque::OpaqueServer::generate_serialized_setup();
+                println!(
+                    "{}",
+                    base64::engine::general_purpose::STANDARD.encode(setup)
+                );
+                Ok(())
+            }
+            _ => anyhow::bail!("opaque-setup expects exactly one command: generate"),
+        },
         Some(command) => anyhow::bail!(
-            "unknown command {command:?}; expected serve, migrate, healthcheck, or admin-bootstrap <username>"
+            "unknown command {command:?}; expected serve, migrate, healthcheck, admin-bootstrap <username>, or opaque-setup generate"
         ),
     }
 }

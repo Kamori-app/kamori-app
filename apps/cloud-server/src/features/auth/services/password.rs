@@ -22,6 +22,7 @@ use crate::{
     platform::state::AppState,
 };
 
+use super::consume_reauth_token;
 use super::support::{hash_data_recovery_verifier, normalize_username};
 
 pub(crate) async fn password_change_start(
@@ -60,6 +61,15 @@ pub(crate) async fn password_change_finish(
     let principal = authorize_principal(state, headers).await?;
     let user_id = principal.user_id;
     let username = principal.username;
+
+    consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        user_id,
+        &username,
+        crate::features::auth::dto::ReauthAction::ChangePassword,
+    )
+    .await?;
 
     let password_file_bytes = state
         .opaque

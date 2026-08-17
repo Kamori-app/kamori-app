@@ -4,32 +4,34 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cloud-server-beta
+  group: cloud-server-production
   cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   image:
     name: Build immutable image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       cloud-image: ${{ steps.reference.outputs.cloud-image }}
       web-image: ${{ steps.reference.outputs.web-image }}
       admin-image: ${{ steps.reference.outputs.admin-image }}
       edge-image: ${{ steps.reference.outputs.edge-image }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: cloud
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: apps/cloud-server/Dockerfile
@@ -38,7 +40,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - id: web
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: apps/web-frontend/Dockerfile
@@ -47,7 +49,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - id: admin
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: apps/admin-frontend/Dockerfile
@@ -56,7 +58,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - id: edge
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/edge/Dockerfile
@@ -81,9 +83,11 @@ jobs:
     name: Rolling beta deployment
     needs: image
     runs-on: [self-hosted, linux, x64, kamori-beta]
-    environment: beta
+    environment: production
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install pinned host keys
         env:
           KNOWN_HOSTS: ${{ secrets.BETA_SSH_KNOWN_HOSTS }}

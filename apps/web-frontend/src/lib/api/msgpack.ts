@@ -27,8 +27,8 @@ const decodeErrorPayload = async (response: Response): Promise<string> => {
 
   if (contentType.includes("application/json")) {
     try {
-      const payload = (await response.json()) as { error?: string };
-      return payload.error ?? `Request failed with status ${response.status}`;
+      const payload = (await response.json()) as { message?: string };
+      return payload.message ?? `Request failed with status ${response.status}`;
     } catch {
       return `Request failed with status ${response.status}`;
     }
@@ -37,9 +37,9 @@ const decodeErrorPayload = async (response: Response): Promise<string> => {
   if (contentType.includes(MSGPACK_CONTENT_TYPE)) {
     try {
       const payload = decode(new Uint8Array(await response.arrayBuffer())) as {
-        error?: string;
+        message?: string;
       };
-      return payload.error ?? `Request failed with status ${response.status}`;
+      return payload.message ?? `Request failed with status ${response.status}`;
     } catch {
       return `Request failed with status ${response.status}`;
     }

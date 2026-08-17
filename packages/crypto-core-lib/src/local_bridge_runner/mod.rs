@@ -19,7 +19,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 #[cfg(feature = "local-bridge")]
 use axum::{Router, routing::any};
-use cache::LocalCache;
+use cache::{CachedOperationState, LocalCache};
 use cloud::CloudSyncClient;
 #[cfg(feature = "local-bridge")]
 use dav::dav_dispatch;
@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 use crate::{
     operation_envelope::{EnvelopeKind, OperationEnvelopeV1, OperationSealContext},
-    pim::{PimDeleteV1, PimOperationV1, PimResourceKind, PimUpsertV1, PimValue},
+    pim::{PimDeleteV1, PimOperationV1, PimResourceKind, PimSnapshotV1, PimUpsertV1, PimValue},
 };
 
 #[derive(Clone)]
@@ -230,6 +230,39 @@ impl LocalBridgeRunner {
             .delete_pim_item_and_push(space_id, resource_id, resource_kind)
             .await
     }
+
+    /// Creates one signed encrypted current-state snapshot per active stream.
+    pub async fn build_rotation_snapshots(
+        &self,
+        space_id: Uuid,
+        new_key_epoch: u32,
+        new_space_key: [u8; 32],
+        covers_through_space_seq: u64,
+    ) -> Result<Vec<OperationEnvelopeV1>> {
+        anyhow::ensure!(new_key_epoch > 0, "new key epoch must be positive");
+        let identity = self
+            .state
+            .device_identity
+            .as_ref()
+            .ok_or_else(|| anyhow!("approved device identity is required for snapshots"))?;
+        anyhow::ensure!(
+            self.state
+                .collection_keys
+                .read()
+                .await
+                .contains_key(&space_id),
+            "security-space key is not registered"
+        );
+        self.state
+            .build_rotation_snapshots(
+                space_id,
+                new_key_epoch,
+                new_space_key,
+                covers_through_space_seq,
+                identity,
+            )
+            .await
+    }
 }
 
 #[cfg(feature = "local-bridge")]
@@ -281,17 +314,35 @@ impl LocalBridgeState {
                     .verify(public_key)
                     .context("verify operation author signature")?;
                 if let Some(key) = keys.get(&stored.envelope.key_epoch) {
-                    if stored.envelope.envelope_kind == EnvelopeKind::Operation {
-                        let plaintext = stored.envelope.open(key)?;
-                        let operation = PimOperationV1::decode(&plaintext)?;
-                        self.apply_pim_operation(
-                            space_id,
-                            stored.space_seq,
-                            &stored.envelope,
-                            operation,
-                        )
-                        .await?;
-                        applied = applied.saturating_add(1);
+                    let plaintext = stored.envelope.open(key)?;
+                    match stored.envelope.envelope_kind {
+                        EnvelopeKind::Operation => {
+                            let operation = PimOperationV1::decode(&plaintext)?;
+                            self.apply_pim_operation(
+                                space_id,
+                                stored.space_seq,
+                                &stored.envelope,
+                                operation,
+                            )
+                            .await?;
+                            applied = applied.saturating_add(1);
+                        }
+                        EnvelopeKind::Snapshot => {
+                            let snapshot = PimSnapshotV1::decode(&plaintext)?;
+                            self.apply_pim_snapshot(
+                                space_id,
+                                stored.space_seq,
+                                &stored.envelope,
+                                snapshot,
+                            )
+                            .await?;
+                            applied = applied.saturating_add(1);
+                        }
+                        EnvelopeKind::Control => {
+                            return Err(anyhow!(
+                                "unsupported mandatory key-control envelope version"
+                            ));
+                        }
                     }
                 } else {
                     warn!(%space_id, key_epoch = stored.envelope.key_epoch, "operation belongs to an unavailable historical key epoch");
@@ -333,17 +384,56 @@ impl LocalBridgeState {
             ),
         };
         let dav_kind = dav_kind(resource_kind);
+        if self
+            .load_operation_state(envelope.client_op_id)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
         let current_head = self
             .load_resource_head(&collection_id, &resource_id)
             .await?;
-        if current_head == Some(envelope.client_op_id) {
-            return Ok(());
+        let mut dependency_states = Vec::new();
+        for dependency in dependencies {
+            if let Some(state) = self.load_operation_state(*dependency).await? {
+                dependency_states.push(state);
+            }
         }
+        dependency_states.sort_by_key(|state| state.client_op_id);
+        let base_state = current_head
+            .and_then(|head| {
+                dependency_states
+                    .iter()
+                    .find(|state| state.client_op_id == head)
+            })
+            .or_else(|| dependency_states.last());
         let conflict = current_head.is_some_and(|head| !dependencies.contains(&head));
         if matches!(operation, PimOperationV1::Delete(_)) {
-            if !conflict {
-                self.delete_resource(dav_kind, collection_id.clone(), resource_id.clone())
+            let target_resource_id = if conflict {
+                base_state
+                    .filter(|state| state.materialized_resource_id != resource_id)
+                    .map(|state| state.materialized_resource_id.clone())
+                    .unwrap_or_else(|| format!("{resource_id}.conflict-{}", envelope.client_op_id))
+            } else {
+                resource_id.clone()
+            };
+            if !conflict || target_resource_id != resource_id {
+                self.delete_resource(dav_kind, collection_id.clone(), target_resource_id.clone())
                     .await?;
+            }
+            self.store_operation_state(CachedOperationState {
+                client_op_id: envelope.client_op_id,
+                collection_id: collection_id.clone(),
+                stream_id: envelope.stream_id,
+                logical_resource_id: resource_id.clone(),
+                materialized_resource_id: target_resource_id,
+                kind: dav_kind,
+                payload: None,
+                deleted: true,
+            })
+            .await?;
+            if !conflict {
                 self.store_resource_head(collection_id, resource_id, envelope.client_op_id)
                     .await?;
             }
@@ -352,32 +442,101 @@ impl LocalBridgeState {
         let PimOperationV1::Upsert(upsert) = operation else {
             unreachable!();
         };
-        let existing = self
-            .get_resource(dav_kind, collection_id.clone(), resource_id.clone())
-            .await?;
-        let payload = materialize_projection(
-            &upsert,
-            existing.as_ref().map(|resource| resource.payload.as_str()),
-        );
+        let existing_payload = base_state
+            .and_then(|state| state.payload.as_deref())
+            .map(str::to_owned);
+        let payload = materialize_projection(&upsert, existing_payload.as_deref());
         let target_resource_id = if conflict {
-            format!("{resource_id}.conflict-{}", envelope.client_op_id)
+            base_state
+                .filter(|state| state.materialized_resource_id != resource_id)
+                .map(|state| state.materialized_resource_id.clone())
+                .unwrap_or_else(|| format!("{resource_id}.conflict-{}", envelope.client_op_id))
         } else {
             resource_id.clone()
         };
         let resource = LocalResource {
             kind: dav_kind,
             collection_id: collection_id.clone(),
-            resource_id: target_resource_id,
+            resource_id: target_resource_id.clone(),
             etag: compute_etag(payload.as_bytes()),
-            payload,
+            payload: payload.clone(),
             updated_at_ms: i64::try_from(space_seq).unwrap_or(i64::MAX),
         };
         self.upsert_authoritative(resource).await?;
+        self.store_operation_state(CachedOperationState {
+            client_op_id: envelope.client_op_id,
+            collection_id: collection_id.clone(),
+            stream_id: envelope.stream_id,
+            logical_resource_id: resource_id.clone(),
+            materialized_resource_id: target_resource_id,
+            kind: dav_kind,
+            payload: Some(payload),
+            deleted: false,
+        })
+        .await?;
         if !conflict {
             self.store_resource_head(collection_id, resource_id, envelope.client_op_id)
                 .await?;
         }
         Ok(())
+    }
+
+    async fn apply_pim_snapshot(
+        &self,
+        space_id: Uuid,
+        space_seq: u64,
+        envelope: &OperationEnvelopeV1,
+        snapshot: PimSnapshotV1,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            snapshot.resource_id == envelope.stream_id,
+            "snapshot stream mismatch"
+        );
+        anyhow::ensure!(
+            snapshot.covers_through_space_seq <= space_seq,
+            "snapshot coverage exceeds its transport position"
+        );
+        let collection_id = space_id.to_string();
+        let kind = dav_kind(snapshot.resource_kind);
+        let payload = if snapshot.deleted {
+            self.delete_resource(
+                kind,
+                collection_id.clone(),
+                snapshot.projection_resource_id.clone(),
+            )
+            .await?;
+            None
+        } else {
+            let projection = String::from_utf8(snapshot.materialized_projection)
+                .context("snapshot projection is not UTF-8")?;
+            self.upsert_authoritative(LocalResource {
+                kind,
+                collection_id: collection_id.clone(),
+                resource_id: snapshot.projection_resource_id.clone(),
+                etag: compute_etag(projection.as_bytes()),
+                payload: projection.clone(),
+                updated_at_ms: i64::try_from(space_seq).unwrap_or(i64::MAX),
+            })
+            .await?;
+            Some(projection)
+        };
+        self.store_operation_state(CachedOperationState {
+            client_op_id: snapshot.head_operation_id,
+            collection_id: collection_id.clone(),
+            stream_id: envelope.stream_id,
+            logical_resource_id: snapshot.projection_resource_id.clone(),
+            materialized_resource_id: snapshot.projection_resource_id.clone(),
+            kind,
+            payload,
+            deleted: snapshot.deleted,
+        })
+        .await?;
+        self.store_resource_head(
+            collection_id,
+            snapshot.projection_resource_id,
+            snapshot.head_operation_id,
+        )
+        .await
     }
 
     pub(crate) async fn list_resources(
@@ -493,6 +652,62 @@ impl LocalBridgeState {
         .await?
     }
 
+    async fn load_operation_state(
+        &self,
+        operation_id: Uuid,
+    ) -> Result<Option<CachedOperationState>> {
+        let cache = self.cache.clone();
+        tokio::task::spawn_blocking(move || cache.load_operation_state(operation_id)).await?
+    }
+
+    async fn store_operation_state(&self, state: CachedOperationState) -> Result<()> {
+        let cache = self.cache.clone();
+        tokio::task::spawn_blocking(move || cache.store_operation_state(&state)).await?
+    }
+
+    async fn build_rotation_snapshots(
+        &self,
+        space_id: Uuid,
+        new_key_epoch: u32,
+        new_space_key: [u8; 32],
+        covers_through_space_seq: u64,
+        identity: &LocalDeviceIdentity,
+    ) -> Result<Vec<OperationEnvelopeV1>> {
+        let cache = self.cache.clone();
+        let collection_id = space_id.to_string();
+        let states =
+            tokio::task::spawn_blocking(move || cache.list_head_states(&collection_id)).await??;
+        let signing_key = SigningKey::from_bytes(&identity.signing_private_key);
+        states
+            .into_iter()
+            .map(|state| {
+                let snapshot = PimSnapshotV1 {
+                    schema_version: PimSnapshotV1::SCHEMA_VERSION,
+                    covers_through_space_seq,
+                    resource_kind: pim_kind_from_cached_state(&state),
+                    resource_id: state.stream_id,
+                    projection_resource_id: state.logical_resource_id,
+                    head_operation_id: state.client_op_id,
+                    deleted: state.deleted,
+                    materialized_projection: state.payload.unwrap_or_default().into_bytes(),
+                };
+                OperationEnvelopeV1::seal_xchacha(
+                    OperationSealContext {
+                        space_id,
+                        stream_id: state.stream_id,
+                        client_op_id: Uuid::new_v4(),
+                        author_device_id: identity.device_id,
+                        key_epoch: new_key_epoch,
+                        envelope_kind: EnvelopeKind::Snapshot,
+                    },
+                    &snapshot.encode()?,
+                    &new_space_key,
+                    &signing_key,
+                )
+            })
+            .collect()
+    }
+
     async fn upsert_pim_item_and_push(
         &self,
         space_id: Uuid,
@@ -546,6 +761,7 @@ impl LocalBridgeState {
         )?;
         let timestamp = now_unix_ms();
         self.queue_operation(envelope.clone(), timestamp).await?;
+        let materialized_payload = payload.clone();
         self.upsert(LocalResource {
             kind: dav_kind(resource_kind),
             collection_id: space_id.to_string(),
@@ -553,6 +769,17 @@ impl LocalBridgeState {
             etag: compute_etag(payload.as_bytes()),
             payload,
             updated_at_ms: timestamp,
+        })
+        .await?;
+        self.store_operation_state(CachedOperationState {
+            client_op_id,
+            collection_id: space_id.to_string(),
+            stream_id: resource_id,
+            logical_resource_id: projection_resource_id.clone(),
+            materialized_resource_id: projection_resource_id.clone(),
+            kind: dav_kind(resource_kind),
+            payload: Some(materialized_payload),
+            deleted: false,
         })
         .await?;
         self.store_resource_head(space_id.to_string(), projection_resource_id, client_op_id)
@@ -607,6 +834,17 @@ impl LocalBridgeState {
             space_id.to_string(),
             projection_resource_id.clone(),
         )
+        .await?;
+        self.store_operation_state(CachedOperationState {
+            client_op_id,
+            collection_id: space_id.to_string(),
+            stream_id: resource_id,
+            logical_resource_id: projection_resource_id.clone(),
+            materialized_resource_id: projection_resource_id.clone(),
+            kind: dav_kind(resource_kind),
+            payload: None,
+            deleted: true,
+        })
         .await?;
         self.store_resource_head(space_id.to_string(), projection_resource_id, client_op_id)
             .await?;
@@ -664,6 +902,7 @@ impl LocalBridgeState {
         )?;
         self.queue_operation(envelope.clone(), updated_at_ms)
             .await?;
+        let materialized_payload = payload.clone();
         let resource = LocalResource {
             kind,
             collection_id: collection_id.clone(),
@@ -673,6 +912,17 @@ impl LocalBridgeState {
             updated_at_ms,
         };
         let (outcome, resource) = self.upsert(resource).await?;
+        self.store_operation_state(CachedOperationState {
+            client_op_id,
+            collection_id: collection_id.clone(),
+            stream_id,
+            logical_resource_id: resource_id.clone(),
+            materialized_resource_id: resource_id.clone(),
+            kind,
+            payload: Some(materialized_payload),
+            deleted: false,
+        })
+        .await?;
         self.store_resource_head(collection_id, resource_id, client_op_id)
             .await?;
         let pushed = self.cloud.append_operation(&envelope).await;
@@ -744,6 +994,17 @@ impl LocalBridgeState {
         let deleted = self
             .delete_resource(kind, collection_id.clone(), resource_id.clone())
             .await?;
+        self.store_operation_state(CachedOperationState {
+            client_op_id,
+            collection_id: collection_id.clone(),
+            stream_id,
+            logical_resource_id: resource_id.clone(),
+            materialized_resource_id: resource_id.clone(),
+            kind,
+            payload: None,
+            deleted: true,
+        })
+        .await?;
         self.store_resource_head(collection_id, resource_id, client_op_id)
             .await?;
         if self.cloud.append_operation(&envelope).await.is_ok() {
@@ -801,6 +1062,22 @@ fn dav_kind(kind: PimResourceKind) -> DavResourceKind {
     match kind {
         PimResourceKind::Contact => DavResourceKind::Contact,
         PimResourceKind::CalendarEvent | PimResourceKind::Task => DavResourceKind::Calendar,
+    }
+}
+
+fn pim_kind_from_cached_state(state: &CachedOperationState) -> PimResourceKind {
+    match state.kind {
+        DavResourceKind::Contact => PimResourceKind::Contact,
+        DavResourceKind::Calendar
+            if state
+                .payload
+                .as_deref()
+                .is_some_and(|payload| payload.contains("BEGIN:VTODO")) =>
+        {
+            PimResourceKind::Task
+        }
+        DavResourceKind::Calendar => PimResourceKind::CalendarEvent,
+        DavResourceKind::Note => PimResourceKind::Task,
     }
 }
 

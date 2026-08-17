@@ -101,7 +101,7 @@ pub async fn admin_bootstrap(username: &str) -> anyhow::Result<()> {
         username,
         &totp_secret,
     )
-    .map_err(|error| anyhow::anyhow!(error.1.0.error))?;
+    .map_err(|error| anyhow::anyhow!(error.1.0.message))?;
     println!("operator_id={}", bootstrap.admin_user_id);
     println!("bootstrap_token={}", bootstrap.token);
     println!("totp_secret={totp_secret}");

@@ -25,21 +25,22 @@ pub struct OpaqueSigninFinishResponse {
     pub preauth_token: Option<String>,
 }
 
-/// Passkey login start response from cloud-server.
+/// External-browser device authorization response from cloud-server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PasskeyLoginStartResponse {
+pub struct BrowserLoginStartResponse {
     pub flow_id: Uuid,
-    #[serde(with = "serde_bytes")]
-    pub challenge: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub public_key_credential_request_options: Vec<u8>,
+    pub device_secret: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in_seconds: u64,
+    pub poll_interval_seconds: u64,
 }
 
-/// Passkey login finish response from cloud-server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PasskeyLoginFinishResponse {
-    pub username: String,
-    pub access_token: String,
+pub struct BrowserLoginPollResponse {
+    pub status: String,
+    pub username: Option<String>,
+    pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub refresh_token_id: Option<Uuid>,
 }

@@ -2,11 +2,6 @@
     import { navigate } from "../router";
     import { api } from "../tauri";
     import { backendSettings, loginNotice, session } from "../stores/app";
-    import {
-        parseRequestOptions,
-        serializeAssertionCredential,
-        toUtf8Bytes,
-    } from "../webauthn";
     import Card from "../components/ui/Card.svelte";
     import Button from "../components/ui/Button.svelte";
     import Input from "../components/ui/Input.svelte";
@@ -67,42 +62,35 @@
         }
     };
 
-    const signInPasskey = async () => {
-        if (!("PublicKeyCredential" in window) || !navigator.credentials) {
-            loginNotice.set(
-                "Passkey login is not supported in this environment.",
-            );
-            return;
-        }
-
+    const signInBrowser = async () => {
         loading = true;
         loadingMode = "passkey";
 
         try {
             await configureBackend();
 
-            const start = await api.passkeyLoginStart();
-            const requestOptions = parseRequestOptions(
-                start.public_key_credential_request_options,
+            const start = await api.browserLoginStart();
+            loginNotice.set(
+                `Approve code ${start.user_code} in the browser. Keep this window open.`,
             );
-
-            const credential = (await navigator.credentials.get({
-                publicKey: requestOptions,
-            })) as PublicKeyCredential | null;
-
-            if (!credential) {
-                throw new Error("Passkey request was cancelled.");
+            const deadline = Date.now() + start.expires_in_seconds * 1000;
+            while (Date.now() < deadline) {
+                await new Promise((resolve) =>
+                    window.setTimeout(
+                        resolve,
+                        Math.max(start.poll_interval_seconds, 1) * 1000,
+                    ),
+                );
+                const result = await api.browserLoginPoll(
+                    start.flow_id,
+                    start.device_secret,
+                );
+                if (result.status === "approved") {
+                    await completeLogin("Signed in through your browser.");
+                    return;
+                }
             }
-
-            const payload = serializeAssertionCredential(credential);
-            if (!start.flow_id) {
-                throw new Error("Missing flow_id for passkey login.");
-            }
-            await api.passkeyLoginFinish(
-                toUtf8Bytes(JSON.stringify(payload)),
-                start.flow_id,
-            );
-            await completeLogin("Signed in with passkey.");
+            throw new Error("Browser authorization expired. Start again.");
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
@@ -170,16 +158,17 @@
                         type="button"
                         variant="secondary"
                         disabled={loading}
-                        on:click={signInPasskey}
+                        on:click={signInBrowser}
                     >
                         {loadingMode === "passkey"
                             ? "Signing In..."
-                            : "Sign In With Passkey"}
+                            : "Continue In Browser"}
                     </Button>
                 </div>
                 <p class="mt-2 text-xs text-slate/70">
-                    Passkey login uses discoverable authentication and does not
-                    require username input.
+                    The system browser handles passkeys on the trusted Kamori
+                    web origin. First-time devices must be unlocked once with
+                    the password before browser-only sign-in can restore keys.
                 </p>
             </div>
         </form>

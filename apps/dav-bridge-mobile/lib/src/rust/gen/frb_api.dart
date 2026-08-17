@@ -86,6 +86,11 @@ Future<String?> mobileExportRefreshToken() =>
 Future<void> mobileClearRefreshToken() =>
     RustLib.instance.api.crateFrbApiMobileClearRefreshToken();
 
+Future<bool> mobileRevokeRefreshSession(
+        {required String cloudBaseUrl, required String refreshToken}) =>
+    RustLib.instance.api.crateFrbApiMobileRevokeRefreshSession(
+        cloudBaseUrl: cloudBaseUrl, refreshToken: refreshToken);
+
 Future<MobileIssuedInviteCode> mobileCreateInviteCode(
         {required String collectionId,
         required U8Array32 collectionKey,

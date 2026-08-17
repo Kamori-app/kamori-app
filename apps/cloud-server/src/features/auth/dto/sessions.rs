@@ -8,6 +8,8 @@ use uuid::Uuid;
 pub struct RefreshRequest {
     /// Opaque refresh token (body transport mode).
     pub refresh_token: Option<String>,
+    /// Idempotency key retained for every retry of this single rotation.
+    pub rotation_request_id: Uuid,
 }
 
 /// Refresh response.
@@ -73,6 +75,7 @@ mod tests {
     fn refresh_and_revoke_msgpack_roundtrip() {
         let refresh = RefreshRequest {
             refresh_token: Some("opaque".to_string()),
+            rotation_request_id: Uuid::new_v4(),
         };
         let refresh_bin = rmp_serde::to_vec_named(&refresh).expect("msgpack serialize");
         let refresh_back: RefreshRequest =

@@ -75,10 +75,30 @@ pub struct SigninFinishResponse {
 }
 
 /// Authenticated OPAQUE reauthentication start request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReauthAction {
+    ChangePassword,
+    DeleteAccount,
+    RecoverySettings,
+}
+
+impl ReauthAction {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ChangePassword => "change_password",
+            Self::DeleteAccount => "delete_account",
+            Self::RecoverySettings => "recovery_settings",
+        }
+    }
+}
+
+/// Authenticated OPAQUE reauthentication start request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReauthStartRequest {
     #[serde(with = "serde_bytes")]
     pub opaque_start_request: Vec<u8>,
+    pub action: ReauthAction,
 }
 
 /// Authenticated OPAQUE reauthentication start response.
@@ -97,6 +117,7 @@ pub struct ReauthFinishRequest {
     #[serde(with = "serde_bytes")]
     pub opaque_finish_request: Vec<u8>,
     pub totp_code: Option<String>,
+    pub action: ReauthAction,
 }
 
 /// Very short-lived proof used only by destructive endpoints.
@@ -142,6 +163,51 @@ pub struct PasskeyLoginFinishResponse {
     /// Refresh token on success (body transport mode only).
     pub refresh_token: Option<String>,
     /// Refresh token row id for session management.
+    pub refresh_token_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DeviceAuthorizationStartRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAuthorizationStartResponse {
+    pub flow_id: Uuid,
+    pub device_secret: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in_seconds: u64,
+    pub poll_interval_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAuthorizationApproveRequest {
+    pub user_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAuthorizationApproveResponse {
+    pub approved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAuthorizationTokenRequest {
+    pub flow_id: Uuid,
+    pub device_secret: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceAuthorizationStatus {
+    Pending,
+    Approved,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceAuthorizationTokenResponse {
+    pub status: DeviceAuthorizationStatus,
+    pub username: Option<String>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
     pub refresh_token_id: Option<Uuid>,
 }
 

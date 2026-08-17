@@ -14,7 +14,7 @@ use crate::{
     },
     features::auth::{
         repositories::{
-            UserRow, consume_totp_backup_code, create_refresh_token, get_user_by_username,
+            UserRow, consume_totp_backup_code, create_refresh_token, find_user_by_username,
         },
         transport::{
             RefreshTransport, client_metadata_from_headers, generate_csrf_token,
@@ -41,23 +41,23 @@ pub(crate) async fn signin_start(
     }
     let username = normalize_username(&payload.username)
         .map_err(|_| unauthenticated("invalid credentials"))?;
-    let user = get_user_by_username(&state.pool, &username).await?;
-
+    let user = find_user_by_username(&state.pool, &username).await?;
     let password_file_bytes = user
-        .opaque_record
-        .ok_or_else(|| bad_request("missing opaque record"))?;
+        .as_ref()
+        .and_then(|candidate| candidate.opaque_record.as_deref());
 
     let opaque = state
         .opaque
         .login_start(
             &username,
             &payload.opaque_start_request,
-            &password_file_bytes,
+            password_file_bytes,
         )
         .await
         .map_err(internal_error)?;
 
-    let totp_required = state.config.enable_totp && user.totp_secret_ciphertext.is_some();
+    // Do not disclose account existence or TOTP configuration before password proof.
+    let totp_required = false;
     let preauth_token = None;
 
     let next_step = if totp_required {
@@ -85,7 +85,7 @@ pub(crate) async fn signin_finish(
     let refresh_transport = refresh_transport_from_headers(headers)?;
     let username = normalize_username(&payload.username)
         .map_err(|_| unauthenticated("invalid credentials"))?;
-    let user = get_user_by_username(&state.pool, &username).await?;
+    let user = find_user_by_username(&state.pool, &username).await?;
 
     state
         .opaque
@@ -95,7 +95,8 @@ pub(crate) async fn signin_finish(
             &payload.opaque_finish_request,
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| unauthenticated("invalid credentials"))?;
+    let user = user.ok_or_else(|| unauthenticated("invalid credentials"))?;
 
     let (access_token, totp_verified, preauth_token) = issue_login_tokens(
         state,

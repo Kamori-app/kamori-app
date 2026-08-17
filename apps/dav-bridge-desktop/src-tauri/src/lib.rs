@@ -12,6 +12,7 @@ pub fn run() {
     let app_state = DesktopState::new("http://127.0.0.1:3000", FIXED_SQLITE_CACHE_PATH);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -37,10 +38,8 @@ pub fn run() {
             commands::window::configure_backend,
             commands::window::apply_window_preferences,
             commands::auth::password_login,
-            commands::auth::opaque_signin_start,
-            commands::auth::opaque_signin_finish,
-            commands::auth::passkey_login_start,
-            commands::auth::passkey_login_finish,
+            commands::auth::browser_login_start,
+            commands::auth::browser_login_poll,
             commands::bridge::start_local_server,
             commands::bridge::stop_local_server,
             commands::bridge::local_server_status,

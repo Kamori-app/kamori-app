@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1948317936;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1643323983;
 
 // Section: executor
 
@@ -761,6 +761,47 @@ fn wire__crate__frb_api__mobile_register_collection_key_impl(
         },
     )
 }
+fn wire__crate__frb_api__mobile_revoke_refresh_session_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "mobile_revoke_refresh_session",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_cloud_base_url = <String>::sse_decode(&mut deserializer);
+            let api_refresh_token = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::frb_api::mobile_revoke_refresh_session(
+                            api_cloud_base_url,
+                            api_refresh_token,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__mobile_sync_now_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1336,20 +1377,26 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        19 => wire__crate__frb_api__mobile_sync_now_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__frb_api__types__mobile_sync_runtime_default_impl(
+        19 => wire__crate__frb_api__mobile_revoke_refresh_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => wire__crate__frb_api__mobile_unregister_collection_key_impl(
+        20 => wire__crate__frb_api__mobile_sync_now_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__frb_api__types__mobile_sync_runtime_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => wire__crate__frb_api__mobile_upsert_pim_item_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__frb_api__mobile_unregister_collection_key_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        23 => wire__crate__frb_api__mobile_upsert_pim_item_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

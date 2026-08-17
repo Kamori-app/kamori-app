@@ -24,10 +24,14 @@ use crate::{
         auth::{
             dto::{
                 AccountRecoveryFinishRequest, AccountRecoveryFinishResponse,
-                AccountRecoveryStartRequest, AccountRecoveryStartResponse, LogoutRequest,
-                LogoutResponse, RefreshRequest, RefreshResponse, SigninFinishRequest,
-                SigninFinishResponse, SigninStartRequest, SigninStartResponse, SignupFinishRequest,
-                SignupFinishResponse, SignupStartRequest, SignupStartResponse,
+                AccountRecoveryStartRequest, AccountRecoveryStartResponse,
+                DeviceAuthorizationApproveRequest, DeviceAuthorizationApproveResponse,
+                DeviceAuthorizationStartRequest, DeviceAuthorizationStartResponse,
+                DeviceAuthorizationStatus, DeviceAuthorizationTokenRequest,
+                DeviceAuthorizationTokenResponse, LogoutRequest, LogoutResponse, RefreshRequest,
+                RefreshResponse, SigninFinishRequest, SigninFinishResponse, SigninStartRequest,
+                SigninStartResponse, SignupFinishRequest, SignupFinishResponse, SignupStartRequest,
+                SignupStartResponse,
             },
             repositories::consume_totp_backup_code,
             services::support::{hash_account_recovery_code, normalize_recovery_code},
@@ -65,6 +69,7 @@ enum SigninTransport {
 }
 
 struct SigninArtifacts {
+    access_token: String,
     refresh_token: Option<String>,
     set_cookie_headers: Vec<String>,
 }
@@ -297,9 +302,101 @@ async fn signin_user(
     assert!(payload.preauth_token.is_none());
 
     SigninArtifacts {
+        access_token: payload.access_token.expect("access token"),
         refresh_token: payload.refresh_token,
         set_cookie_headers: set_cookie_values(&response_headers),
     }
+}
+
+#[tokio::test]
+async fn external_browser_device_authorization_is_explicit_and_single_use() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+
+    let username = format!("it-device-flow-{}", Uuid::new_v4());
+    let password = "P@ssword123!";
+    register_user(&app, &username, password).await;
+    let signin = signin_user(&app, &username, password, SigninTransport::Body).await;
+
+    let start_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/start",
+        &DeviceAuthorizationStartRequest {},
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, body) = split_response(start_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let started: DeviceAuthorizationStartResponse = decode_msgpack(&body);
+    assert!(started.verification_uri.contains(&started.user_code));
+
+    let pending_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &DeviceAuthorizationTokenRequest {
+            flow_id: started.flow_id,
+            device_secret: started.device_secret.clone(),
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, body) = split_response(pending_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let pending: DeviceAuthorizationTokenResponse = decode_msgpack(&body);
+    assert_eq!(pending.status, DeviceAuthorizationStatus::Pending);
+    assert!(pending.access_token.is_none());
+
+    let mut approve_headers = HeaderMap::new();
+    approve_headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", signin.access_token))
+            .expect("authorization header"),
+    );
+    let approve_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/approve",
+        &DeviceAuthorizationApproveRequest {
+            user_code: started.user_code.clone(),
+        },
+        &approve_headers,
+    )
+    .await;
+    let (status, _, body) = split_response(approve_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let approved: DeviceAuthorizationApproveResponse = decode_msgpack(&body);
+    assert!(approved.approved);
+
+    let token_request = DeviceAuthorizationTokenRequest {
+        flow_id: started.flow_id,
+        device_secret: started.device_secret,
+    };
+    let token_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &token_request,
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, body) = split_response(token_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let token: DeviceAuthorizationTokenResponse = decode_msgpack(&body);
+    assert_eq!(token.status, DeviceAuthorizationStatus::Approved);
+    assert_eq!(token.username.as_deref(), Some(username.as_str()));
+    assert!(token.access_token.is_some());
+    assert!(token.refresh_token.is_some());
+
+    let replay_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &token_request,
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, _) = split_response(replay_response).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    app.shutdown().await;
 }
 
 #[tokio::test]
@@ -344,6 +441,7 @@ async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies()
         "/auth/refresh",
         &RefreshRequest {
             refresh_token: None,
+            rotation_request_id: Uuid::new_v4(),
         },
         &refresh_headers,
     )
@@ -441,6 +539,7 @@ async fn cookie_refresh_rejects_csrf_mismatch() {
         "/auth/refresh",
         &RefreshRequest {
             refresh_token: None,
+            rotation_request_id: Uuid::new_v4(),
         },
         &refresh_headers,
     )
@@ -448,7 +547,7 @@ async fn cookie_refresh_rejects_csrf_mismatch() {
     let (status, _headers, body) = split_response(refresh_response).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let error: ErrorResponse = decode_json(&body);
-    assert_eq!(error.error, "csrf token mismatch");
+    assert_eq!(error.message, "csrf token mismatch");
 
     app.shutdown().await;
 }
@@ -493,6 +592,7 @@ async fn cookie_refresh_rejects_missing_origin_or_referer() {
         "/auth/refresh",
         &RefreshRequest {
             refresh_token: None,
+            rotation_request_id: Uuid::new_v4(),
         },
         &refresh_headers,
     )
@@ -500,7 +600,7 @@ async fn cookie_refresh_rejects_missing_origin_or_referer() {
     let (status, _headers, body) = split_response(refresh_response).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let error: ErrorResponse = decode_json(&body);
-    assert_eq!(error.error, "origin or referer is required");
+    assert_eq!(error.message, "origin or referer is required");
 
     app.shutdown().await;
 }
@@ -519,12 +619,14 @@ async fn body_transport_refresh_and_logout_remain_compatible() {
     assert!(signin.refresh_token.is_some());
     assert!(signin.set_cookie_headers.is_empty());
     let body_refresh_token = signin.refresh_token.expect("body refresh token");
+    let rotation_request_id = Uuid::new_v4();
 
     let refresh_response = post_msgpack(
         &app.app,
         "/auth/refresh",
         &RefreshRequest {
-            refresh_token: Some(body_refresh_token),
+            refresh_token: Some(body_refresh_token.clone()),
+            rotation_request_id,
         },
         &HeaderMap::new(),
     )
@@ -536,7 +638,27 @@ async fn body_transport_refresh_and_logout_remain_compatible() {
     assert!(set_cookie_values(&response_headers).is_empty());
     let rotated_refresh_token = refresh_payload
         .refresh_token
+        .clone()
         .expect("rotated refresh token");
+
+    let retry_response = post_msgpack(
+        &app.app,
+        "/auth/refresh",
+        &RefreshRequest {
+            refresh_token: Some(body_refresh_token),
+            rotation_request_id,
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    let (retry_status, _, retry_body) = split_response(retry_response).await;
+    assert_eq!(retry_status, StatusCode::OK);
+    let retry_payload: RefreshResponse = decode_msgpack(&retry_body);
+    assert_eq!(retry_payload.refresh_token, refresh_payload.refresh_token);
+    assert_eq!(
+        retry_payload.refresh_token_id,
+        refresh_payload.refresh_token_id
+    );
 
     let mut logout_headers = HeaderMap::new();
     let authorization = format!("Bearer {}", refresh_payload.access_token);

@@ -1,5 +1,6 @@
 //! Auth HTTP handlers.
 
+mod device_authorization;
 #[cfg(test)]
 mod integration_tests;
 mod passkeys;
@@ -10,6 +11,10 @@ mod signin;
 mod signup;
 mod totp;
 
+pub use device_authorization::{
+    approve as device_authorization_approve, start as device_authorization_start,
+    token as device_authorization_token,
+};
 pub use passkeys::{
     passkey_add_finish, passkey_add_start, passkey_delete, passkey_list, passkey_login_finish,
     passkey_login_start, passkey_update,

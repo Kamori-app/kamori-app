@@ -62,13 +62,22 @@ pub(super) struct OpaqueSigninFinishRequest {
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct PasskeyLoginStartRequest {}
+pub(super) struct BrowserLoginStartRequest {}
 
 #[derive(Debug, Serialize)]
-pub(super) struct PasskeyLoginFinishRequest {
+pub(super) struct BrowserLoginPollRequest {
     pub(super) flow_id: Uuid,
-    #[serde(with = "serde_bytes")]
-    pub(super) credential: Vec<u8>,
+    pub(super) device_secret: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LogoutRequest {
+    refresh_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LogoutResponse {
+    revoked: bool,
 }
 
 /// OPAQUE ciphersuite used by desktop client to match cloud-server.
@@ -96,6 +105,27 @@ pub(super) async fn decode_msgpack<T: DeserializeOwned>(
 ) -> Result<T, String> {
     let bytes = response.bytes().await.map_err(to_ui_error)?;
     rmp_serde::from_slice(&bytes).map_err(to_ui_error)
+}
+
+/// Revokes a body-transport refresh session without depending on a live access token.
+pub(super) async fn revoke_refresh_session(
+    cloud_base_url: &str,
+    refresh_token: &str,
+) -> Result<bool, String> {
+    let body = encode_msgpack(&LogoutRequest {
+        refresh_token: Some(refresh_token.to_string()),
+    })?;
+    let response = reqwest::Client::new()
+        .post(endpoint(cloud_base_url, "/auth/logout"))
+        .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
+        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
+        .body(body)
+        .send()
+        .await
+        .map_err(to_ui_error)?
+        .error_for_status()
+        .map_err(to_ui_error)?;
+    Ok(decode_msgpack::<LogoutResponse>(response).await?.revoked)
 }
 
 /// Joins base url and endpoint path into a stable absolute URL.

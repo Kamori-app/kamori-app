@@ -56,9 +56,12 @@ pub(crate) async fn insert_invite_code(
         r#"
         INSERT INTO security_space_invites (
             id, space_id, created_by, role, code_hash, encrypted_key_package,
-            encrypted_note, expires_at
+            encrypted_note, expires_at, key_epoch, invite_version, max_uses
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(mins => $8::int))
+        SELECT $1, s.id, $3, $4, $5, $6, $7,
+               now() + make_interval(mins => $8::int), s.current_key_epoch, 1, 1
+        FROM security_spaces s
+        WHERE s.id = $2 AND s.status = 'active'
         "#,
     )
     .bind(invite.id)
@@ -92,12 +95,14 @@ pub(crate) async fn redeem_invite_code_tx(
     let row = sqlx::query(
         r#"
         SELECT i.id, i.space_id, i.role, i.encrypted_key_package,
-               i.encrypted_note, s.current_key_epoch
+               i.encrypted_note, i.key_epoch
         FROM security_space_invites i
         JOIN security_spaces s ON s.id = i.space_id AND s.status = 'active'
         WHERE i.code_hash = $1
-          AND i.redeemed_at IS NULL
+          AND i.revoked_at IS NULL
+          AND i.used_count < i.max_uses
           AND i.expires_at > now()
+          AND i.key_epoch = s.current_key_epoch
         FOR UPDATE OF i
         "#,
     )
@@ -110,7 +115,7 @@ pub(crate) async fn redeem_invite_code_tx(
     let space_id: Uuid = row.try_get("space_id")?;
     let role_value: String = row.try_get("role")?;
     let role = SpaceRole::from_db(&role_value)?;
-    let key_epoch_i32: i32 = row.try_get("current_key_epoch")?;
+    let key_epoch_i32: i32 = row.try_get("key_epoch")?;
     let key_epoch = u32::try_from(key_epoch_i32)?;
     let encrypted_key_package: Vec<u8> = row.try_get("encrypted_key_package")?;
     let encrypted_note: Option<Vec<u8>> = row.try_get("encrypted_note")?;
@@ -137,7 +142,11 @@ pub(crate) async fn redeem_invite_code_tx(
     .await?;
 
     sqlx::query(
-        "UPDATE security_space_invites SET redeemed_by = $2, redeemed_at = now() WHERE id = $1",
+        r#"
+        UPDATE security_space_invites
+        SET redeemed_by = $2, redeemed_at = now(), used_count = used_count + 1
+        WHERE id = $1 AND revoked_at IS NULL AND used_count < max_uses
+        "#,
     )
     .bind(invite_id)
     .bind(actor_id)

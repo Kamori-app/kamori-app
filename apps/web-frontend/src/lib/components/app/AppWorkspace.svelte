@@ -16,12 +16,12 @@
     import {
         getActiveWebDevice,
         listQueuedOperationEnvelopes,
-        loadMaterializedPimItems,
+        loadMaterializedPimState,
         loadSpaceKey,
         queueOperationEnvelope,
         removeQueuedOperationEnvelope,
         storeSpaceKey,
-        storeMaterializedPimItems,
+        storeMaterializedPimState,
         withActiveMasterKey,
     } from "$lib/cryptoVault";
     import {
@@ -35,11 +35,14 @@
     } from "$lib/opaqueClient";
     import {
         decodePimOperation,
+        decodePimSnapshot,
         encodePimOperation,
         type MaterializedPimItem,
+        type MaterializedOperationState,
         type PimOperationV1,
         type PimResourceKind,
         type PimValue,
+        type PimSnapshotV1,
     } from "$lib/pim";
     import Button from "$lib/components/ui/Button.svelte";
     import Card from "$lib/components/ui/Card.svelte";
@@ -61,6 +64,7 @@
     let contactEmail = "";
     let contactPhone = "";
     let pimItems: MaterializedPimItem[] = [];
+    let operationStates: MaterializedOperationState[] = [];
     let trashedCollections: CollectionEntry[] = [];
 
     let inviteTtlMinutes = "60";
@@ -70,6 +74,7 @@
     let inviteRedeemedNote = "";
 
     let loadingAction = "";
+    let deviceAuthorizationCode = "";
 
     let deleteModalOpen = false;
     let pendingDeleteCollectionId = "";
@@ -107,6 +112,34 @@
 
     const setNotice = (notice: string) => {
         appState.update((state) => ({ ...state, notice }));
+    };
+
+    const clearDeviceAuthorizationQuery = () => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("device_code");
+        window.history.replaceState({}, "", url);
+        deviceAuthorizationCode = "";
+    };
+
+    const approveDeviceAuthorization = async () => {
+        if (!deviceAuthorizationCode) return;
+        setLoading("device-authorization");
+        try {
+            await withAccessRetry((accessToken) =>
+                cloudApi.approveDeviceAuthorization(
+                    $appState.cloudBaseUrl,
+                    deviceAuthorizationCode,
+                    accessToken,
+                ),
+            );
+            setNotice("Desktop sign-in approved. You may return to Kamori Desktop.");
+            clearDeviceAuthorizationQuery();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice(`Desktop authorization failed: ${message}`);
+        } finally {
+            clearLoading();
+        }
     };
 
     const withAccessToken = (): string => {
@@ -191,7 +224,7 @@
                     accessToken,
                 ),
             );
-            await storeSpaceKey(spaceId, spaceKey);
+            await storeSpaceKey(spaceId, 1, spaceKey);
             const entry: CollectionEntry = {
                 id: spaceId,
                 name,
@@ -222,42 +255,77 @@
         clientOpId: string,
         operation: PimOperationV1,
     ) => {
+        if (operationStates.some((state) => state.clientOpId === clientOpId)) return;
+        const parent = operation.dependencies
+            .map((dependency) =>
+                operationStates.find(
+                    (state) =>
+                        state.clientOpId === dependency &&
+                        state.spaceId === spaceId &&
+                        state.logicalResourceId === operation.resource_id &&
+                        state.kind === operation.resource_kind,
+                ),
+            )
+            .find((state) => state !== undefined);
+        const canonical = pimItems.find(
+            (item) =>
+                item.spaceId === spaceId &&
+                item.resourceId === operation.resource_id &&
+                (item.projectionId ?? item.resourceId) === operation.resource_id,
+        );
+        const isSequential = Boolean(
+            canonical && operation.dependencies.includes(canonical.headOperationId),
+        );
+        const projectionId =
+            parent?.projectionId ??
+            (isSequential || !canonical
+                ? operation.resource_id
+                : `${operation.resource_id}~conflict-${clientOpId.slice(0, 8)}`);
         const index = pimItems.findIndex(
             (item) =>
                 item.spaceId === spaceId &&
-                item.resourceId === operation.resource_id,
+                (item.projectionId ?? item.resourceId) === projectionId,
         );
         if (operation.operation === "delete") {
             if (index >= 0) {
                 pimItems = pimItems.filter((_, itemIndex) => itemIndex !== index);
             }
+            operationStates = [
+                ...operationStates,
+                {
+                    spaceId,
+                    clientOpId,
+                    logicalResourceId: operation.resource_id,
+                    projectionId,
+                    kind: operation.resource_kind,
+                    title: parent?.title ?? "",
+                    completed: parent?.completed ?? false,
+                    fields: parent?.fields ?? {},
+                    deleted: true,
+                },
+            ];
             return;
         }
         const existing = index >= 0 ? pimItems[index] : undefined;
-        if (existing?.headOperationId === clientOpId) {
-            return;
-        }
         const titleValue = operation.fields.title;
         const completedValue = operation.fields.completed;
-        const fields = { ...(existing?.fields ?? {}), ...operation.fields };
+        const fields = { ...(parent?.fields ?? {}), ...operation.fields };
         const next: MaterializedPimItem = {
             spaceId,
             resourceId: operation.resource_id,
+            projectionId,
             kind: operation.resource_kind,
             title:
                 titleValue?.type === "text"
                     ? titleValue.value
-                    : (existing?.title ?? "Untitled"),
+                    : (parent?.title ?? "Untitled"),
             completed:
                 completedValue?.type === "boolean"
                     ? completedValue.value
-                    : (existing?.completed ?? false),
+                    : (parent?.completed ?? false),
             fields,
             headOperationId: clientOpId,
-            conflict: Boolean(
-                existing &&
-                !operation.dependencies.includes(existing.headOperationId),
-            ),
+            conflict: projectionId !== operation.resource_id,
         };
         if (index >= 0) {
             pimItems = pimItems.map((item, itemIndex) =>
@@ -266,6 +334,95 @@
         } else {
             pimItems = [...pimItems, next];
         }
+        operationStates = [
+            ...operationStates,
+            {
+                spaceId,
+                clientOpId,
+                logicalResourceId: operation.resource_id,
+                projectionId,
+                kind: operation.resource_kind,
+                title: next.title,
+                completed: next.completed,
+                fields,
+                deleted: false,
+            },
+        ];
+    };
+
+    const applyPimSnapshot = (spaceId: string, snapshot: PimSnapshotV1) => {
+        pimItems = pimItems.filter(
+            (item) =>
+                !(
+                    item.spaceId === spaceId &&
+                    item.resourceId === snapshot.resource_id
+                ),
+        );
+        operationStates = operationStates.filter(
+            (state) =>
+                !(
+                    state.spaceId === spaceId &&
+                    state.logicalResourceId === snapshot.resource_id
+                ),
+        );
+        if (snapshot.deleted) return;
+
+        const projection = new TextDecoder().decode(
+            snapshot.materialized_projection,
+        );
+        const lineValue = (names: string[]): string => {
+            for (const line of projection.split(/\r?\n/)) {
+                const separator = line.indexOf(":");
+                if (separator < 0) continue;
+                const property = line
+                    .slice(0, separator)
+                    .split(";", 1)[0]
+                    .toUpperCase();
+                if (names.includes(property)) return line.slice(separator + 1);
+            }
+            return "";
+        };
+        const title =
+            lineValue(
+                snapshot.resource_kind === "contact"
+                    ? ["FN", "N"]
+                    : ["SUMMARY"],
+            ) || "Untitled";
+        const completed = lineValue(["STATUS"]).toUpperCase() === "COMPLETED";
+        const fields: Record<string, PimValue> = {
+            title: { type: "text", value: title },
+        };
+        if (snapshot.resource_kind === "task") {
+            fields.completed = { type: "boolean", value: completed };
+        }
+        pimItems = [
+            ...pimItems,
+            {
+                spaceId,
+                resourceId: snapshot.resource_id,
+                projectionId: snapshot.projection_resource_id,
+                kind: snapshot.resource_kind,
+                title,
+                completed,
+                fields,
+                headOperationId: snapshot.head_operation_id,
+                conflict: false,
+            },
+        ];
+        operationStates = [
+            ...operationStates,
+            {
+                spaceId,
+                clientOpId: snapshot.head_operation_id,
+                logicalResourceId: snapshot.resource_id,
+                projectionId: snapshot.projection_resource_id,
+                kind: snapshot.resource_kind,
+                title,
+                completed,
+                fields,
+                deleted: false,
+            },
+        ];
     };
 
     const textField = (item: MaterializedPimItem, name: string): string => {
@@ -303,7 +460,7 @@
         if (!collection) {
             throw new Error("Choose a collection first.");
         }
-        const spaceKey = await loadSpaceKey(collection.id);
+        const spaceKey = await loadSpaceKey(collection.id, collection.keyEpoch);
         if (!spaceKey) {
             throw new Error(
                 "This device has no key for the selected collection.",
@@ -324,7 +481,7 @@
         });
         await queueOperationEnvelope(envelope);
         applyPimOperation(collection.id, clientOpId, operation);
-        await storeMaterializedPimItems(pimItems);
+        await storeMaterializedPimState(pimItems, operationStates);
         return (await flushOutbox()) > 0;
     };
 
@@ -523,7 +680,7 @@
                 trashedCollections = [removed, ...trashedCollections];
             }
             pimItems = pimItems.filter((item) => item.spaceId !== collectionId);
-            await storeMaterializedPimItems(pimItems);
+            await storeMaterializedPimState(pimItems, operationStates);
             if (selectedCollectionId === collectionId) {
                 selectedCollectionId = "";
             }
@@ -564,6 +721,7 @@
     const syncNow = async () => {
         setLoading("sync-now");
         const previousPimItems = pimItems;
+        const previousOperationStates = operationStates;
         try {
             const response = await withAccessRetry((accessToken) =>
                 cloudApi.listSpaces($appState.cloudBaseUrl, accessToken),
@@ -578,8 +736,9 @@
             const collections: CollectionEntry[] = [];
             let syncedOperationCount = 0;
             pimItems = [];
+            operationStates = [];
             for (const space of response.spaces) {
-                let key = await loadSpaceKey(space.space_id);
+                let key = await loadSpaceKey(space.space_id, space.key_epoch);
                 if (!key) {
                     const packageForDevice = space.device_key_packages.find(
                         (item) =>
@@ -591,7 +750,7 @@
                             decode(packageForDevice.encrypted_key_package),
                             device.identity.hpke_private_key,
                         );
-                        await storeSpaceKey(space.space_id, key);
+                        await storeSpaceKey(space.space_id, space.key_epoch, key);
                     }
                 }
                 const packageForThisDevice = space.device_key_packages.find(
@@ -690,15 +849,35 @@
                                 stored.envelope,
                                 signingKey,
                             );
+                            const operationKey = await loadSpaceKey(
+                                space.space_id,
+                                stored.envelope.key_epoch,
+                            );
+                            if (!operationKey) {
+                                continue;
+                            }
                             const plaintext = await openOperationEnvelope(
                                 stored.envelope,
-                                key,
+                                operationKey,
                             );
-                            applyPimOperation(
-                                space.space_id,
-                                stored.envelope.client_op_id,
-                                decodePimOperation(plaintext),
-                            );
+                            if (stored.envelope.envelope_kind === "operation") {
+                                applyPimOperation(
+                                    space.space_id,
+                                    stored.envelope.client_op_id,
+                                    decodePimOperation(plaintext),
+                                );
+                            } else if (
+                                stored.envelope.envelope_kind === "snapshot"
+                            ) {
+                                applyPimSnapshot(
+                                    space.space_id,
+                                    decodePimSnapshot(plaintext),
+                                );
+                            } else {
+                                throw new Error(
+                                    "Unsupported mandatory key-control envelope.",
+                                );
+                            }
                         }
                         spaceOperationCount += page.operations.length;
                         if (
@@ -715,12 +894,30 @@
                 }
             }
 
+            const queued = await listQueuedOperationEnvelopes();
+            for (const envelope of queued) {
+                const key = await loadSpaceKey(envelope.space_id, envelope.key_epoch);
+                if (!key) continue;
+                const plaintext = await openOperationEnvelope(envelope, key);
+                if (envelope.envelope_kind === "operation") {
+                    applyPimOperation(
+                        envelope.space_id,
+                        envelope.client_op_id,
+                        decodePimOperation(plaintext),
+                    );
+                } else if (envelope.envelope_kind === "snapshot") {
+                    applyPimSnapshot(
+                        envelope.space_id,
+                        decodePimSnapshot(plaintext),
+                    );
+                }
+            }
             const flushed = await flushOutbox();
-            await storeMaterializedPimItems(pimItems);
+            await storeMaterializedPimState(pimItems, operationStates);
 
             const trash: CollectionEntry[] = [];
             for (const space of trashResponse.spaces) {
-                const key = await loadSpaceKey(space.space_id);
+                const key = await loadSpaceKey(space.space_id, space.key_epoch);
                 let name = `Space ${space.space_id.slice(0, 8)}`;
                 if (key) {
                     try {
@@ -751,6 +948,7 @@
             }));
         } catch (error) {
             pimItems = previousPimItems;
+            operationStates = previousOperationStates;
             const message =
                 error instanceof Error ? error.message : String(error);
             setNotice(`Sync failed: ${message}`);
@@ -782,7 +980,7 @@
         try {
             inviteRedeemedNote = "";
             const inviteCode = generateInviteCode();
-            const collectionKey = await loadSpaceKey(collection.id);
+            const collectionKey = await loadSpaceKey(collection.id, collection.keyEpoch);
             if (!collectionKey) {
                 throw new Error("This device has no key package for the selected space.");
             }
@@ -847,7 +1045,7 @@
                 redeemed.encrypted_key_package,
                 code,
             );
-            await storeSpaceKey(redeemed.space_id, collectionKey);
+            await storeSpaceKey(redeemed.space_id, redeemed.key_epoch, collectionKey);
             const device = getActiveWebDevice();
             const devicePackage = encode(
                 await wrapSpaceKeyForDevice(
@@ -940,9 +1138,16 @@
     }
 
     onMount(() => {
+        deviceAuthorizationCode =
+            new URLSearchParams(window.location.search)
+                .get("device_code")
+                ?.trim()
+                .toUpperCase() ?? "";
         void (async () => {
             try {
-                pimItems = await loadMaterializedPimItems();
+                const materialized = await loadMaterializedPimState();
+                pimItems = materialized.items;
+                operationStates = materialized.operations;
             } catch (error) {
                 const message =
                     error instanceof Error ? error.message : String(error);
@@ -951,6 +1156,32 @@
         })();
     });
 </script>
+
+{#if deviceAuthorizationCode}
+    <Card>
+        <h2 class="font-heading text-xl font-semibold text-slate">
+            Authorize Kamori Desktop
+        </h2>
+        <p class="mt-2 text-sm text-slate/80">
+            Confirm that code <strong>{deviceAuthorizationCode}</strong> is also
+            shown in your desktop app. Approving creates a desktop session; it
+            does not expose session tokens in this browser URL.
+        </p>
+        <div class="mt-3 flex gap-2">
+            <Button
+                on:click={approveDeviceAuthorization}
+                disabled={loadingAction === "device-authorization"}
+            >
+                {loadingAction === "device-authorization"
+                    ? "Approving..."
+                    : "Approve Desktop"}
+            </Button>
+            <Button variant="secondary" on:click={clearDeviceAuthorizationQuery}>
+                Cancel
+            </Button>
+        </div>
+    </Card>
+{/if}
 
 <div class="grid gap-4 md:grid-cols-2">
     <Card>

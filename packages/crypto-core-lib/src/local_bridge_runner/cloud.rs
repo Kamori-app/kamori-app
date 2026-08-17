@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -183,8 +184,10 @@ impl CloudSyncClient {
         let Some(refresh_token) = self.tokens.read().await.refresh_token.clone() else {
             return Ok(false);
         };
+        let rotation_request_id = refresh_rotation_request_id(&refresh_token);
         let body = encode_msgpack(&CloudRefreshRequest {
             refresh_token: Some(refresh_token),
+            rotation_request_id,
         })?;
         let response = self
             .http
@@ -242,6 +245,22 @@ struct CloudListSpaceDevicesResponse {
 #[derive(Serialize)]
 struct CloudRefreshRequest {
     refresh_token: Option<String>,
+    rotation_request_id: Uuid,
+}
+
+fn refresh_rotation_request_id(refresh_token: &str) -> Uuid {
+    let digest = Sha256::digest(
+        [
+            b"kamori.refresh-request.v1\0".as_slice(),
+            refresh_token.as_bytes(),
+        ]
+        .concat(),
+    );
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
 }
 
 #[derive(Deserialize)]

@@ -20,8 +20,8 @@ Do not treat an unsigned development build as a supported backup service.
 - Desktop is a control center and local CalDAV/CardDAV bridge.
 - Android/iOS system calendar and contact projection is explicit opt-in.
 - Mobile does not run a localhost DAV server.
-- The cloud stores signed encrypted operations; snapshot envelopes are reserved
-  for a later client codec and DAV is not the server data model.
+- The cloud stores signed encrypted operations and snapshots; DAV is not the
+  server data model.
 - The server cannot decrypt user PIM content.
 
 ## Repository layout
@@ -81,6 +81,9 @@ Server setup and required environment variables are documented in
 `apps/cloud-server/README.md` and the hosted-beta runbook. Never commit secrets
 or use production credentials in local examples.
 
+The exact production bootstrap procedure for encrypted Pulumi configuration
+and GitHub Actions is documented in [SECRETS.md](SECRETS.md).
+
 ## Documentation
 
 - [Product contract](SPEC.md)
@@ -104,3 +107,5 @@ the complete legal package must be reviewed before public source publication.
 The project is not yet accepting substantial external contributions. A reviewed
 CLA, contribution guide, and responsible disclosure process are release
 prerequisites. Do not submit security vulnerabilities through public issues.
+Known target-specific dependency audit exceptions and their removal conditions
+are documented in [docs/security/dependency-exceptions.md](docs/security/dependency-exceptions.md).

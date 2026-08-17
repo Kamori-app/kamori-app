@@ -1,6 +1,7 @@
 //! OPAQUE protocol helpers for password-based authentication.
 use crate::platform::state_store::StateStore;
 use anyhow::{Result, anyhow};
+use base64::Engine as _;
 use opaque_ke::argon2::Argon2;
 use opaque_ke::ciphersuite::CipherSuite;
 use opaque_ke::key_exchange::tripledh::TripleDh;
@@ -11,7 +12,9 @@ use opaque_ke::{
 };
 use rand08::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sha2_opaque::Sha512;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,11 +49,54 @@ pub struct OpaqueServer {
 }
 
 impl OpaqueServer {
-    /// Creates a new OPAQUE server instance.
+    /// Creates an ephemeral OPAQUE server instance for tests and explicit local use.
     pub fn new(state_store: Arc<dyn StateStore>) -> Result<Self> {
         let mut rng = OsRng;
         let setup = ServerSetup::<DefaultOpaqueSuite>::new(&mut rng);
         Ok(Self { setup, state_store })
+    }
+
+    /// Restores a deployment-owned setup from its canonical serialized bytes.
+    pub fn from_serialized_setup(
+        state_store: Arc<dyn StateStore>,
+        serialized: &[u8],
+    ) -> Result<Self> {
+        let setup = ServerSetup::<DefaultOpaqueSuite>::deserialize(serialized)
+            .map_err(|e| anyhow!("deserialize OPAQUE server setup: {e:?}"))?;
+        Ok(Self { setup, state_store })
+    }
+
+    /// Loads a standard-base64 setup file, or creates an ephemeral setup only when allowed.
+    pub fn load(
+        state_store: Arc<dyn StateStore>,
+        setup_path: Option<&str>,
+        allow_ephemeral: bool,
+    ) -> Result<Self> {
+        let Some(setup_path) = setup_path else {
+            if allow_ephemeral {
+                return Self::new(state_store);
+            }
+            return Err(anyhow!("persistent OPAQUE server setup is required"));
+        };
+        let encoded = std::fs::read_to_string(Path::new(setup_path))
+            .map_err(|e| anyhow!("read OPAQUE server setup file {setup_path:?}: {e}"))?;
+        let serialized = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|_| anyhow!("OPAQUE server setup file must contain standard base64"))?;
+        Self::from_serialized_setup(state_store, &serialized)
+    }
+
+    /// Generates canonical bytes for one new deployment setup.
+    pub fn generate_serialized_setup() -> Vec<u8> {
+        let mut rng = OsRng;
+        ServerSetup::<DefaultOpaqueSuite>::new(&mut rng)
+            .serialize()
+            .to_vec()
+    }
+
+    /// Returns a non-secret fingerprint used to detect mismatched app nodes.
+    pub fn setup_fingerprint(&self) -> [u8; 32] {
+        Sha256::digest(self.setup.serialize()).into()
     }
 
     /// Starts OPAQUE registration and returns the server message bytes.
@@ -90,20 +136,21 @@ impl OpaqueServer {
         &self,
         username: &str,
         request_bytes: &[u8],
-        password_file_bytes: &[u8],
+        password_file_bytes: Option<&[u8]>,
     ) -> Result<OpaqueLoginStart> {
         let request = CredentialRequest::<DefaultOpaqueSuite>::deserialize(request_bytes)
             .map_err(|e| anyhow!("deserialize credential request: {e:?}"))?;
 
-        let password_file =
-            ServerRegistration::<DefaultOpaqueSuite>::deserialize(password_file_bytes)
-                .map_err(|e| anyhow!("deserialize password file: {e:?}"))?;
+        let password_file = password_file_bytes
+            .map(ServerRegistration::<DefaultOpaqueSuite>::deserialize)
+            .transpose()
+            .map_err(|e| anyhow!("deserialize password file: {e:?}"))?;
 
         let mut rng = OsRng;
         let start_result = ServerLogin::<DefaultOpaqueSuite>::start(
             &mut rng,
             &self.setup,
-            Some(password_file),
+            password_file,
             request,
             username.as_bytes(),
             ServerLoginParameters::default(),
@@ -201,6 +248,23 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn serialized_setup_survives_server_restart() {
+        let serialized = OpaqueServer::generate_serialized_setup();
+        let first = OpaqueServer::from_serialized_setup(
+            Arc::new(InMemoryStore::new(Duration::from_secs(300))),
+            &serialized,
+        )
+        .expect("first server");
+        let restarted = OpaqueServer::from_serialized_setup(
+            Arc::new(InMemoryStore::new(Duration::from_secs(300))),
+            &serialized,
+        )
+        .expect("restarted server");
+
+        assert_eq!(first.setup_fingerprint(), restarted.setup_fingerprint());
+    }
+
+    #[test]
     fn registration_flow_roundtrip() {
         let store = Arc::new(InMemoryStore::new(Duration::from_secs(300)));
         let server = OpaqueServer::new(store).expect("server");
@@ -271,7 +335,11 @@ mod tests {
         let credential_request_bytes = client_login.message.serialize().to_vec();
 
         let server_login = rt
-            .block_on(server.login_start("alice", &credential_request_bytes, &password_file_bytes))
+            .block_on(server.login_start(
+                "alice",
+                &credential_request_bytes,
+                Some(&password_file_bytes),
+            ))
             .expect("server login start");
 
         let client_finish = client_login

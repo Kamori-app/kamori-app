@@ -194,7 +194,10 @@ Token model (current):
 - `POST /auth/refresh` rotates refresh token in one transaction (one-time use):
   - old token gets `revoked_at=now` and `replaced_by_token_id=<new_id>`;
   - new refresh token row is created and returned/set with a new access token.
-- Reuse/invalid/expired refresh token returns unauthorized.
+- A client-stable `rotation_request_id` makes an exact network retry return the
+  same replacement for 30 seconds. Other reuse, or any retry after that window,
+  revokes the session chain and returns unauthorized.
+- Invalid or expired refresh tokens return unauthorized.
 - `POST /auth/logout` revokes current refresh session (idempotent) and clears refresh cookie in cookie mode.
 - `POST /auth/revoke` revokes another refresh session by `refresh_token_id` for same owner (idempotent).
 - Client contract: refresh tokens must be stored in platform secure storage (Keychain/Keystore/secure enclave equivalent), not plaintext local storage.
@@ -203,6 +206,9 @@ Token model (current):
 
 Required for production:
 - `KAMORI_JWT_SECRET` (must be non-empty and not placeholder `change-me`).
+- `KAMORI_OPAQUE_SERVER_SETUP_FILE` (persistent standard-base64 setup generated
+  once with `cloud-server opaque-setup generate`).
+- `KAMORI_REFRESH_ROTATION_KEY_FILE` (persistent standard-base64 32-byte key).
 
 Important settings:
 - `KAMORI_DATABASE_URL` (Postgres URL)
@@ -217,6 +223,8 @@ Important settings:
 - `KAMORI_ACCOUNT_STORAGE_BYTES` (default `5000000000`)
 - `KAMORI_OWNER_MONTHLY_EGRESS_BYTES` (default `10000000000`)
 - `KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES` (default `2000000000`)
+- `KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS` (default `2`)
+- `KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND` (default `1250000` per stream)
 - `KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES` (default `16000000000000`)
 - `KAMORI_GLOBAL_EMERGENCY_EGRESS_BREAKER_BYTES` (default `19000000000000`)
 - `KAMORI_OBJECT_STORE_ENDPOINT` (required; include `https://` for B2/S3)

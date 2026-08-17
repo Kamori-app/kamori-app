@@ -86,7 +86,7 @@ mod tests {
             .await
             .expect_err("must fail");
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(err.1.0.error, "missing token");
+        assert_eq!(err.1.0.message, "missing token");
         state.pool.close().await;
     }
 
@@ -103,7 +103,7 @@ mod tests {
             .await
             .expect_err("must fail");
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(err.1.0.error, "invalid token");
+        assert_eq!(err.1.0.message, "invalid token");
         state.pool.close().await;
     }
 
@@ -121,7 +121,7 @@ mod tests {
             .await
             .expect_err("must fail");
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(err.1.0.error, "invalid token");
+        assert_eq!(err.1.0.message, "invalid token");
         state.pool.close().await;
     }
 
@@ -139,7 +139,7 @@ mod tests {
             .await
             .expect_err("must fail");
         assert_eq!(err.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(err.1.0.error, "invalid token");
+        assert_eq!(err.1.0.message, "invalid token");
         state.pool.close().await;
     }
 

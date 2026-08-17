@@ -132,6 +132,14 @@ pub async fn mobile_clear_refresh_token() {
 }
 
 #[flutter_rust_bridge::frb]
+pub async fn mobile_revoke_refresh_session(
+    cloud_base_url: String,
+    refresh_token: String,
+) -> Result<bool, String> {
+    auth::mobile_revoke_refresh_session_impl(cloud_base_url, refresh_token).await
+}
+
+#[flutter_rust_bridge::frb]
 pub async fn mobile_create_invite_code(
     collection_id: String,
     collection_key: [u8; 32],

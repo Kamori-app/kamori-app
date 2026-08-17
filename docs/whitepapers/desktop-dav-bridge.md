@@ -29,6 +29,13 @@ unless another desktop application needs CalDAV or CardDAV.
 6. Copy the direct Calendar URL or Address Book URL for the space you want.
 7. Use the displayed DAV username and the dedicated DAV password.
 
+Passkey sign-in opens `app.kamori.app` in your normal browser and shows the
+same short code in both places. Approve only when the codes match. Session
+tokens are delivered through the expiring device-authorization channel, not
+through the browser URL. Unlock a new desktop once with the account password
+so its operating-system keychain has the account key; later sign-ins can use
+the browser flow.
+
 Do not enter your Kamori account password into a DAV client. The random DAV
 password exists only for the local bridge and is stored in the operating
 system's secure credential store.

@@ -140,6 +140,14 @@ class MockRustBridgeApi implements RustBridgeApi {
   }
 
   @override
+  Future<bool> revokeRefreshSession({
+    required String cloudBaseUrl,
+    required String refreshToken,
+  }) async {
+    return refreshToken.trim().isNotEmpty;
+  }
+
+  @override
   Future<void> configureSync({
     required String cloudBaseUrl,
     required String sqlitePath,

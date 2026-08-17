@@ -55,7 +55,11 @@ impl AppState {
     /// Builds a new AppState.
     pub fn new(pool: PgPool, config: Config, state_store: Arc<dyn StateStore>) -> Result<Self> {
         let jwt = JwtManager::new(&config)?;
-        let opaque = Arc::new(OpaqueServer::new(state_store.clone())?);
+        let opaque = Arc::new(OpaqueServer::load(
+            state_store.clone(),
+            config.opaque_server_setup_path.as_deref(),
+            config.allow_ephemeral_opaque_setup,
+        )?);
         let passkeys = Arc::new(PasskeyService::new(&config, state_store.clone())?);
         let admin_passkeys = Arc::new(PasskeyService::new_admin(&config, state_store.clone())?);
         let object_store = build_object_store(&config)?;
@@ -142,5 +146,32 @@ pub async fn load_state(database_url: &str) -> Result<AppState> {
         std::time::Duration::from_secs(config.valkey_ttl_seconds),
     ))?;
 
-    AppState::new(pool, config, Arc::new(valkey))
+    let state = AppState::new(pool, config, Arc::new(valkey))?;
+    verify_opaque_setup_fingerprint(&state.pool, &state.opaque.setup_fingerprint()).await?;
+    Ok(state)
+}
+
+async fn verify_opaque_setup_fingerprint(pool: &PgPool, fingerprint: &[u8; 32]) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO server_security_config (singleton, opaque_setup_version, opaque_setup_fingerprint)
+        VALUES (TRUE, 1, $1)
+        ON CONFLICT (singleton) DO NOTHING
+        "#,
+    )
+    .bind(fingerprint.as_slice())
+    .execute(pool)
+    .await?;
+
+    let stored: Vec<u8> = sqlx::query_scalar(
+        "SELECT opaque_setup_fingerprint FROM server_security_config WHERE singleton = TRUE",
+    )
+    .fetch_one(pool)
+    .await?;
+    if stored.as_slice() != fingerprint {
+        anyhow::bail!(
+            "OPAQUE server setup fingerprint does not match the setup registered by this deployment"
+        );
+    }
+    Ok(())
 }

@@ -243,10 +243,21 @@ pub struct MobileSyncRuntime {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileRefreshRequest {
     pub(super) refresh_token: String,
+    pub(super) rotation_request_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileRefreshResponse {
     pub(super) access_token: String,
     pub(super) refresh_token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileLogoutRequest {
+    pub(super) refresh_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileLogoutResponse {
+    pub(super) revoked: bool,
 }

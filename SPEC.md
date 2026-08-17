@@ -1,7 +1,7 @@
 # Kamori MVP specification
 
 Status: implementation-aligned contract
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 This file describes the product implemented by this repository and the exact
 boundary of the first hosted beta. Architecture rationale lives in `docs/adr`;
@@ -33,8 +33,11 @@ attachments, and enterprise policy are not MVP features.
 - Password registration, login, password change, reauthentication, and data
   recovery use OPAQUE. Concurrent OPAQUE exchanges have independent random
   flow handles.
-- Passkeys are implemented in web and desktop. Native mobile passkey plumbing
-  is explicitly deferred; mobile exposes password plus optional TOTP sign-in.
+- Passkeys are implemented on the trusted web origin. Desktop passkey sign-in
+  uses an expiring external-browser device-authorization flow; the Tauri
+  WebView never performs a WebAuthn ceremony for `kamori.app`. Native mobile
+  passkey plumbing is explicitly deferred; mobile exposes password plus
+  optional TOTP sign-in.
 - TOTP is optional. Its one-time backup codes are distinct from the data
   recovery kit and are atomically consumed.
 - Access tokens are short-lived. Refresh tokens rotate, detect reuse, and can
@@ -109,10 +112,11 @@ reusing a `client_op_id` for different bytes is rejected.
 
 `space_seq` is a catch-up cursor, not CRDT causality or a client timestamp.
 The server cannot parse operation plaintext. Current clients emit versioned
-field-oriented PIM upsert/delete payloads. The transport reserves `snapshot`
-and `control` envelope kinds, but the MVP clients do not yet generate snapshot
-or history-compaction records; the hosted beta therefore retains its operation
-log instead of promising a 90-day compaction window.
+field-oriented PIM upsert/delete payloads. Epoch rotation requires a signed,
+encrypted current-state `snapshot` for every stream before old keys are
+superseded. General background compaction and `control` processing remain
+deferred; the hosted beta therefore retains its operation log instead of
+promising a 90-day compaction window.
 
 Future encrypted documents may introduce a benchmarked CRDT payload codec
 without changing this envelope or tying durable history to MLS messages.

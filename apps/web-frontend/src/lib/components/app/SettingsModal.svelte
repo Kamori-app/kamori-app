@@ -61,6 +61,8 @@
     let totpDisableCode = "";
     let passwordChangeNew = "";
     let passwordChangeConfirm = "";
+    let passwordChangeCurrent = "";
+    let passwordChangeTotp = "";
     let dataRecoveryKit = "";
     let sessions: SessionSummary[] = [];
     let deviceApprovals: Array<{
@@ -99,6 +101,8 @@
     const clearPasswordChangeDraft = () => {
         passwordChangeNew = "";
         passwordChangeConfirm = "";
+        passwordChangeCurrent = "";
+        passwordChangeTotp = "";
     };
 
     const setBusyAction = (value: string) => {
@@ -346,8 +350,8 @@
         }
 
         const nextPassword = passwordChangeNew;
-        if (!nextPassword || !passwordChangeConfirm) {
-            setNotice("New password and confirmation are required.");
+        if (!passwordChangeCurrent || !nextPassword || !passwordChangeConfirm) {
+            setNotice("Current password, new password, and confirmation are required.");
             return;
         }
         if (nextPassword !== passwordChangeConfirm) {
@@ -357,6 +361,35 @@
 
         setBusyAction("password-change");
         try {
+            const reauthStart = await opaqueSigninStart(passwordChangeCurrent);
+            const reauthStartResponse = await withAccessRetry((accessToken) =>
+                cloudApi.reauthStart(
+                    $appState.cloudBaseUrl,
+                    reauthStart.opaque_start_request,
+                    "change_password",
+                    accessToken,
+                ),
+            );
+            if (reauthStartResponse.totp_required && !passwordChangeTotp.trim()) {
+                throw new Error("Current two-factor code is required.");
+            }
+            const reauthFinish = await opaqueSigninFinish(
+                reauthStart.flow_id,
+                passwordChangeCurrent,
+                reauthStartResponse.opaque_server_message,
+            );
+            const reauth = await withAccessRetry((accessToken) =>
+                cloudApi.reauthFinish(
+                    $appState.cloudBaseUrl,
+                    reauthStartResponse.opaque_flow_id,
+                    reauthFinish.opaque_finish_request,
+                    reauthStartResponse.totp_required
+                        ? passwordChangeTotp.trim()
+                        : null,
+                    "change_password",
+                    accessToken,
+                ),
+            );
             const start = await opaqueSignupStart(nextPassword);
             const startResponse = await withAccessRetry((accessToken) =>
                 cloudApi.passwordChangeStart(
@@ -377,6 +410,7 @@
                 cloudApi.passwordChangeFinish(
                     $appState.cloudBaseUrl,
                     {
+                        reauth_token: reauth.reauth_token,
                         opaque_finish_request: finish.opaque_finish_request,
                         encrypted_master_key: encryptedMasterKey,
                     },
@@ -545,7 +579,7 @@
         try {
             let approved = 0;
             for (const space of entry.missingSpaces) {
-                const key = await loadSpaceKey(space.space_id);
+                const key = await loadSpaceKey(space.space_id, space.key_epoch);
                 if (!key) continue;
                 const encryptedKeyPackage = encode(
                     await wrapSpaceKeyForDevice(
@@ -762,6 +796,7 @@
                 cloudApi.reauthStart(
                     $appState.cloudBaseUrl,
                     start.opaque_start_request,
+                    "delete_account",
                     accessToken,
                 ),
             );
@@ -781,6 +816,7 @@
                     startResponse.totp_required
                         ? accountDeleteTotp.trim()
                         : null,
+                    "delete_account",
                     accessToken,
                 ),
             );
@@ -1420,6 +1456,11 @@
                     class="mt-3 space-y-2 rounded-xl border border-slate/15 p-3"
                 >
                     <Input
+                        bind:value={passwordChangeCurrent}
+                        type="password"
+                        placeholder="Current password"
+                    />
+                    <Input
                         bind:value={passwordChangeNew}
                         type="password"
                         placeholder="New password"
@@ -1429,6 +1470,12 @@
                         type="password"
                         placeholder="Confirm new password"
                     />
+                    {#if totpEnabled}
+                        <Input
+                            bind:value={passwordChangeTotp}
+                            placeholder="Current TOTP or backup code"
+                        />
+                    {/if}
                     <Button
                         variant="secondary"
                         on:click={changePassword}

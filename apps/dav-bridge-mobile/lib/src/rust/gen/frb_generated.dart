@@ -71,7 +71,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1948317936;
+  int get rustContentHash => -1643323983;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -156,6 +156,9 @@ abstract class RustLibApi extends BaseApi {
       {required String collectionId,
       required int keyEpoch,
       required U8Array32 cmk});
+
+  Future<bool> crateFrbApiMobileRevokeRefreshSession(
+      {required String cloudBaseUrl, required String refreshToken});
 
   Future<BigInt> crateFrbApiMobileSyncNow();
 
@@ -711,12 +714,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<bool> crateFrbApiMobileRevokeRefreshSession(
+      {required String cloudBaseUrl, required String refreshToken}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(cloudBaseUrl, serializer);
+        sse_encode_String(refreshToken, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 19, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFrbApiMobileRevokeRefreshSessionConstMeta,
+      argValues: [cloudBaseUrl, refreshToken],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFrbApiMobileRevokeRefreshSessionConstMeta =>
+      const TaskConstMeta(
+        debugName: "mobile_revoke_refresh_session",
+        argNames: ["cloudBaseUrl", "refreshToken"],
+      );
+
+  @override
   Future<BigInt> crateFrbApiMobileSyncNow() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 19, port: port_);
+            funcId: 20, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_u_64,
@@ -739,7 +769,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
+            funcId: 21, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_sync_runtime,
@@ -765,7 +795,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(collectionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 21, port: port_);
+            funcId: 22, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -807,7 +837,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(startsAt, serializer);
         sse_encode_opt_String(endsAt, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 22, port: port_);
+            funcId: 23, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_pim_item,

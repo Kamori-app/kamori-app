@@ -1,5 +1,6 @@
 //! Security-space API models.
 
+use crypto_core_lib::operation_envelope::OperationEnvelopeV1;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -121,9 +122,22 @@ pub struct RecoverySpaceKeyPackage {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RevokeSpaceMemberRequest {
+    pub rotation_id: Uuid,
     pub expected_key_epoch: u32,
     pub new_key_epoch: u32,
+    #[serde(with = "serde_bytes")]
+    pub new_encrypted_metadata: Vec<u8>,
     pub remaining_device_packages: Vec<DeviceKeyPackage>,
+    pub remaining_recovery_packages: Vec<MemberRecoveryKeyPackage>,
+    pub snapshots: Vec<OperationEnvelopeV1>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MemberRecoveryKeyPackage {
+    pub user_id: Uuid,
+    pub key_epoch: u32,
+    #[serde(with = "serde_bytes")]
+    pub encrypted_key_package: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

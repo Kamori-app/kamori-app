@@ -28,6 +28,8 @@ services:
       - /etc/kamori/postgres-ca.crt:/run/secrets/postgres-ca.crt:ro
       - /etc/kamori/postgres-client.crt:/run/secrets/postgres-client.crt:ro
       - /etc/kamori/postgres-client.key:/run/secrets/postgres-client.key:ro
+      - /etc/kamori/secrets/opaque-server-setup:/run/secrets/opaque-server-setup:ro
+      - /etc/kamori/secrets/refresh-rotation-key:/run/secrets/refresh-rotation-key:ro
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,size=64m

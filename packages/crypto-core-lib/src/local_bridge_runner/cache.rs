@@ -11,6 +11,18 @@ use crate::operation_envelope::OperationEnvelopeV1;
 
 const DEFAULT_SYNC_SCOPE: &str = "workspace:personal";
 
+#[derive(Clone, Debug)]
+pub(crate) struct CachedOperationState {
+    pub(crate) client_op_id: Uuid,
+    pub(crate) collection_id: String,
+    pub(crate) stream_id: Uuid,
+    pub(crate) logical_resource_id: String,
+    pub(crate) materialized_resource_id: String,
+    pub(crate) kind: DavResourceKind,
+    pub(crate) payload: Option<String>,
+    pub(crate) deleted: bool,
+}
+
 fn normalize_sync_scope(scope: &str) -> &str {
     let trimmed = scope.trim();
     if trimmed.is_empty() {
@@ -169,6 +181,20 @@ impl LocalCache {
                 PRIMARY KEY (collection_id, resource_id)
             );
 
+            CREATE TABLE IF NOT EXISTS operation_states (
+                client_op_id TEXT PRIMARY KEY,
+                collection_id TEXT NOT NULL,
+                stream_id TEXT NOT NULL,
+                logical_resource_id TEXT NOT NULL,
+                materialized_resource_id TEXT NOT NULL,
+                resource_kind TEXT NOT NULL,
+                payload TEXT,
+                deleted INTEGER NOT NULL CHECK (deleted IN (0, 1))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_operation_states_resource
+                ON operation_states (collection_id, logical_resource_id);
+
             CREATE TABLE IF NOT EXISTS operation_outbox (
                 client_op_id TEXT PRIMARY KEY,
                 envelope BLOB NOT NULL,
@@ -194,6 +220,16 @@ impl LocalCache {
             WHERE id = 1
             ON CONFLICT(scope) DO NOTHING;
             "#,
+        )?;
+        ensure_column(
+            &conn,
+            "operation_states",
+            "stream_id",
+            "ALTER TABLE operation_states ADD COLUMN stream_id TEXT",
+        )?;
+        conn.execute(
+            "UPDATE operation_states SET stream_id = logical_resource_id WHERE stream_id IS NULL",
+            [],
         )?;
         Ok(())
     }
@@ -443,6 +479,76 @@ impl LocalCache {
         Ok(())
     }
 
+    pub(crate) fn load_operation_state(
+        &self,
+        client_op_id: Uuid,
+    ) -> Result<Option<CachedOperationState>> {
+        let conn = self.connect()?;
+        conn.query_row(
+            r#"
+            SELECT client_op_id, collection_id, stream_id, logical_resource_id,
+                   materialized_resource_id, resource_kind, payload, deleted
+            FROM operation_states WHERE client_op_id = ?1
+            "#,
+            params![client_op_id.to_string()],
+            map_operation_state,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub(crate) fn store_operation_state(&self, state: &CachedOperationState) -> Result<()> {
+        self.connect()?.execute(
+            r#"
+            INSERT INTO operation_states (
+                client_op_id, collection_id, stream_id, logical_resource_id,
+                materialized_resource_id, resource_kind, payload, deleted
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(client_op_id) DO UPDATE SET
+                collection_id = excluded.collection_id,
+                stream_id = excluded.stream_id,
+                logical_resource_id = excluded.logical_resource_id,
+                materialized_resource_id = excluded.materialized_resource_id,
+                resource_kind = excluded.resource_kind,
+                payload = excluded.payload,
+                deleted = excluded.deleted
+            "#,
+            params![
+                state.client_op_id.to_string(),
+                state.collection_id,
+                state.stream_id.to_string(),
+                state.logical_resource_id,
+                state.materialized_resource_id,
+                state.kind.route_prefix(),
+                state.payload,
+                i64::from(state.deleted),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn list_head_states(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<CachedOperationState>> {
+        let conn = self.connect()?;
+        let mut statement = conn.prepare(
+            r#"
+            SELECT state.client_op_id, state.collection_id, state.stream_id,
+                   state.logical_resource_id, state.materialized_resource_id,
+                   state.resource_kind, state.payload, state.deleted
+            FROM resource_heads head
+            JOIN operation_states state ON state.client_op_id = head.client_op_id
+            WHERE head.collection_id = ?1
+            ORDER BY state.logical_resource_id
+            "#,
+        )?;
+        statement
+            .query_map(params![collection_id], map_operation_state)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     pub(crate) fn delete_resource(
         &self,
         kind: DavResourceKind,
@@ -548,6 +654,53 @@ impl LocalCache {
         )?;
         Ok(())
     }
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, migration_sql: &str) -> Result<()> {
+    let mut statement = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(());
+        }
+    }
+    conn.execute(migration_sql, [])?;
+    Ok(())
+}
+
+fn map_operation_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedOperationState> {
+    let kind: String = row.get(5)?;
+    let kind = match kind.as_str() {
+        "carddav" => DavResourceKind::Contact,
+        "caldav" => DavResourceKind::Calendar,
+        "notes" => DavResourceKind::Note,
+        _ => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                5,
+                rusqlite::types::Type::Text,
+                format!("unsupported cached resource kind {kind:?}").into(),
+            ));
+        }
+    };
+    let client_op_id: String = row.get(0)?;
+    let client_op_id = Uuid::parse_str(&client_op_id).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let stream_id: String = row.get(2)?;
+    let stream_id = Uuid::parse_str(&stream_id).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(CachedOperationState {
+        client_op_id,
+        collection_id: row.get(1)?,
+        stream_id,
+        logical_resource_id: row.get(3)?,
+        materialized_resource_id: row.get(4)?,
+        kind,
+        payload: row.get(6)?,
+        deleted: row.get::<_, i64>(7)? != 0,
+    })
 }
 
 fn record_dav_change(
