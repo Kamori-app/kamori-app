@@ -53,12 +53,17 @@ build_images() {
 
 write_opaque_setup() {
   if [[ -f "$runtime_dir/opaque-server-setup" ]]; then
+    # The acceptance container runs as UID 10001, which is intentionally
+    # different from the host user that generates this file. The parent
+    # directory remains 0700, so making the file container-readable does not
+    # expose it to other host users while keeping Docker and Podman portable.
+    chmod 0644 "$runtime_dir/opaque-server-setup"
     return
   fi
   setup_tmp="$runtime_dir/opaque-server-setup.tmp"
   "${compose[@]}" --profile tools run --rm --no-deps opaque-setup > "$setup_tmp"
   test -s "$setup_tmp"
-  chmod 0600 "$setup_tmp"
+  chmod 0644 "$setup_tmp"
   mv "$setup_tmp" "$runtime_dir/opaque-server-setup"
 }
 
