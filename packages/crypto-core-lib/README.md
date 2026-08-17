@@ -79,6 +79,19 @@ Run core tests:
 cargo test -p crypto-core-lib
 ```
 
+The default test run includes `tests/dav_conformance.rs`, a black-box suite
+that starts the embedded listener on an operating-system-assigned loopback
+port and exercises it through HTTP. It covers dedicated Basic Auth, discovery,
+CalDAV/CardDAV resource lifecycle, conditional writes and deletes, query and
+multiget reports, and RFC 6578 sync tokens/tombstones. It does not replace the
+release compatibility matrix against real third-party DAV clients.
+
+Run only that suite:
+
+```bash
+cargo test -p crypto-core-lib --test dav_conformance
+```
+
 Run FRB-enabled tests:
 
 ```bash
