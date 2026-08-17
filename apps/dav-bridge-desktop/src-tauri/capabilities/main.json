@@ -1,0 +1,6 @@
+{
+  "identifier": "main-window",
+  "description": "Restricts IPC to the explicitly allowed Kamori app commands for the main window.",
+  "windows": ["main"],
+  "permissions": ["default"]
+}

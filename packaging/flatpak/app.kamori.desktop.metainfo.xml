@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.kamori.desktop</id>
+  <name>Kamori</name>
+  <summary>Encrypted PIM client and local DAV bridge</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <description>
+    <p>Kamori connects to end-to-end encrypted calendar, task, and contact spaces and exposes an optional loopback-only CalDAV/CardDAV bridge.</p>
+  </description>
+  <launchable type="desktop-id">app.kamori.desktop.desktop</launchable>
+  <url type="homepage">https://kamori.app</url>
+  <provides>
+    <binary>kamori</binary>
+  </provides>
+</component>

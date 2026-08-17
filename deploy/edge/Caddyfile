@@ -1,0 +1,44 @@
+{
+  auto_https off
+  admin off
+}
+
+:8080 {
+  encode zstd gzip
+
+  @api host api.kamori.app
+  handle @api {
+    reverse_proxy cloud:8080
+  }
+
+  @admin host admin.kamori.app
+  handle @admin {
+    header {
+      X-Frame-Options "DENY"
+      X-Content-Type-Options "nosniff"
+      Referrer-Policy "no-referrer"
+      Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+      Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.kamori.app; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    }
+    reverse_proxy admin:3000
+  }
+
+  @web host kamori.app app.kamori.app
+  handle @web {
+    header {
+      X-Frame-Options "DENY"
+      X-Content-Type-Options "nosniff"
+      Referrer-Policy "strict-origin-when-cross-origin"
+      Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+      Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.kamori.app; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    }
+    reverse_proxy web:3000
+  }
+
+  # Hetzner health checks do not guarantee an application Host header.
+  handle /health/ready {
+    reverse_proxy cloud:8080
+  }
+
+  respond 404
+}

@@ -1,0 +1,66 @@
+# -----------------------------------------------------------------------------
+# Cloud-server Docker build context ignore rules
+# Optimized for root-context build:
+#   docker build -f apps/cloud-server/Dockerfile .
+# -----------------------------------------------------------------------------
+
+# VCS
+.git
+**/.git
+.gitignore
+**/.gitignore
+.github
+
+# Rust artifacts
+/target
+**/target
+**/*.rs.bk
+**/*.profraw
+**/*.profdata
+**/coverage
+**/coverage/**
+**/*.lcov
+
+# Node / Turbo artifacts
+node_modules
+**/node_modules
+.pnpm-store
+.npm
+.yarn
+.turbo
+**/.turbo
+.svelte-kit
+**/.svelte-kit
+.vite
+**/.vite
+dist
+**/dist
+build
+**/build
+
+# Flutter artifacts
+apps/dav-bridge-mobile/.dart_tool
+apps/dav-bridge-mobile/build
+apps/dav-bridge-mobile/ios/Pods
+apps/dav-bridge-mobile/macos/Pods
+apps/dav-bridge-mobile/android/.gradle
+apps/dav-bridge-mobile/android/app/build
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+**/*.swp
+**/*.swo
+
+# Local secrets and env files
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Local docker-compose overrides
+*docker-compose*.yml

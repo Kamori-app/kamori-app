@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Kamori web portal preview</title>
+  <desc id="desc">Illustrative screenshot-style panel of the Kamori web portal dashboard.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f5f8f6" />
+      <stop offset="100%" stop-color="#e9f1ec" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)" />
+  <rect x="24" y="24" width="1152" height="672" rx="20" fill="#ffffff" stroke="#d5dfd9" />
+  <rect x="56" y="56" width="1088" height="64" rx="14" fill="#eef5f1" />
+  <rect x="76" y="74" width="220" height="28" rx="10" fill="#2b4b43" opacity="0.9" />
+  <rect x="864" y="74" width="260" height="28" rx="10" fill="#c7d7cf" />
+  <rect x="56" y="148" width="700" height="236" rx="16" fill="#f8fbf9" stroke="#d7e2db" />
+  <rect x="80" y="176" width="220" height="24" rx="8" fill="#2b4b43" opacity="0.8" />
+  <rect x="80" y="216" width="640" height="12" rx="6" fill="#d9e4de" />
+  <rect x="80" y="238" width="580" height="12" rx="6" fill="#d9e4de" />
+  <rect x="80" y="260" width="610" height="12" rx="6" fill="#d9e4de" />
+  <rect x="80" y="296" width="240" height="48" rx="12" fill="#2f8f76" />
+  <rect x="780" y="148" width="364" height="236" rx="16" fill="#f8fbf9" stroke="#d7e2db" />
+  <rect x="804" y="176" width="190" height="22" rx="8" fill="#2b4b43" opacity="0.8" />
+  <rect x="804" y="216" width="300" height="14" rx="7" fill="#d9e4de" />
+  <rect x="804" y="242" width="280" height="14" rx="7" fill="#d9e4de" />
+  <rect x="804" y="268" width="250" height="14" rx="7" fill="#d9e4de" />
+  <rect x="56" y="408" width="1088" height="256" rx="16" fill="#f8fbf9" stroke="#d7e2db" />
+  <rect x="80" y="436" width="260" height="24" rx="8" fill="#2b4b43" opacity="0.75" />
+  <rect x="80" y="474" width="1040" height="18" rx="9" fill="#d9e4de" />
+  <rect x="80" y="506" width="1040" height="18" rx="9" fill="#d9e4de" />
+  <rect x="80" y="538" width="760" height="18" rx="9" fill="#d9e4de" />
+  <rect x="80" y="582" width="200" height="44" rx="12" fill="#374954" />
+</svg>

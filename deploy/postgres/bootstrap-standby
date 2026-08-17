@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  echo "bootstrap-standby must run as root" >&2
+  exit 1
+fi
+source /usr/local/lib/kamori/postgres-lib
+load_postgres_env
+if [[ ${CONFIRM_EMPTY_STANDBY:-} != "EMPTY ${POSTGRES_STANDBY_IP}" ]]; then
+  echo "set CONFIRM_EMPTY_STANDBY='EMPTY ${POSTGRES_STANDBY_IP}' to initialize the standby" >&2
+  exit 1
+fi
+install_postgres_packages
+require_tls_material
+test -r /etc/kamori/tls/postgres-client.crt
+test -r /etc/kamori/tls/postgres-client.key
+write_pgbackrest_config
+systemctl stop postgresql.service || true
+install -d -o postgres -g postgres -m 0700 "$POSTGRES_DATA_DIR"
+find "$POSTGRES_DATA_DIR" -mindepth 1 -delete
+
+export PGPASSWORD=$POSTGRES_REPLICATION_PASSWORD
+runuser -u postgres --preserve-environment -- pg_basebackup \
+  --dbname="host=${POSTGRES_PRIMARY_IP} port=5432 user=kamori_replication sslmode=verify-full sslrootcert=/etc/kamori/tls/postgres-ca.crt sslcert=/etc/kamori/tls/postgres-client.crt sslkey=/etc/kamori/tls/postgres-client.key" \
+  --pgdata="$POSTGRES_DATA_DIR" --format=plain --wal-method=stream \
+  --slot=kamori_standby --write-recovery-conf --progress
+unset PGPASSWORD
+write_postgres_config "$POSTGRES_STANDBY_IP" always
+systemctl enable --now postgresql.service
+runuser -u postgres -- psql --set=ON_ERROR_STOP=1 --command='SELECT pg_is_in_recovery();'

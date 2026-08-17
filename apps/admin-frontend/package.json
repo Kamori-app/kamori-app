@@ -1,0 +1,27 @@
+{
+  "name": "admin-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "svelte-kit sync && vite build",
+    "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json",
+    "lint": "bun run check",
+    "test": "bun run check"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.3",
+    "@sveltejs/kit": "^2.70.2",
+    "svelte": "^5.56.9"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@typescript/native": "npm:typescript@7",
+    "svelte-check": "^4.7.6",
+    "typescript": "~6",
+    "vite": "^8.2.1"
+  }
+}

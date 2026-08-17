@@ -1,0 +1,72 @@
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      javascript:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust:
+        patterns: ["*"]
+
+  - package-ecosystem: pub
+    directory: /apps/dav-bridge-mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      flutter:
+        patterns: ["*"]
+
+  - package-ecosystem: gradle
+    directory: /apps/dav-bridge-mobile/android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: gomod
+    directory: /infra
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      infrastructure:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      workflows:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /apps/cloud-server
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/web-frontend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/admin-frontend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /deploy/edge
+    schedule:
+      interval: weekly

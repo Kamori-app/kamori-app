@@ -1,0 +1,155 @@
+name: kamori-acceptance
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    environment:
+      POSTGRES_USER: kamori
+      POSTGRES_PASSWORD: kamori-acceptance
+      POSTGRES_DB: kamori_acceptance
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kamori -d kamori_acceptance"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  valkey:
+    image: valkey/valkey:9-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: kamori-acceptance
+      MINIO_ROOT_PASSWORD: kamori-acceptance-secret
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until mc alias set local http://minio:9000 kamori-acceptance kamori-acceptance-secret;
+        do sleep 1; done;
+        mc mb --ignore-existing local/kamori-acceptance;
+        mc anonymous set none local/kamori-acceptance
+
+  opaque-setup:
+    profiles: ["tools"]
+    image: kamori/cloud-server:acceptance
+    command: ["opaque-setup", "generate"]
+
+  migrate:
+    image: kamori/cloud-server:acceptance
+    build:
+      context: ../..
+      dockerfile: apps/cloud-server/Dockerfile
+    command: ["migrate"]
+    environment:
+      KAMORI_DATABASE_URL: postgres://kamori:kamori-acceptance@postgres:5432/kamori_acceptance
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  cloud:
+    image: kamori/cloud-server:acceptance
+    build:
+      context: ../..
+      dockerfile: apps/cloud-server/Dockerfile
+    env_file:
+      - .runtime/cloud.env
+    environment:
+      KAMORI_BIND_ADDR: 0.0.0.0:8080
+      KAMORI_DATABASE_URL: postgres://kamori:kamori-acceptance@postgres:5432/kamori_acceptance
+      KAMORI_VALKEY_URL: valkey://valkey:6379/0
+      KAMORI_VALKEY_KEY_PREFIX: "kamori:acceptance:"
+      KAMORI_REGISTRATION_ENABLED: "true"
+      KAMORI_BETA_ACCOUNT_LIMIT: "100"
+      KAMORI_AUTH_RATE_LIMIT_PER_MINUTE: "1000"
+      KAMORI_API_RATE_LIMIT_PER_MINUTE: "10000"
+      KAMORI_CORS_ALLOW_ORIGINS: http://127.0.0.1:14173,http://localhost:14173,http://127.0.0.1:14174,http://localhost:14174
+      KAMORI_CORS_ALLOW_CREDENTIALS: "true"
+      KAMORI_WEBAUTHN_RP_ID: localhost
+      KAMORI_WEBAUTHN_RP_ORIGIN: http://localhost:14173
+      KAMORI_ADMIN_WEBAUTHN_RP_ORIGIN: http://localhost:14174
+      KAMORI_WEB_REFRESH_COOKIE_SECURE: "false"
+      KAMORI_WEB_REFRESH_COOKIE_NAME: kamori_rt
+      KAMORI_WEB_CSRF_COOKIE_NAME: kamori_csrf
+      KAMORI_OBJECT_STORE_ENDPOINT: http://minio:9000
+      KAMORI_OBJECT_STORE_REGION: us-east-1
+      KAMORI_OBJECT_STORE_BUCKET: kamori-acceptance
+      KAMORI_OBJECT_STORE_ACCESS_KEY_ID: kamori-acceptance
+      KAMORI_OBJECT_STORE_SECRET_ACCESS_KEY: kamori-acceptance-secret
+      KAMORI_OBJECT_STORE_ALLOW_HTTP: "true"
+      KAMORI_MAX_BLOB_BYTES: "2097152"
+      KAMORI_ACCOUNT_STORAGE_BYTES: "2097152"
+      KAMORI_OWNER_MONTHLY_EGRESS_BYTES: "10485760"
+      KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES: "10485760"
+      KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND: "10485760"
+      KAMORI_OPAQUE_SERVER_SETUP_FILE: /run/secrets/opaque-server-setup
+    volumes:
+      - ./.runtime/opaque-server-setup:/run/secrets/opaque-server-setup:ro
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cloud-server", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  web:
+    image: kamori/web:acceptance
+    build:
+      context: ../..
+      dockerfile: apps/web-frontend/Dockerfile
+      args:
+        VITE_KAMORI_API_BASE_URL: http://127.0.0.1:18080
+        VITE_KAMORI_WEB_CSRF_COOKIE_NAME: kamori_csrf
+    environment:
+      ORIGIN: http://127.0.0.1:14173
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:14173:3000"
+    depends_on:
+      cloud:
+        condition: service_healthy
+
+  admin:
+    image: kamori/admin:acceptance
+    build:
+      context: ../..
+      dockerfile: apps/admin-frontend/Dockerfile
+      args:
+        VITE_KAMORI_API_BASE_URL: http://127.0.0.1:18080
+    environment:
+      ORIGIN: http://127.0.0.1:14174
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:14174:3000"
+    depends_on:
+      cloud:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  minio-data:

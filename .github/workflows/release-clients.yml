@@ -1,0 +1,349 @@
+name: Build client release artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package
+        required: true
+        type: string
+
+concurrency:
+  group: client-release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+jobs:
+  release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Create immutable draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
+          gh release create "$RELEASE_TAG" --verify-tag --draft
+          --title "Kamori $RELEASE_TAG" --generate-notes
+      - name: Verify artifact versions match the tag
+        run: |
+          version="${RELEASE_TAG#v}"
+          test "$(jq -r .version package.json)" = "$version"
+          test "$(jq -r .version apps/dav-bridge-desktop/src-tauri/tauri.conf.json)" = "$version"
+          test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/dav-bridge-desktop/src-tauri/Cargo.toml | head -1)" = "$version"
+          test "$(sed -n 's/^version: \([^+]*\).*/\1/p' apps/dav-bridge-mobile/pubspec.yaml | head -1)" = "$version"
+
+  desktop:
+    name: Desktop ${{ matrix.platform }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+            tauri_args: ""
+          - platform: macos
+            os: macos-15
+            tauri_args: ""
+          - platform: windows
+            os: windows-2025
+            tauri_args: --config src-tauri/tauri.release.conf.json
+    runs-on: ${{ matrix.os }}
+    environment: release
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - name: Restore Bun package cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-targets: false
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          flatpak flatpak-builder zstd
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Require macOS signing and notarization credentials
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_SIGNING_IDENTITY"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+      - name: Import Windows signing certificate
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+            throw 'Windows signing secrets are required.'
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'kamori-release.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          $releaseConfig = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT
+                digestAlgorithm = 'sha256'
+                timestampUrl = 'http://timestamp.digicert.com'
+              }
+            }
+          } | ConvertTo-Json -Depth 4
+          Set-Content -Path apps/dav-bridge-desktop/src-tauri/tauri.release.conf.json -Value $releaseConfig
+      - name: Build and attach native bundles
+        uses: tauri-apps/tauri-action@1ddc7b49b13c3038297360482fcb3e058764d7c9 # v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: apps/dav-bridge-desktop
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseDraft: true
+          args: ${{ matrix.tauri_args }}
+      - name: Build Flatpak and repository bundle
+        if: matrix.platform == 'linux'
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          FLATPAK_GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          test -n "$FLATPAK_GPG_PRIVATE_KEY"
+          test -n "$FLATPAK_GPG_KEY_ID"
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+          install -Dm755 target/release/dav-bridge-desktop packaging/flatpak/dist/kamori
+          install -Dm644 apps/dav-bridge-desktop/src-tauri/icons/icon.png packaging/flatpak/dist/icon.png
+          printf '%s' "$FLATPAK_GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          sign_args=("--gpg-sign=$FLATPAK_GPG_KEY_ID")
+          flatpak-builder --user --force-clean --repo=flatpak-repo "${sign_args[@]}" flatpak-build packaging/flatpak/app.kamori.desktop.yml
+          flatpak-builder --run flatpak-build packaging/flatpak/app.kamori.desktop.yml sh -c '! ldd /app/bin/kamori | grep -q "not found"'
+          flatpak build-bundle "${sign_args[@]}" flatpak-repo Kamori.flatpak app.kamori.desktop
+          find target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec gpg --batch --yes --armor --detach-sign --local-user "$FLATPAK_GPG_KEY_ID" {} \;
+          tar --zstd -cf kamori-flatpak-repository.tar.zst flatpak-repo
+      - name: Attach Flatpak artifacts
+        if: matrix.platform == 'linux'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            Kamori.flatpak
+            kamori-flatpak-repository.tar.zst
+            target/release/bundle/**/*.asc
+
+  android:
+    name: Android signed artifacts
+    needs: release
+    runs-on: ubuntu-24.04
+    environment: release
+    defaults:
+      run:
+        working-directory: apps/dav-bridge-mobile
+    env:
+      KAMORI_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/apps/dav-bridge-mobile/android/release-keystore.jks
+      KAMORI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KAMORI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KAMORI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+          targets: armv7-linux-androideabi,aarch64-linux-android,i686-linux-android,x86_64-linux-android
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-targets: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          cache-provider: basic
+      - name: Install signing identity
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release-keystore.jks
+          chmod 0600 android/release-keystore.jks
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Build Play bundle and universal APK
+        run: |
+          test -n "$KAMORI_ANDROID_KEYSTORE_PASSWORD"
+          test -n "$KAMORI_ANDROID_KEY_ALIAS"
+          test -n "$KAMORI_ANDROID_KEY_PASSWORD"
+          flutter build appbundle --release --dart-define=KAMORI_USE_MOCK_RUST=false
+          flutter build apk --release --dart-define=KAMORI_USE_MOCK_RUST=false
+          unzip -l build/app/outputs/flutter-apk/app-release.apk | grep -q 'lib/arm64-v8a/libcrypto_core_lib.so'
+          unzip -p build/app/outputs/flutter-apk/app-release.apk lib/arm64-v8a/libcrypto_core_lib.so > "$RUNNER_TEMP/libcrypto_core_lib.so"
+          readelf --dyn-syms "$RUNNER_TEMP/libcrypto_core_lib.so" | grep -q frb_pde_ffi_dispatcher_primary
+      - name: Build Accrescent APK set
+        run: |
+          curl --fail --location --output bundletool.jar https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo 'a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  bundletool.jar' | sha256sum --check --strict
+          java -jar bundletool.jar build-apks \
+            --bundle=build/app/outputs/bundle/release/app-release.aab \
+            --output=build/app/outputs/bundle/release/kamori.apks \
+            --ks="$KAMORI_ANDROID_KEYSTORE_PATH" \
+            --ks-pass="pass:$KAMORI_ANDROID_KEYSTORE_PASSWORD" \
+            --ks-key-alias="$KAMORI_ANDROID_KEY_ALIAS" \
+            --key-pass="pass:$KAMORI_ANDROID_KEY_PASSWORD" \
+            --overwrite
+      - name: Attach Android artifacts
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            apps/dav-bridge-mobile/build/app/outputs/bundle/release/app-release.aab
+            apps/dav-bridge-mobile/build/app/outputs/bundle/release/kamori.apks
+            apps/dav-bridge-mobile/build/app/outputs/flutter-apk/app-release.apk
+
+  ios:
+    name: iOS signed IPA
+    needs: release
+    runs-on: macos-26
+    environment: release
+    defaults:
+      run:
+        working-directory: apps/dav-bridge-mobile
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-targets: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get
+      - name: Install iOS distribution identity
+        id: ios-signing
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          test -n "$IOS_CERTIFICATE"
+          test -n "$IOS_CERTIFICATE_PASSWORD"
+          test -n "$IOS_PROVISIONING_PROFILE"
+          test -n "$IOS_KEYCHAIN_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          certificate="$RUNNER_TEMP/kamori-ios-distribution.p12"
+          profile="$RUNNER_TEMP/kamori-ios.mobileprovision"
+          profile_plist="$RUNNER_TEMP/kamori-ios-profile.plist"
+          keychain="$RUNNER_TEMP/kamori-ios-signing.keychain-db"
+          printf '%s' "$IOS_CERTIFICATE" | base64 --decode > "$certificate"
+          printf '%s' "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$profile"
+          chmod 0600 "$certificate" "$profile"
+          security create-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$IOS_KEYCHAIN_PASSWORD" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security default-keychain -d user -s "$keychain"
+          security cms -D -i "$profile" > "$profile_plist"
+          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$profile_plist")
+          profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$profile_plist")
+          profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$profile_dir"
+          installed_profile="$profile_dir/$profile_uuid.mobileprovision"
+          cp "$profile" "$installed_profile"
+          /usr/libexec/PlistBuddy -c "Set :teamID $APPLE_TEAM_ID" ios/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:app.kamori.mobile string '$profile_name'" ios/ExportOptions.plist
+          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
+          echo "profile=$installed_profile" >> "$GITHUB_OUTPUT"
+      - name: Build signed native release
+        run: |
+          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --dart-define=KAMORI_USE_MOCK_RUST=false
+          nm -gU build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Runner | grep -q _frb_pde_ffi_dispatcher_primary
+          codesign --verify --deep --strict --verbose=2 build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app
+          test -n "$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)"
+      - name: Attach signed iOS IPA
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: apps/dav-bridge-mobile/build/ios/ipa/*.ipa
+      - name: Remove iOS signing material
+        if: always()
+        env:
+          IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+          SIGNING_KEYCHAIN: ${{ steps.ios-signing.outputs.keychain }}
+          INSTALLED_PROFILE: ${{ steps.ios-signing.outputs.profile }}
+        run: |
+          if [ -n "$INSTALLED_PROFILE" ]; then rm -f "$INSTALLED_PROFILE"; fi
+          if [ -n "$SIGNING_KEYCHAIN" ]; then
+            security default-keychain -d user -s login.keychain-db
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi

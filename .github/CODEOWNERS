@@ -1,0 +1,12 @@
+# Default owner until the Kamori maintainers team is created.
+* @yujinio
+
+# Security-sensitive deployment and protocol surfaces require explicit review.
+/.github/workflows/ @yujinio
+/infra/ @yujinio
+/deploy/ @yujinio
+/apps/cloud-server/migrations/ @yujinio
+/apps/cloud-server/src/features/auth/ @yujinio
+/packages/crypto-core-lib/src/ @yujinio
+/infra/Pulumi.*.yaml @yujinio
+/SECRETS.md @yujinio

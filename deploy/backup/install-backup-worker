@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  echo "install-backup-worker must run as root" >&2
+  exit 1
+fi
+bundle_dir=${1:-.}
+test -r /etc/kamori/backup.env
+test -r /etc/kamori/tls/postgres-ca.crt
+test -r /etc/kamori/tls/jobs-client.crt
+test -r /etc/kamori/tls/jobs-client.key
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  ca-certificates postgresql-client rclone
+install -d -m 0755 /usr/local/lib/kamori
+install -m 0755 "$bundle_dir/replicate-blobs" /usr/local/lib/kamori/replicate-blobs
+install -m 0644 "$bundle_dir/kamori-blob-replication.service" /etc/systemd/system/
+install -m 0644 "$bundle_dir/kamori-blob-replication.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now kamori-blob-replication.timer

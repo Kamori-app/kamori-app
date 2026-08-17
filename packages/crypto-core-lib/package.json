@@ -1,0 +1,12 @@
+{
+  "name": "crypto-core-lib",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "../../scripts/cargo-with-sccache.sh build -p crypto-core-lib --features frb",
+    "lint": "../../scripts/cargo-with-sccache.sh clippy -p crypto-core-lib --all-targets -- -D warnings",
+    "test": "../../scripts/cargo-with-sccache.sh test -p crypto-core-lib --features frb",
+    "fast": "../../scripts/cargo-with-sccache.sh check -p crypto-core-lib --features frb --tests"
+  }
+}

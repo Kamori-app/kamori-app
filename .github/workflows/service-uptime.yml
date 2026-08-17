@@ -1,0 +1,26 @@
+name: Hosted endpoint probe
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: hosted-endpoint-probe
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe public beta endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: API readiness
+        run: curl --fail --silent --show-error --max-time 10 --retry 3 --retry-all-errors https://api.kamori.app/health/ready
+      - name: User web
+        run: curl --fail --silent --show-error --max-time 10 --retry 3 --retry-all-errors https://app.kamori.app/
+      - name: Operator console
+        run: curl --fail --silent --show-error --max-time 10 --retry 3 --retry-all-errors https://admin.kamori.app/
