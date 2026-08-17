@@ -22,7 +22,7 @@ ARG VITE_KAMORI_API_BASE_URL=https://api.kamori.app
 ENV VITE_KAMORI_API_BASE_URL=$VITE_KAMORI_API_BASE_URL
 RUN bun run --filter admin-frontend build
 
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 ORIGIN=https://admin.kamori.app
 WORKDIR /workspace/apps/admin-frontend
 COPY --from=runtime-dependencies /workspace/node_modules /workspace/node_modules
