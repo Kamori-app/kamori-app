@@ -9,7 +9,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "build/**", "target/**", "pkg/**", ".turbo/**"]
+      "inputs": ["$TURBO_DEFAULT$", "!dist/.gitkeep"],
+      "outputs": [
+        "dist/**",
+        "build/**",
+        ".svelte-kit/**",
+        "pkg/**"
+      ]
     },
     "dev": {
       "cache": false,
