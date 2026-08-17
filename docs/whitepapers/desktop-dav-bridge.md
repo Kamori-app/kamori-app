@@ -98,5 +98,7 @@ signed Kamori tombstone after the client's revision check succeeds.
 The MVP supports authenticated direct collection URLs, discovery within that
 collection, reads, conditional writes, and conditional deletes. It does not
 yet promise every optional CalDAV/CardDAV extension, scheduling, or every
-client's proprietary discovery flow. The compatibility matrix and protocol
-conformance suite are explicit public-beta exit criteria in the roadmap.
+client's proprietary discovery flow. An automated black-box protocol suite
+checks the supported contract over a real loopback HTTP listener on every full
+CI run. The separate compatibility matrix against named third-party clients
+remains an explicit public-beta exit criterion in the roadmap.

@@ -124,6 +124,7 @@ impl LocalBridgeRunner {
         });
         lifecycle.shutdown_tx = Some(tx);
         lifecycle.handle = Some(handle);
+        lifecycle.local_addr = Some(addr);
         Ok(())
     }
 
@@ -136,12 +137,22 @@ impl LocalBridgeRunner {
         if let Some(handle) = lifecycle.handle.take() {
             let _ = handle.await;
         }
+        lifecycle.local_addr = None;
         Ok(())
     }
 
     #[cfg(feature = "local-bridge")]
     pub async fn is_running(&self) -> bool {
         self.lifecycle.lock().await.handle.is_some()
+    }
+
+    /// Returns the address currently used by the embedded DAV listener.
+    ///
+    /// This can differ from [`Self::bind_addr`] when the configured port is
+    /// zero and the operating system selects an available ephemeral port.
+    #[cfg(feature = "local-bridge")]
+    pub async fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.lifecycle.lock().await.local_addr
     }
 
     pub async fn register_collection_key(&self, collection_id: impl Into<String>, key: [u8; 32]) {
@@ -270,6 +281,7 @@ impl LocalBridgeRunner {
 struct ServerLifecycle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<()>>,
+    local_addr: Option<std::net::SocketAddr>,
 }
 
 #[cfg(feature = "local-bridge")]

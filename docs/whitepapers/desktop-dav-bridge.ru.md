@@ -63,3 +63,7 @@ Bridge слушает только `127.0.0.1` — адрес этого ком�
 MVP поддерживает защищённые прямые URL коллекций, discovery внутри коллекции,
 чтение, conditional write и conditional delete. Не обещаются все опциональные
 расширения CalDAV/CardDAV, scheduling и proprietary discovery flows.
+Автоматический black-box suite проверяет поддерживаемый контракт через реальный
+loopback HTTP listener при каждом полном запуске CI. Отдельная release matrix с
+именованными сторонними DAV-клиентами остаётся обязательным условием выхода из
+public beta.
