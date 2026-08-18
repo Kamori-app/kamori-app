@@ -64,7 +64,8 @@ GitHub environment. It must not hold database, JWT, B2, or Pulumi secrets.
 The workflow builds and pushes immutable API, web, operator-console, and edge
 digests, applies migrations once, then rolls app node 1 and app node 2 as one
 release. Each node checks `/health/ready`; a failed check restores the complete
-previous release automatically.
+previous release automatically. CI/CD does not probe public endpoints after
+deployment; the dedicated external monitoring service owns that responsibility.
 
 ## 4. Create the first operator
 
@@ -92,10 +93,9 @@ fresh key assertion, TOTP, reason, and exact confirmation.
 - Prometheus sees both app nodes and all five node exporters.
 - Alertmanager delivers a synthetic critical alert to a human.
 - Quota alerts at account 80/95% and egress 10/14 TB are loaded.
-- The public uptime monitor checks `/health/ready` from outside Hetzner.
-- The GitHub-hosted `Hosted endpoint probe` succeeds and its failure
-  notifications reach a human. It is the beta external probe, not an SLA-grade
-  monitoring substitute; replace or supplement it before paid B2B commitments.
+- The dedicated external monitoring service checks API readiness, user web,
+  operator console, DNS, and TLS from outside Hetzner, and its failure
+  notifications reach a human. GitHub Actions is not used for uptime checks.
 - Legal templates are reviewed and a real operator exists; until then public
   registration remains closed regardless of technical readiness.
 - Two operator security keys are enrolled and tested from separate storage
