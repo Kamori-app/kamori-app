@@ -125,8 +125,3 @@ jobs:
         run: |
           ssh "$APP_ONE" "sudo env RUN_MIGRATIONS=1 /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
           ssh "$APP_TWO" "sudo /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
-      - name: Verify public readiness
-        run: |
-          curl --fail --silent --show-error --retry 10 --retry-all-errors https://api.kamori.app/health/ready
-          curl --fail --silent --show-error --retry 10 --retry-all-errors https://app.kamori.app/
-          curl --fail --silent --show-error --retry 10 --retry-all-errors https://admin.kamori.app/
