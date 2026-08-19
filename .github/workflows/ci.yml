@@ -50,9 +50,12 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           # The Azure-local Ubuntu mirror has repeatedly stalled while serving
-          # WebKit packages. Ubuntu's GeoDNS endpoint selects a healthy mirror.
+          # WebKit packages. New runner images resolve their mirror through an
+          # apt mirror-list file, so replace both forms with Ubuntu's GeoDNS
+          # endpoint instead of only rewriting a direct Azure URL.
           sudo sed -i \
-            's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get \
             -o Acquire::Retries=3 \
