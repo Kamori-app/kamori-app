@@ -1,3 +1,13 @@
 name: kamori-hosted
 runtime: go
-description: Kamori hosted MVP infrastructure on Hetzner with B2 and Hetzner S3-compatible storage
+description: Kamori hosted MVP infrastructure on Hetzner with Porkbun DNS, B2, and Hetzner S3-compatible storage
+requiredPulumiVersion: "=3.258.0"
+backend:
+  url: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true
+packages:
+  porkbun:
+    source: terraform-provider
+    version: 1.3.0
+    parameters:
+      - marcfrederick/porkbun
+      - 1.3.3

@@ -7,8 +7,8 @@ import (
 
 func TestRenderCloudEnvQuotesSecretValuesAndKeepsRequiredGuards(t *testing.T) {
 	env := renderCloudEnv(cloudEnvSecrets{
-		databaseURL:          "postgres://app:p@ss@db/kamori?sslmode=require",
-		valkeyURL:            "redis://:cache secret@valkey:6379/0",
+		databasePassword:     "p@ss:/?#[]% word",
+		valkeyPassword:       "cache@:/?#[]% word",
 		jwtSecret:            "jwt\nvalue",
 		adminTotpKek:         "admin-key",
 		authTotpKek:          "auth-key",
@@ -18,8 +18,8 @@ func TestRenderCloudEnvQuotesSecretValuesAndKeepsRequiredGuards(t *testing.T) {
 	}, "https://s3.example.test", "eu-test-1", "ciphertext")
 
 	required := []string{
-		`KAMORI_DATABASE_URL="postgres://app:p@ss@db/kamori?sslmode=require"`,
-		`KAMORI_VALKEY_URL="redis://:cache secret@valkey:6379/0"`,
+		`KAMORI_DATABASE_URL="postgres://kamori_app:p%40ss%3A%2F%3F%23%5B%5D%25%20word@10.42.0.21:5432/kamori?sslmode=verify-full&sslrootcert=/run/secrets/postgres-ca.crt&sslcert=/run/secrets/postgres-client.crt&sslkey=/run/secrets/postgres-client.key"`,
+		`KAMORI_VALKEY_URL="redis://:cache%40%3A%2F%3F%23%5B%5D%25%20word@10.42.0.31:6379/0"`,
 		`KAMORI_JWT_SECRET="jwt\nvalue"`,
 		`KAMORI_OBJECT_STORE_SECRET_ACCESS_KEY="runtime secret"`,
 		"KAMORI_OPAQUE_SERVER_SETUP_FILE=/run/secrets/opaque-server-setup",
@@ -52,6 +52,9 @@ func TestBaseCloudInitKeepsSecretsInRootOnlyFiles(t *testing.T) {
 		"/etc/kamori/postgres-client.key",
 		"permissions: '0400'",
 		"chown, '10001:10001', /etc/kamori/cloud.env",
+		"Port 2022",
+		"port = 2022",
+		"[sshd, -t]",
 	} {
 		if !strings.Contains(cloudInit, expected) {
 			t.Fatalf("cloud-init is missing %q", expected)

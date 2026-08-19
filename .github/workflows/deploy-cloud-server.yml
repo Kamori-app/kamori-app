@@ -84,6 +84,8 @@ jobs:
     needs: image
     runs-on: [self-hosted, linux, x64, kamori-beta]
     environment: production
+    env:
+      SSH_PORT: "2022"
     permissions:
       contents: read
     steps:
@@ -101,8 +103,8 @@ jobs:
           APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
         run: |
           for host in "$APP_ONE" "$APP_TWO"; do
-            scp -r deploy/cloud-server "$host:/tmp/kamori-cloud-release"
-            ssh "$host" 'sudo /tmp/kamori-cloud-release/bootstrap-host /tmp/kamori-cloud-release'
+            scp -P "$SSH_PORT" -r deploy/cloud-server "$host:/tmp/kamori-cloud-release"
+            ssh -p "$SSH_PORT" "$host" 'sudo /tmp/kamori-cloud-release/bootstrap-host /tmp/kamori-cloud-release'
           done
       - name: Authenticate nodes to GHCR
         env:
@@ -112,7 +114,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         run: |
           for host in "$APP_ONE" "$APP_TWO"; do
-            printf '%s' "$GHCR_TOKEN" | ssh "$host" "sudo docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+            printf '%s' "$GHCR_TOKEN" | ssh -p "$SSH_PORT" "$host" "sudo docker login ghcr.io --username '$GHCR_USER' --password-stdin"
           done
       - name: Migrate and roll app nodes
         env:
@@ -123,5 +125,5 @@ jobs:
           ADMIN_IMAGE: ${{ needs.image.outputs.admin-image }}
           EDGE_IMAGE: ${{ needs.image.outputs.edge-image }}
         run: |
-          ssh "$APP_ONE" "sudo env RUN_MIGRATIONS=1 /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
-          ssh "$APP_TWO" "sudo /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          ssh -p "$SSH_PORT" "$APP_ONE" "sudo env RUN_MIGRATIONS=1 /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          ssh -p "$SSH_PORT" "$APP_TWO" "sudo /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"

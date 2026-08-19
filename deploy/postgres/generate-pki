@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: generate-pki OUTPUT_DIRECTORY" >&2
+  exit 2
+fi
+
+output_dir=$1
+if [[ -e "$output_dir" ]]; then
+  echo "refusing to overwrite existing PKI directory: $output_dir" >&2
+  exit 1
+fi
+
+umask 077
+mkdir -p "$output_dir"
+temporary_dir=$(mktemp -d)
+trap 'rm -rf "$temporary_dir"' EXIT
+
+ca_key="$output_dir/postgres-ca.key"
+ca_cert="$output_dir/postgres-ca.crt"
+ca_serial="$output_dir/postgres-ca.srl"
+
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$ca_key"
+openssl req -new -x509 -sha384 -days 3650 \
+  -key "$ca_key" \
+  -subj "/CN=Kamori PostgreSQL Root CA/O=Kamori" \
+  -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" \
+  -addext "subjectKeyIdentifier=hash" \
+  -out "$ca_cert"
+
+issue_certificate() {
+  local name=$1
+  local common_name=$2
+  local extended_usage=$3
+  local subject_alt_name=$4
+  local key="$output_dir/$name.key"
+  local certificate="$output_dir/$name.crt"
+  local request="$temporary_dir/$name.csr"
+  local extensions="$temporary_dir/$name.ext"
+
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$key"
+  openssl req -new -sha384 -key "$key" -subj "/CN=$common_name/O=Kamori" -out "$request"
+  {
+    printf '%s\n' \
+      "basicConstraints=critical,CA:FALSE" \
+      "keyUsage=critical,digitalSignature" \
+      "extendedKeyUsage=$extended_usage" \
+      "subjectKeyIdentifier=hash" \
+      "authorityKeyIdentifier=keyid,issuer" \
+      "subjectAltName=$subject_alt_name"
+  } > "$extensions"
+  openssl x509 -req -sha384 -days 397 \
+    -in "$request" \
+    -CA "$ca_cert" \
+    -CAkey "$ca_key" \
+    -CAserial "$ca_serial" \
+    -CAcreateserial \
+    -extfile "$extensions" \
+    -out "$certificate"
+}
+
+issue_certificate "db-primary" "kamori-db-primary" "serverAuth" "IP:10.42.0.21"
+issue_certificate "db-standby" "kamori-db-standby" "serverAuth" "IP:10.42.0.22"
+issue_certificate "app-client" "kamori_app" "clientAuth" "URI:spiffe://kamori.app/postgres/app"
+issue_certificate "replication-client" "kamori_replication" "clientAuth" "URI:spiffe://kamori.app/postgres/replication"
+issue_certificate "jobs-client" "kamori_jobs" "clientAuth" "URI:spiffe://kamori.app/postgres/jobs"
+
+openssl verify -purpose sslserver -CAfile "$ca_cert" \
+  "$output_dir/db-primary.crt" "$output_dir/db-standby.crt"
+openssl verify -purpose sslclient -CAfile "$ca_cert" \
+  "$output_dir/app-client.crt" "$output_dir/replication-client.crt" "$output_dir/jobs-client.crt"
+
+chmod 0600 "$output_dir"/*.key
+chmod 0644 "$output_dir"/*.crt
+rm -f "$ca_serial"
+
+echo "PostgreSQL PKI created in $output_dir"
+echo "Keep postgres-ca.key offline. Do not copy it to Pulumi or any server."
