@@ -12,7 +12,13 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
-const sshPort = "2022"
+const (
+	sshPort = "2022"
+
+	// The generated Go SDK documents camelCase values, but the bridged hcloud
+	// provider validates the Terraform wire value.
+	loadBalancerAlgorithm = "least_connections"
+)
 
 type nodeSpec struct {
 	name       string
@@ -285,7 +291,7 @@ func main() {
 		}
 
 		loadBalancer, err := hcloud.NewLoadBalancer(ctx, "public-load-balancer", &hcloud.LoadBalancerArgs{
-			Name: pulumi.String("kamori-beta-public"), LoadBalancerType: pulumi.String("lb11"), Location: pulumi.String("nbg1"), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("public-edge"), Algorithm: &hcloud.LoadBalancerAlgorithmArgs{Type: pulumi.String("leastConnections")},
+			Name: pulumi.String("kamori-beta-public"), LoadBalancerType: pulumi.String("lb11"), Location: pulumi.String("nbg1"), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("public-edge"), Algorithm: &hcloud.LoadBalancerAlgorithmArgs{Type: pulumi.String(loadBalancerAlgorithm)},
 		}, opts)
 		if err != nil {
 			return err
