@@ -12,6 +12,8 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
+const sshPort = "2022"
+
 type nodeSpec struct {
 	name       string
 	role       string
@@ -21,8 +23,8 @@ type nodeSpec struct {
 }
 
 type cloudEnvSecrets struct {
-	databaseURL          string
-	valkeyURL            string
+	databasePassword     string
+	valkeyPassword       string
 	jwtSecret            string
 	adminTotpKek         string
 	authTotpKek          string
@@ -46,9 +48,9 @@ func envLine(name, value string) string {
 
 func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) string {
 	return "KAMORI_BIND_ADDR=0.0.0.0:8080\n" +
-		envLine("KAMORI_DATABASE_URL", secrets.databaseURL) +
+		envLine("KAMORI_DATABASE_URL", databaseConnectionURL(secrets.databasePassword)) +
 		"KAMORI_DATABASE_MAX_CONNECTIONS=20\n" +
-		envLine("KAMORI_VALKEY_URL", secrets.valkeyURL) +
+		envLine("KAMORI_VALKEY_URL", valkeyConnectionURL(secrets.valkeyPassword)) +
 		"KAMORI_VALKEY_KEY_PREFIX=kamori:production:\n" +
 		envLine("KAMORI_JWT_SECRET", secrets.jwtSecret) +
 		"KAMORI_JWT_ISSUER=https://api.kamori.app\n" +
@@ -109,12 +111,12 @@ func main() {
 		cfg := config.New(ctx, "kamori")
 		opaqueServerSetup := cfg.RequireSecret("opaqueServerSetup")
 		refreshRotationKey := cfg.RequireSecret("refreshRotationKey")
-		postgresCACertificate := cfg.RequireSecret("postgresCaCertificate")
-		postgresClientCertificate := cfg.RequireSecret("postgresClientCertificate")
+		postgresCACertificate := pulumi.String(cfg.Require("postgresCaCertificate"))
+		postgresClientCertificate := pulumi.String(cfg.Require("postgresClientCertificate"))
 		postgresClientKey := cfg.RequireSecret("postgresClientKey")
 		appRuntimeEnv := pulumi.All(
-			cfg.RequireSecret("databaseUrl"),
-			cfg.RequireSecret("valkeyUrl"),
+			cfg.RequireSecret("databasePassword"),
+			cfg.RequireSecret("valkeyPassword"),
 			cfg.RequireSecret("jwtSecret"),
 			cfg.RequireSecret("adminTotpKek"),
 			cfg.RequireSecret("authTotpKek"),
@@ -123,15 +125,15 @@ func main() {
 			cfg.RequireSecret("metricsBearerToken"),
 		).ApplyT(func(values []interface{}) string {
 			return renderCloudEnv(cloudEnvSecrets{
-				databaseURL:          values[0].(string),
-				valkeyURL:            values[1].(string),
+				databasePassword:     values[0].(string),
+				valkeyPassword:       values[1].(string),
 				jwtSecret:            values[2].(string),
 				adminTotpKek:         values[3].(string),
 				authTotpKek:          values[4].(string),
 				objectStoreKeyID:     values[5].(string),
 				objectStoreSecretKey: values[6].(string),
 				metricsBearerToken:   values[7].(string),
-			}, cfg.Require("b2Endpoint"), cfg.Require("b2Region"), cfg.Require("b2Bucket"))
+			}, backblazeEndpoint, backblazeRegion, backblazePrimaryBucket)
 		}).(pulumi.StringOutput)
 		provider, err := hcloud.NewProvider(ctx, "hetzner", &hcloud.ProviderArgs{
 			Token: cfg.RequireSecret("hcloudToken").ToStringPtrOutput(),
@@ -149,13 +151,12 @@ func main() {
 		if err != nil {
 			return err
 		}
+		drBucketName, err := hetznerDRBucketName(ctx.Stack())
+		if err != nil {
+			return err
+		}
 
 		sshKeys := splitRequiredCSV(cfg.Require("sshKeys"), "sshKeys")
-		adminCIDRs := splitRequiredCSV(cfg.Require("adminCidrs"), "adminCidrs")
-		certificateIDs, err := parseRequiredInts(cfg.Require("tlsCertificateIds"))
-		if err != nil {
-			return fmt.Errorf("tlsCertificateIds: %w", err)
-		}
 
 		network, err := hcloud.NewNetwork(ctx, "private-network", &hcloud.NetworkArgs{
 			Name:             pulumi.String("kamori-beta"),
@@ -180,12 +181,22 @@ func main() {
 			Name:   pulumi.String("kamori-beta-hosts"),
 			Labels: commonLabels("firewall"),
 			Rules: hcloud.FirewallRuleArray{
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("22"), SourceIps: stringsToInputs(adminCIDRs), Description: pulumi.String("operator SSH")},
+				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String(sshPort), SourceIps: pulumi.StringArray{pulumi.String(valkeyPrivateIP + "/32")}, Description: pulumi.String("ops runner SSH")},
 				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("8080"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("load balancer to app")},
 				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("5432"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private PostgreSQL")},
 				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("6379"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private Valkey")},
 				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("9100"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private metrics")},
 				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("9090"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private Prometheus")},
+			},
+		}, opts)
+		if err != nil {
+			return err
+		}
+		operatorFirewall, err := hcloud.NewFirewall(ctx, "operator-firewall", &hcloud.FirewallArgs{
+			Name:   pulumi.String("kamori-beta-operator-access"),
+			Labels: commonLabels("operator-access"),
+			Rules: hcloud.FirewallRuleArray{
+				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String(sshPort), SourceIps: pulumi.StringArray{pulumi.String("0.0.0.0/0"), pulumi.String("::/0")}, Description: pulumi.String("operator SSH to ops bastion")},
 			},
 		}, opts)
 		if err != nil {
@@ -202,9 +213,9 @@ func main() {
 		nodes := []nodeSpec{
 			{name: "app-1", role: "app", serverType: cfg.Get("appServerType"), location: "nbg1", privateIP: "10.42.0.11"},
 			{name: "app-2", role: "app", serverType: cfg.Get("appServerType"), location: "fsn1", privateIP: "10.42.0.12"},
-			{name: "db-primary", role: "db-primary", serverType: cfg.Get("dbServerType"), location: "nbg1", privateIP: "10.42.0.21"},
-			{name: "db-standby", role: "db-standby", serverType: cfg.Get("dbServerType"), location: "fsn1", privateIP: "10.42.0.22"},
-			{name: "ops", role: "ops", serverType: cfg.Get("opsServerType"), location: "hel1", privateIP: "10.42.0.31"},
+			{name: "db-primary", role: "db-primary", serverType: cfg.Get("dbServerType"), location: "nbg1", privateIP: databasePrimaryPrivateIP},
+			{name: "db-standby", role: "db-standby", serverType: cfg.Get("dbServerType"), location: "fsn1", privateIP: databaseStandbyPrivateIP},
+			{name: "ops", role: "ops", serverType: cfg.Get("opsServerType"), location: "hel1", privateIP: valkeyPrivateIP},
 		}
 		servers := make(map[string]*hcloud.Server, len(nodes))
 		for _, spec := range nodes {
@@ -218,13 +229,17 @@ func main() {
 					spec.serverType = "cax21"
 				}
 			}
+			firewallIDs := pulumi.IntArray{idToInt(firewall.ID())}
+			if spec.role == "ops" {
+				firewallIDs = append(firewallIDs, idToInt(operatorFirewall.ID()))
+			}
 			args := &hcloud.ServerArgs{
 				Name:              pulumi.String("kamori-beta-" + spec.name),
 				Image:             pulumi.String("ubuntu-24.04"),
 				ServerType:        pulumi.String(spec.serverType),
 				Location:          pulumi.String(spec.location),
 				SshKeys:           stringsToInputs(sshKeys),
-				FirewallIds:       pulumi.IntArray{idToInt(firewall.ID())},
+				FirewallIds:       firewallIDs,
 				Backups:           pulumi.Bool(true),
 				UserData:          pulumi.String(baseCloudInit(spec.role, appHostSecrets{})),
 				Labels:            commonLabels(spec.role),
@@ -253,7 +268,7 @@ func main() {
 					})
 				}).(pulumi.StringOutput)
 			}
-			server, err := hcloud.NewServer(ctx, spec.name, args, opts, pulumi.DependsOn([]pulumi.Resource{subnet, firewall}))
+			server, err := hcloud.NewServer(ctx, spec.name, args, opts, pulumi.DependsOn([]pulumi.Resource{subnet, firewall, operatorFirewall}))
 			if err != nil {
 				return err
 			}
@@ -275,6 +290,10 @@ func main() {
 		if err != nil {
 			return err
 		}
+		publicEdge, err := provisionPublicDNSAndTLS(ctx, cfg, provider, loadBalancer)
+		if err != nil {
+			return err
+		}
 		lbNetwork, err := hcloud.NewLoadBalancerNetwork(ctx, "load-balancer-network", &hcloud.LoadBalancerNetworkArgs{
 			LoadBalancerId: idToInt(loadBalancer.ID()), NetworkId: idToInt(network.ID()).ToIntPtrOutput(), EnablePublicInterface: pulumi.Bool(true), Ip: pulumi.String("10.42.0.5"),
 		}, opts, pulumi.DependsOn([]pulumi.Resource{subnet}))
@@ -291,40 +310,21 @@ func main() {
 		}
 		_, err = hcloud.NewLoadBalancerService(ctx, "https-service", &hcloud.LoadBalancerServiceArgs{
 			LoadBalancerId: loadBalancer.ID(), Protocol: pulumi.String("https"), ListenPort: pulumi.Int(443), DestinationPort: pulumi.Int(8080),
-			Http:        &hcloud.LoadBalancerServiceHttpArgs{Certificates: intsToInputs(certificateIDs), RedirectHttp: pulumi.Bool(true), StickySessions: pulumi.Bool(false), TimeoutIdle: pulumi.Int(60)},
+			Http:        &hcloud.LoadBalancerServiceHttpArgs{Certificates: pulumi.IntArray{idToInt(publicEdge.certificate.ID())}, RedirectHttp: pulumi.Bool(true), StickySessions: pulumi.Bool(false), TimeoutIdle: pulumi.Int(60)},
 			HealthCheck: &hcloud.LoadBalancerServiceHealthCheckArgs{Protocol: pulumi.String("http"), Port: pulumi.Int(8080), Interval: pulumi.Int(15), Timeout: pulumi.Int(5), Retries: pulumi.Int(3), Http: &hcloud.LoadBalancerServiceHealthCheckHttpArgs{Path: pulumi.String("/health/ready"), StatusCodes: pulumi.StringArray{pulumi.String("200")}}},
-		}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork}))
-		if err != nil {
-			return err
-		}
-
-		b2Provider, err := minio.NewProvider(ctx, "b2", &minio.ProviderArgs{
-			MinioServer: pulumi.String(cfg.Require("b2Endpoint")), MinioRegion: pulumi.String(cfg.Require("b2Region")), MinioUser: cfg.RequireSecret("b2InfraKeyId").ToStringPtrOutput(), MinioPassword: cfg.RequireSecret("b2InfraApplicationKey").ToStringPtrOutput(), MinioSsl: pulumi.Bool(true),
-		})
-		if err != nil {
-			return err
-		}
-		postgresBackupBucket, err := minio.NewS3Bucket(ctx, "postgres-backups", &minio.S3BucketArgs{
-			Bucket: pulumi.String(cfg.Require("b2PostgresBackupBucket")), Acl: pulumi.String("private"), ForceDestroy: pulumi.Bool(false),
-		}, pulumi.Provider(b2Provider), pulumi.Protect(true))
-		if err != nil {
-			return err
-		}
-		b2Bucket, err := minio.NewS3Bucket(ctx, "primary-blobs", &minio.S3BucketArgs{
-			Bucket: pulumi.String(cfg.Require("b2Bucket")), Acl: pulumi.String("private"), ForceDestroy: pulumi.Bool(false),
-		}, pulumi.Provider(b2Provider), pulumi.Protect(true))
+		}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork, publicEdge.certificate}))
 		if err != nil {
 			return err
 		}
 
 		drProvider, err := minio.NewProvider(ctx, "hetzner-object-storage", &minio.ProviderArgs{
-			MinioServer: pulumi.String(cfg.Require("hetznerObjectEndpoint")), MinioRegion: pulumi.String(cfg.Require("hetznerObjectRegion")), MinioUser: cfg.RequireSecret("hetznerObjectAccessKey").ToStringPtrOutput(), MinioPassword: cfg.RequireSecret("hetznerObjectSecretKey").ToStringPtrOutput(), MinioSsl: pulumi.Bool(true),
+			MinioServer: pulumi.String(hetznerObjectEndpoint), MinioRegion: pulumi.String(hetznerObjectLocation), MinioUser: cfg.RequireSecret("hetznerObjectAccessKey").ToStringPtrOutput(), MinioPassword: cfg.RequireSecret("hetznerObjectSecretKey").ToStringPtrOutput(), MinioSsl: pulumi.Bool(true),
 		})
 		if err != nil {
 			return err
 		}
 		drBucket, err := minio.NewS3Bucket(ctx, "dr-blobs", &minio.S3BucketArgs{
-			Bucket: pulumi.String(cfg.Require("hetznerObjectBucket")), Acl: pulumi.String("private"), ForceDestroy: pulumi.Bool(false),
+			Bucket: pulumi.String(drBucketName), Acl: pulumi.String("private"), ForceDestroy: pulumi.Bool(false),
 		}, pulumi.Provider(drProvider), pulumi.Protect(true))
 		if err != nil {
 			return err
@@ -332,15 +332,20 @@ func main() {
 
 		ctx.Export("loadBalancerIPv4", loadBalancer.Ipv4)
 		ctx.Export("loadBalancerIPv6", loadBalancer.Ipv6)
-		ctx.Export("primaryBlobBucket", b2Bucket.Bucket)
-		ctx.Export("postgresBackupBucket", postgresBackupBucket.Bucket)
+		ctx.Export("publicDNSNameservers", publicEdge.certificateZone.AuthoritativeNameservers.Assigneds())
+		ctx.Export("tlsCertificateID", publicEdge.certificate.ID())
+		ctx.Export("tlsCertificateNotValidAfter", publicEdge.certificate.NotValidAfter)
+		ctx.Export("primaryBlobBucket", pulumi.String(backblazePrimaryBucket))
+		ctx.Export("postgresBackupBucket", pulumi.String(backblazePostgresBackupBucket))
 		ctx.Export("drBlobBucket", drBucket.Bucket)
+		ctx.Export("drBlobLocation", pulumi.String(hetznerObjectLocation))
+		ctx.Export("drBlobEndpoint", pulumi.String(hetznerObjectEndpoint))
 		ctx.Export("budgetGuardrails", pulumi.String(encodedGuardrails))
-		ctx.Export("databasePrimaryPrivateIP", pulumi.String("10.42.0.21"))
-		ctx.Export("databaseStandbyPrivateIP", pulumi.String("10.42.0.22"))
+		ctx.Export("databasePrimaryPrivateIP", pulumi.String(databasePrimaryPrivateIP))
+		ctx.Export("databaseStandbyPrivateIP", pulumi.String(databaseStandbyPrivateIP))
 		ctx.Export("appOnePrivateIP", pulumi.String("10.42.0.11"))
 		ctx.Export("appTwoPrivateIP", pulumi.String("10.42.0.12"))
-		ctx.Export("opsPrivateIP", pulumi.String("10.42.0.31"))
+		ctx.Export("opsPrivateIP", pulumi.String(valkeyPrivateIP))
 		ctx.Export("opsPublicIPv4", servers["ops"].Ipv4Address)
 		return nil
 	})
@@ -364,31 +369,10 @@ func splitRequiredCSV(value, name string) []string {
 	return result
 }
 
-func parseRequiredInts(value string) ([]int, error) {
-	parts := splitRequiredCSV(value, "tlsCertificateIds")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		value, err := strconv.Atoi(part)
-		if err != nil || value <= 0 {
-			return nil, fmt.Errorf("%q is not a positive certificate id", part)
-		}
-		result = append(result, value)
-	}
-	return result, nil
-}
-
 func stringsToInputs(values []string) pulumi.StringArray {
 	result := make(pulumi.StringArray, 0, len(values))
 	for _, value := range values {
 		result = append(result, pulumi.String(value))
-	}
-	return result
-}
-
-func intsToInputs(values []int) pulumi.IntArray {
-	result := make(pulumi.IntArray, 0, len(values))
-	for _, value := range values {
-		result = append(result, pulumi.Int(value))
 	}
 	return result
 }
@@ -476,16 +460,26 @@ packages:
     owner: root:root
     permissions: '0644'
     content: |
+      Port %s
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PermitRootLogin prohibit-password
       X11Forwarding no
+  - path: /etc/fail2ban/jail.d/kamori-sshd.local
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [sshd]
+      enabled = true
+      port = %s
+      backend = systemd
 runcmd:
   - [systemctl, enable, --now, unattended-upgrades]
   - [systemctl, enable, --now, fail2ban]
   - [systemctl, enable, --now, chrony]
   - [systemctl, enable, --now, prometheus-node-exporter]
+  - [sshd, -t]
   - [systemctl, reload, ssh]
 %s  - [sysctl, --system]
-`, extraPackages, role, opaqueSetupFile, extraCommands)
+`, extraPackages, role, opaqueSetupFile, sshPort, sshPort, extraCommands)
 }

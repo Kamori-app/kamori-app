@@ -28,6 +28,10 @@
 .env.production
 .env.test
 
+# Pulumi state exports are recovery artifacts, not source configuration.
+# Pulumi.<stack>.yaml remains commit-safe only while every secret uses `secure:`.
+infra/pulumi-*-backup.json
+
 # Allow example / template env files
 !.env.example
 !.env.*.example
