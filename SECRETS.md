@@ -451,18 +451,16 @@ outside the repository. The destination must not already exist:
 ../deploy/postgres/generate-pki /path/on/encrypted/offline-volume/kamori-postgres-pki
 ```
 
-The generator creates an ECDSA P-384 root CA valid for ten years and five
+The generator creates an ECDSA P-384 root CA valid for ten years and three
 separate 397-day leaf identities. It refuses to overwrite an existing PKI and
 verifies every resulting chain. Distribute the files as follows:
 
 | Generated file | Destination | Purpose |
 |---|---|---|
 | `postgres-ca.key` | Encrypted offline recovery storage only | Signs renewals; never copy to Pulumi, GitHub, or a host |
-| `postgres-ca.crt` | Pulumi, both DB nodes, standby, and ops backup worker | Trust anchor; public but integrity-sensitive |
+| `postgres-ca.crt` | Pulumi, primary DB node, and ops backup worker | Trust anchor; public but integrity-sensitive |
 | `db-primary.crt` / `.key` | Primary as `/etc/kamori/tls/postgres.crt` / `.key` | Primary server identity for `10.42.0.21` |
-| `db-standby.crt` / `.key` | Standby as `/etc/kamori/tls/postgres.crt` / `.key` | Standby server identity for `10.42.0.22` |
 | `app-client.crt` / `.key` | Pulumi parameters below | API identity used by both replaceable app nodes |
-| `replication-client.crt` / `.key` | Standby as `/etc/kamori/tls/postgres-client.crt` / `.key` | Physical replication identity |
 | `jobs-client.crt` / `.key` | Ops backup worker as `/etc/kamori/tls/jobs-client.crt` / `.key` | Restricted `kamori_jobs` identity |
 
 Copy only the files listed for each host, set private keys to mode `0600`, and
@@ -794,28 +792,31 @@ Runtime secrets remain in Pulumi, but the workflows also need credentials for
 SSH deployment and signed client artifacts. Keep these in GitHub Environments;
 they are not application configuration and must not be copied into Pulumi.
 
-Do not configure or run the `Deploy cloud server` workflow yet. The current
-repository does not create the `deploy` user or its restricted sudo policy, and
-the workflow currently executes a runner-writable script through `sudo`. That
-boundary must be hardened before these credentials can be considered safe.
+### `BETA_DEPLOY_SSH_PRIVATE_KEY` — deployment-only SSH identity
 
-### Deployment SSH private key — ops-runner local credential
+- **GitHub location:** `production` Environment secret.
+- **Value:** the complete private half of a dedicated Ed25519 key generated
+  only for application deployment. Generate it without reusing an operator key:
 
-- **Storage location:** the dedicated self-hosted runner account's protected
-  `~/.ssh` directory on the ops node, not Pulumi and not a GitHub secret.
-- **Value:** a separate Ed25519 private key generated only for deployments. Its
-  public half will be installed for the restricted `deploy` account on the two
-  app nodes after that account is implemented.
-- **Purpose:** authenticates the ops runner to `10.42.0.11` and `10.42.0.12`
-  over private TCP `2022`.
-- **Dependencies:** the workflow currently relies on normal OpenSSH key
-  discovery, while `BETA_SSH_KNOWN_HOSTS` authenticates the servers in the
-  opposite direction.
-- **Boundary:** never copy an operator's personal private key to ops and never
-  give the deployment key access to database or ops logins.
-- **Rotation:** install the new public key alongside the old one, verify a
-  deployment, and only then remove the old public key and destroy its private
-  half.
+  ```bash
+  ssh-keygen -t ed25519 -a 100 -N '' -f ./kamori-production-deploy -C kamori-production-deploy
+  ```
+
+- **Purpose:** authenticates the protected self-hosted job as `deploy` to
+  `10.42.0.11` and `10.42.0.12` over private TCP `2022`.
+- **Dependencies:** before enabling the workflow, an operator must copy the
+  public half and a reviewed checkout of `deploy/cloud-server` to each app node,
+  then run `bootstrap-host BUNDLE_DIR DEPLOY_PUBLIC_KEY_FILE` as root. That
+  creates the password-locked account and root-owned entrypoints. CI is never
+  allowed to run this bootstrap or install executable host files.
+- **Boundary:** the private key is materialized only under `RUNNER_TEMP` for the
+  deployment step and deleted by a shell trap. The account is not in the Docker
+  group and sudo permits only three fixed root-owned wrappers. Never copy an
+  operator key to GitHub or give this key access to database or ops logins.
+- **Rotation:** rerun the trusted bootstrap on both nodes with the replacement
+  public key, update the Environment secret, run one deployment, then destroy
+  the previous key. Because `authorized_keys` is replaced atomically, do both
+  nodes in one controlled maintenance session.
 
 ### `BETA_SSH_KNOWN_HOSTS` — pinned app-node SSH identities
 
@@ -842,33 +843,18 @@ A valid value resembles:
 An entry for plain `10.42.0.11` or port `22` does not authenticate a connection
 to port `2022` and will make deployment fail closed.
 
-### `GHCR_READ_USER` — container-registry machine identity
+### GHCR authentication — no persistent secret
 
-- **GitHub location:** `production` Environment secret.
-- **Value:** the GitHub username of a dedicated machine account whose only
-  production purpose is reading Kamori container packages.
-- **Purpose:** supplies the username for `docker login ghcr.io` on app nodes.
-- **Dependencies:** the account must be granted read access to the cloud, web,
-  admin, and edge packages. It needs no repository write or package-publish
-  permission.
-- **Rotation:** changing the account requires changing `GHCR_READ_TOKEN` at the
-  same time and reauthenticating both app nodes.
-
-### `GHCR_READ_TOKEN` — container-registry read credential
-
-- **GitHub location:** `production` Environment secret.
-- **Value:** a fine-grained, expiring token issued to `GHCR_READ_USER` with
-  read-only access to the four production packages.
-- **Purpose:** lets app nodes pull immutable image digests from GHCR.
-- **Dependencies:** a missing or expired token does not stop already-running
-  containers, but blocks the next deployment or rollback image pull.
-- **Compromise and rotation:** revoke it, inspect package access, issue a new
-  read-only token, update the Environment secret, and log in both nodes again.
+The deployment job has `packages: read` and passes its short-lived built-in
+`GITHUB_TOKEN` through stdin to the root-owned registry-login wrapper. Do not
+create `GHCR_READ_USER`, `GHCR_READ_TOKEN`, a PAT, or a machine account for this
+workflow. The token expires with the job; an expired login cannot stop already
+running containers and the next job refreshes it before pulling images.
 
 ### `BETA_APP_ONE_HOST` — first deployment SSH destination
 
 - **GitHub location:** `production` Environment variable, not a secret.
-- **Value:** `deploy@10.42.0.11` after the restricted deployment account exists.
+- **Value:** `10.42.0.11`.
 - **Purpose:** tells the self-hosted runner which private host receives the
   migration-first rollout.
 - **Dependencies:** do not append a port; the workflow supplies `2022`.
@@ -877,7 +863,7 @@ to port `2022` and will make deployment fail closed.
 ### `BETA_APP_TWO_HOST` — second deployment SSH destination
 
 - **GitHub location:** `production` Environment variable, not a secret.
-- **Value:** `deploy@10.42.0.12` after the restricted deployment account exists.
+- **Value:** `10.42.0.12`.
 - **Purpose:** identifies the second app node in the rolling deployment.
 - **Dependencies:** it must be a different private address from app one, and
   the ops firewall/private network must allow the connection on `2022`.

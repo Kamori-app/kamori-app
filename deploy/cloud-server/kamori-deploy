@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /usr/local/lib/kamori/deploy-cloud-server "$@"

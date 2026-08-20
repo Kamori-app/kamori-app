@@ -6,14 +6,55 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-bundle_dir=${1:-.}
+if [[ $# -ne 2 ]]; then
+  echo "usage: bootstrap-host BUNDLE_DIR DEPLOY_PUBLIC_KEY_FILE" >&2
+  exit 2
+fi
+
+bundle_dir=$1
+deploy_public_key_file=$2
+test -d "$bundle_dir"
+test -r "$deploy_public_key_file"
+mapfile -t deploy_public_key_lines < "$deploy_public_key_file"
+if [[ ${#deploy_public_key_lines[@]} -ne 1 ]]; then
+  echo "deployment key file must contain exactly one line" >&2
+  exit 2
+fi
+deploy_public_key=${deploy_public_key_lines[0]%$'\r'}
+if [[ ! "$deploy_public_key" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,3}(\ .*)?$ ]]; then
+  echo "deployment key must be exactly one valid-looking ssh-ed25519 public key" >&2
+  exit 2
+fi
+
 install -d -m 0755 /etc/kamori /usr/local/lib/kamori
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  ca-certificates curl docker.io docker-compose-v2 prometheus-node-exporter
+  ca-certificates docker.io docker-compose-v2 prometheus-node-exporter sudo
+
+if ! id deploy >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash deploy
+fi
+passwd --lock deploy >/dev/null
+install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
+printf 'restrict %s\n' "$deploy_public_key" > /home/deploy/.ssh/authorized_keys
+chown deploy:deploy /home/deploy/.ssh/authorized_keys
+chmod 0600 /home/deploy/.ssh/authorized_keys
+
 install -d -m 0755 /opt/kamori/release
 install -m 0644 "$bundle_dir/compose.yaml" /opt/kamori/release/compose.yaml
 install -m 0755 "$bundle_dir/deploy-cloud-server" /usr/local/lib/kamori/deploy-cloud-server
+install -m 0755 "$bundle_dir/kamori-deploy" /usr/local/sbin/kamori-deploy
+install -m 0755 "$bundle_dir/kamori-deploy-migrate" /usr/local/sbin/kamori-deploy-migrate
+install -m 0755 "$bundle_dir/kamori-registry-login" /usr/local/sbin/kamori-registry-login
 install -m 0644 "$bundle_dir/kamori-cloud.service" /etc/systemd/system/kamori-cloud.service
+sudoers_tmp=$(mktemp /etc/sudoers.d/kamori-deploy.XXXXXX)
+cat > "$sudoers_tmp" <<'EOF'
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-deploy *
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-deploy-migrate *
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-registry-login *
+EOF
+chmod 0440 "$sudoers_tmp"
+visudo -cf "$sudoers_tmp"
+mv "$sudoers_tmp" /etc/sudoers.d/kamori-deploy
 systemctl daemon-reload
 systemctl enable docker.service prometheus-node-exporter.service kamori-cloud.service

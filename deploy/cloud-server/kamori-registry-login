@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 || ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]; then
+  echo "usage: kamori-registry-login GITHUB_USER" >&2
+  exit 2
+fi
+
+exec /usr/bin/docker login ghcr.io --username "$1" --password-stdin

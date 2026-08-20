@@ -4,10 +4,11 @@ This Pulumi Go project declares the public-beta Hetzner topology and its
 S3-compatible storage integration. It does not deploy from a developer machine
 by default. GitHub Actions is the deployment entrypoint.
 
-The stack creates two spread app nodes, PostgreSQL primary/standby nodes with
-protected volumes, an ops/witness node, a private network, firewall, HTTPS load
-balancer, Porkbun public DNS records, a Hetzner-managed TLS certificate, and an
-independent Hetzner Object Storage DR bucket. The existing private Backblaze B2
+The stack creates two spread app nodes, one PostgreSQL primary with a protected
+volume and continuous PITR archives, an ops node, a private network, firewall,
+HTTPS load balancer, Porkbun public DNS records, a Hetzner-managed TLS
+certificate, and an independent Hetzner Object Storage DR bucket. The existing
+private Backblaze B2
 primary, PostgreSQL-backup, and Pulumi-state buckets are external prerequisites;
 Pulumi does not hold an account-wide B2 administration key. Kubernetes is
 intentionally not used.
@@ -68,7 +69,7 @@ internet. If first issuance reports an ACME delegation error, wait at least the
 certificate or add a scheduled renewal workflow.
 
 Create separate bucket-scoped Backblaze keys for the API, PostgreSQL backup,
-and replication jobs. Only the API key is a Pulumi input; the other two stay on
+and blob-replication jobs. Only the API key is a Pulumi input; the other two stay on
 their dedicated hosts. SSH listens on TCP port `2022` on every node. Only the
 ops/bastion node exposes that port publicly, protected by key-only
 authentication and Fail2ban; app and database nodes accept it only from the ops
@@ -89,9 +90,13 @@ use the Hetzner Console for failed first-boot recovery.
 ## Application rollout
 
 Base nodes are hardened by cloud-init and expose node-exporter only on the
-private network. The manually approved `Deploy cloud server` workflow builds a
-GHCR image, addresses it by digest, and rolls the two app nodes through the
-self-hosted ops runner over private SSH on port `2022`. Host scripts and the
+private network. The manually approved `Deploy cloud server` workflow builds
+four GHCR images, addresses them by digest, and rolls the two app nodes through
+the self-hosted ops runner over private SSH on port `2022`. The workflow logs in
+with its short-lived GitHub token and may invoke only preinstalled root-owned
+deployment entrypoints through the restricted `deploy` account. It never copies
+runner-controlled executable code into a privileged path and performs no
+deployment or uptime probes. Host scripts and the
 environment template live in
 [`deploy/cloud-server`](../deploy/cloud-server); the Prometheus, Alertmanager,
 Grafana, and ephemeral Valkey stack lives in [`deploy/ops`](../deploy/ops).
@@ -101,8 +106,8 @@ and cross-provider ciphertext replication is in
 
 The end-to-end bootstrap, secret boundaries, and release gates are in the
 [`hosted-beta` runbook](../docs/runbooks/hosted-beta.md). Pulumi provisioning
-alone is not evidence that replication, restore, alert delivery, or deployment
-rollback works.
+alone is not evidence that PITR restore, blob replication, or alert delivery
+works.
 
 ## Parameterized provider maintenance
 
@@ -143,3 +148,10 @@ down the core service.
 Pulumi `protect` and Hetzner deletion/rebuild protection are enabled for
 PostgreSQL volumes and durable infrastructure. A deliberate two-step change is
 required before destruction.
+
+The beta intentionally runs one PostgreSQL primary to control cost. This trades
+automatic database failover for a tested PITR recovery path. The transitional
+`databaseStandbyMode` setting exists only to retire the formerly provisioned
+standby safely: apply `retiring` first to remove both protection layers, review
+that no deletion occurs, then apply `disabled` in a second update. Never skip
+the first update or delete the server outside Pulumi.

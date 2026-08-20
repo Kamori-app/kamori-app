@@ -88,42 +88,42 @@ jobs:
       SSH_PORT: "2022"
     permissions:
       contents: read
+      packages: read
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Install pinned host keys
+      - name: Authenticate registry and deploy immutable release
         env:
+          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
+          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+          DEPLOY_KEY: ${{ secrets.BETA_DEPLOY_SSH_PRIVATE_KEY }}
           KNOWN_HOSTS: ${{ secrets.BETA_SSH_KNOWN_HOSTS }}
-        run: |
-          install -d -m 0700 ~/.ssh
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 0600 ~/.ssh/known_hosts
-      - name: Install deployment bundle
-        env:
-          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
-          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
-        run: |
-          for host in "$APP_ONE" "$APP_TWO"; do
-            scp -P "$SSH_PORT" -r deploy/cloud-server "$host:/tmp/kamori-cloud-release"
-            ssh -p "$SSH_PORT" "$host" 'sudo /tmp/kamori-cloud-release/bootstrap-host /tmp/kamori-cloud-release'
-          done
-      - name: Authenticate nodes to GHCR
-        env:
-          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
-          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
-          GHCR_USER: ${{ secrets.GHCR_READ_USER }}
-          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
-        run: |
-          for host in "$APP_ONE" "$APP_TWO"; do
-            printf '%s' "$GHCR_TOKEN" | ssh -p "$SSH_PORT" "$host" "sudo docker login ghcr.io --username '$GHCR_USER' --password-stdin"
-          done
-      - name: Migrate and roll app nodes
-        env:
-          APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
-          APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
           CLOUD_IMAGE: ${{ needs.image.outputs.cloud-image }}
           WEB_IMAGE: ${{ needs.image.outputs.web-image }}
           ADMIN_IMAGE: ${{ needs.image.outputs.admin-image }}
           EDGE_IMAGE: ${{ needs.image.outputs.edge-image }}
         run: |
-          ssh -p "$SSH_PORT" "$APP_ONE" "sudo env RUN_MIGRATIONS=1 /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
-          ssh -p "$SSH_PORT" "$APP_TWO" "sudo /usr/local/lib/kamori/deploy-cloud-server '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          install -d -m 0700 "$RUNNER_TEMP/kamori-ssh"
+          key_file="$RUNNER_TEMP/kamori-ssh/deploy-key"
+          known_hosts_file="$RUNNER_TEMP/kamori-ssh/known_hosts"
+          trap 'rm -rf "$RUNNER_TEMP/kamori-ssh"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          printf '%s\n' "$KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 0600 "$key_file" "$known_hosts_file"
+          ssh_options=(
+            -i "$key_file"
+            -p "$SSH_PORT"
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$known_hosts_file"
+          )
+
+          for host in "$APP_ONE" "$APP_TWO"; do
+            printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_options[@]}" "deploy@$host" \
+              "sudo /usr/local/sbin/kamori-registry-login '$REGISTRY_USER'"
+          done
+
+          ssh "${ssh_options[@]}" "deploy@$APP_ONE" \
+            "sudo /usr/local/sbin/kamori-deploy-migrate '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          ssh "${ssh_options[@]}" "deploy@$APP_TWO" \
+            "sudo /usr/local/sbin/kamori-deploy '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
