@@ -13,6 +13,7 @@ const (
 	backblazePostgresBackupBucket = "kamori-production-postgres"
 	hetznerObjectLocation         = "fsn1"
 	hetznerObjectEndpoint         = hetznerObjectLocation + ".your-objectstorage.com"
+	hetznerObjectS3CompatMode     = true
 )
 
 var s3BucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)

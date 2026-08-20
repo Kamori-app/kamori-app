@@ -97,29 +97,33 @@ The end-to-end bootstrap, secret boundaries, and release gates are in the
 alone is not evidence that replication, restore, alert delivery, or deployment
 rollback works.
 
-## Porkbun provider maintenance
+## Parameterized provider maintenance
 
-Porkbun has no native Pulumi package. `Pulumi.yaml` therefore pins
-`marcfrederick/porkbun` and the generated typed Go SDK is committed under
-`sdks/porkbun`, following Pulumi's
+Porkbun has no native Pulumi package. The native Pulumi MinIO provider also
+lags the S3-compatibility behavior required by Hetzner Object Storage.
+`Pulumi.yaml` therefore pins `marcfrederick/porkbun` and `aminueza/minio`; the
+generated typed Go SDKs are committed under `sdks/porkbun` and `sdks/minio`,
+following Pulumi's
 [Any Terraform Provider](https://www.pulumi.com/docs/iac/concepts/providers/any-terraform-provider/)
-workflow. CI and deployment must use the committed SDK; never add ad-hoc HTTP
-DNS mutations to the Pulumi program.
+workflow. CI and deployment must use the committed SDKs; never add ad-hoc HTTP
+DNS or S3 mutations to the Pulumi program. Hetzner must keep `s3CompatMode`
+enabled because it is S3-compatible storage, not a MinIO server.
 
 To review and upgrade the provider, choose an explicit upstream release and
 regenerate from `infra`:
 
 ```bash
 pulumi package add terraform-provider marcfrederick/porkbun VERSION
+pulumi package add terraform-provider aminueza/minio VERSION
 go mod tidy
 gofmt -w .
 go test ./...
 go vet ./...
 ```
 
-Commit `Pulumi.yaml`, `go.mod`, and the regenerated `sdks/porkbun` together.
-Review the upstream changelog and the generated resource schema before running
-a production preview; do not float the provider version in CD.
+Commit `Pulumi.yaml`, `go.mod`, and the relevant regenerated SDK directory
+together. Review each upstream changelog and generated resource schema before
+running a production preview; do not float provider versions in CD.
 
 ## Guardrails
 
