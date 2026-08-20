@@ -12,6 +12,13 @@ primary, PostgreSQL-backup, and Pulumi-state buckets are external prerequisites;
 Pulumi does not hold an account-wide B2 administration key. Kubernetes is
 intentionally not used.
 
+The production defaults use the x86 `CX23` type for app/ops nodes and `CX33`
+for PostgreSQL nodes. These replace the earlier ARM `CAX11`/`CAX21` defaults,
+which Hetzner rejected for every selected production location. The optional
+`appServerType`, `opsServerType`, and `dbServerType` stack settings remain
+available for a reviewed resize; any override must be checked against Hetzner's
+current location availability before it is applied.
+
 ## Bootstrap
 
 Follow the complete [production secret procedure](../SECRETS.md). It creates a
