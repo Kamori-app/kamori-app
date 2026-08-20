@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	sshPort = "2022"
+	sshPort                   = "2022"
+	defaultAppServerType      = "cx23"
+	defaultOpsServerType      = "cx23"
+	defaultDatabaseServerType = "cx33"
 
 	// The generated Go SDK documents camelCase values, but the bridged hcloud
 	// provider validates the Terraform wire value.
@@ -228,11 +231,11 @@ func main() {
 			if spec.serverType == "" {
 				switch spec.role {
 				case "app":
-					spec.serverType = "cax11"
+					spec.serverType = defaultAppServerType
 				case "ops":
-					spec.serverType = "cax11"
+					spec.serverType = defaultOpsServerType
 				default:
-					spec.serverType = "cax21"
+					spec.serverType = defaultDatabaseServerType
 				}
 			}
 			firewallIDs := pulumi.IntArray{idToInt(firewall.ID())}
@@ -342,10 +345,6 @@ func main() {
 		},
 			pulumi.Provider(drProvider),
 			pulumi.Protect(true),
-			// The first production update created the bucket remotely before the
-			// legacy provider failed to record it. Adopt that durable resource;
-			// remove this import option once the production state owns it.
-			pulumi.Import(pulumi.ID(drBucketName)),
 		)
 		if err != nil {
 			return err
