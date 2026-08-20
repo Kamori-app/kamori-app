@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/pulumi/pulumi-hcloud/sdk/go/hcloud"
-	"github.com/pulumi/pulumi-minio/sdk/go/minio"
+	"github.com/pulumi/pulumi-terraform-provider/sdks/go/minio/v3/minio"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -324,7 +324,15 @@ func main() {
 		}
 
 		drProvider, err := minio.NewProvider(ctx, "hetzner-object-storage", &minio.ProviderArgs{
-			MinioServer: pulumi.String(hetznerObjectEndpoint), MinioRegion: pulumi.String(hetznerObjectLocation), MinioUser: cfg.RequireSecret("hetznerObjectAccessKey").ToStringPtrOutput(), MinioPassword: cfg.RequireSecret("hetznerObjectSecretKey").ToStringPtrOutput(), MinioSsl: pulumi.Bool(true),
+			MinioServer:           pulumi.String(hetznerObjectEndpoint),
+			MinioRegion:           pulumi.String(hetznerObjectLocation),
+			MinioUser:             cfg.RequireSecret("hetznerObjectAccessKey").ToStringPtrOutput(),
+			MinioPassword:         cfg.RequireSecret("hetznerObjectSecretKey").ToStringPtrOutput(),
+			MinioSsl:              pulumi.Bool(true),
+			S3CompatMode:          pulumi.Bool(hetznerObjectS3CompatMode),
+			SkipBucketTagging:     pulumi.Bool(true),
+			MaxRetries:            pulumi.Float64(6),
+			RequestTimeoutSeconds: pulumi.Float64(30),
 		})
 		if err != nil {
 			return err

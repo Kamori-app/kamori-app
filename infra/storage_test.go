@@ -24,6 +24,9 @@ func TestHetznerObjectStorageTopologyIsDerived(t *testing.T) {
 	if hetznerObjectEndpoint != "fsn1.your-objectstorage.com" {
 		t.Fatalf("Hetzner Object Storage endpoint = %q", hetznerObjectEndpoint)
 	}
+	if !hetznerObjectS3CompatMode {
+		t.Fatal("Hetzner Object Storage must use the provider's S3 compatibility mode")
+	}
 	bucket, err := hetznerDRBucketName("production")
 	if err != nil {
 		t.Fatal(err)

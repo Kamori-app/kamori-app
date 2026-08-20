@@ -4,7 +4,7 @@ go 1.25.11
 
 require (
 	github.com/pulumi/pulumi-hcloud/sdk v1.41.0
-	github.com/pulumi/pulumi-minio/sdk v0.17.1
+	github.com/pulumi/pulumi-terraform-provider/sdks/go/minio/v3 v3.38.5
 	github.com/pulumi/pulumi-terraform-provider/sdks/go/porkbun v0.0.0-00010101000000-000000000000
 	github.com/pulumi/pulumi/sdk/v3 v3.258.0
 )
@@ -122,3 +122,5 @@ require (
 )
 
 replace github.com/pulumi/pulumi-terraform-provider/sdks/go/porkbun => ./sdks/porkbun
+
+replace github.com/pulumi/pulumi-terraform-provider/sdks/go/minio/v3 => ./sdks/minio
