@@ -150,8 +150,4 @@ PostgreSQL volumes and durable infrastructure. A deliberate two-step change is
 required before destruction.
 
 The beta intentionally runs one PostgreSQL primary to control cost. This trades
-automatic database failover for a tested PITR recovery path. The transitional
-`databaseStandbyMode` setting exists only to retire the formerly provisioned
-standby safely: apply `retiring` first to remove both protection layers, review
-that no deletion occurs, then apply `disabled` in a second update. Never skip
-the first update or delete the server outside Pulumi.
+automatic database failover for a tested PITR recovery path.

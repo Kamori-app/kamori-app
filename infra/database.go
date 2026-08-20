@@ -4,7 +4,6 @@ import "net/url"
 
 const (
 	databasePrimaryPrivateIP = "10.42.0.21"
-	databaseStandbyPrivateIP = "10.42.0.22"
 	databasePort             = "5432"
 	databaseName             = "kamori"
 	databaseApplicationRole  = "kamori_app"

@@ -28,39 +28,6 @@ SELECT 'CREATE DATABASE kamori OWNER kamori_app'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kamori') \gexec
 SQL
 
-if [[ "$POSTGRES_STANDBY_ENABLED" == "true" ]]; then
-  runuser -u postgres -- psql --set=ON_ERROR_STOP=1 \
-    --set=replication_password="$POSTGRES_REPLICATION_PASSWORD" <<'SQL'
-SELECT 'CREATE ROLE kamori_replication LOGIN REPLICATION PASSWORD ' || quote_literal(:'replication_password')
-WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'kamori_replication') \gexec
-ALTER ROLE kamori_replication PASSWORD :'replication_password';
-SELECT pg_create_physical_replication_slot('kamori_standby')
-WHERE NOT EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = 'kamori_standby');
-SQL
-else
-  runuser -u postgres -- psql --set=ON_ERROR_STOP=1 <<'SQL'
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT FROM pg_replication_slots
-    WHERE slot_name = 'kamori_standby' AND active_pid IS NOT NULL
-  ) THEN
-    RAISE EXCEPTION 'refusing to remove active replication slot kamori_standby';
-  END IF;
-END
-$$;
-SELECT pg_drop_replication_slot('kamori_standby')
-WHERE EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = 'kamori_standby');
-DO $$
-BEGIN
-  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kamori_replication') THEN
-    ALTER ROLE kamori_replication NOLOGIN;
-  END IF;
-END
-$$;
-SQL
-fi
-
 runuser -u postgres -- pgbackrest --stanza=kamori stanza-create
 runuser -u postgres -- pgbackrest --stanza=kamori check
 install -m 0644 /usr/local/lib/kamori/kamori-pgbackrest-backup.service /etc/systemd/system/
