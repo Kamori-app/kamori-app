@@ -339,7 +339,14 @@ func main() {
 		}
 		drBucket, err := minio.NewS3Bucket(ctx, "dr-blobs", &minio.S3BucketArgs{
 			Bucket: pulumi.String(drBucketName), Acl: pulumi.String("private"), ForceDestroy: pulumi.Bool(false),
-		}, pulumi.Provider(drProvider), pulumi.Protect(true))
+		},
+			pulumi.Provider(drProvider),
+			pulumi.Protect(true),
+			// The first production update created the bucket remotely before the
+			// legacy provider failed to record it. Adopt that durable resource;
+			// remove this import option once the production state owns it.
+			pulumi.Import(pulumi.ID(drBucketName)),
+		)
 		if err != nil {
 			return err
 		}

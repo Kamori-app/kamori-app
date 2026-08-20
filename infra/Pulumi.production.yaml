@@ -8,9 +8,9 @@ config:
   kamori:hcloudToken:
     secure: v1:elX98GB5aOYOpMtM:JjD/8PNgPc7Q57HNKIO1K50NOaJapgs/CBc1/2lg6UHK/Qu65/R++m8EHpdbSdMkqgvc11mhItoQA9idv79zD6BMCv5AdKDS+U38Np1gvGc=
   kamori:porkbunApiKey:
-    secure: v1:OnY1VoD8mKoRGNmc:ulPNu31+oXXR6rbzMhLTmP5JKRPbJuIagl/OD9Y=
+    secure: v1:GBMSmkIf0Jn4MQ7D:4W2cc2W79VF0tBKIZ44dRuOlt8yKirhb0nkL9j8lntSNfjRt3JLvkVB4DcP/q2ppSyCFaFCeslgFYFsPkyQa5hVZumNbTD3ELcUhZsQYMn0dG9SM
   kamori:porkbunSecretApiKey:
-    secure: v1:dCRR4XCwnV94xVsE:e+gjLmiOVK/X/j2z16Xny4Y4InYfcoghkLCKkmDE629t51PHhSKcmkDnwbWQpolV1MIs1abKMPQ1kVOpaLGgWCRsyxmJ3nA4FjuRH9DhbN0nyQ6i
+    secure: v1:g3zTUOx6Q9US5b4n:tBQiL7+KltccJR5Xvr4zoGV8bg+054ogaKXmpsalrQ25k4QGnc6jKSGBAFtOeMWNbAxDSpXvQEDhH4R6VShXIADZ2ebb7lTEDGeg0gAOpZh064va
   kamori:b2RuntimeKeyId:
     secure: v1:HVSMwAkFUAW2lqpg:787sSv6BWEnx0zsfTPC/J10bc+Ft+3MBneTFf3DfI2N6t1BRbTafLsE=
   kamori:b2RuntimeApplicationKey:
