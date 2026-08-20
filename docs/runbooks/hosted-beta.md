@@ -11,7 +11,7 @@ Before provisioning, verify that the existing
 are private. The Pulumi stack treats their endpoint, region, and names as
 versioned external prerequisites and does not receive an account-wide B2 key.
 The API credential must be restricted to the primary bucket; PostgreSQL backup
-and replication credentials are separate host-only keys documented in
+and blob-replication credentials are separate host-only keys documented in
 `SECRETS.md`.
 
 Run the manually approved `Hosted infrastructure` GitHub Actions workflow with
@@ -58,7 +58,7 @@ ssh -J root@<ops-public-ip>:2022 -p 2022 root@10.42.0.11 \
   'cloud-init status --wait && sshd -T | grep -Fx "port 2022"'
 ```
 
-Repeat for `10.42.0.12`, `10.42.0.21`, and `10.42.0.22`. A timeout on `2022`
+Repeat for `10.42.0.12` and `10.42.0.21`. A timeout on `2022`
 is a failed bootstrap, not a reason to enable `22`; inspect the affected node's
 serial console and `/var/log/cloud-init-output.log` instead.
 
@@ -82,16 +82,21 @@ Connect as the initial operator with `ssh -p 2022 root@<ops-public-ip>`. Then:
 3. Put the same random metrics token used by both app nodes in
    `/etc/kamori/secrets/metrics_token`, root-owned mode `0400`.
 4. Run `sudo ./bootstrap-ops .`.
-5. Reach Grafana only through an SSH tunnel:
+5. Install the pinned self-hosted runner with a fresh one-hour repository
+   registration token: `sudo ./install-actions-runner TOKEN`. The script pins
+   both runner version and SHA-256, registers only the `kamori-beta` label, and
+   installs a system service. Never store the registration token; it expires
+   after one use.
+6. Reach Grafana only through an SSH tunnel:
 
    ```bash
    ssh -p 2022 -L 3000:127.0.0.1:3000 root@<ops-public-ip>
    ```
 
    Keep the session open and browse to `http://127.0.0.1:3000`.
-6. Replace the placeholder Alertmanager receiver with an operator-owned
+7. Replace the placeholder Alertmanager receiver with an operator-owned
    destination and fire a synthetic alert. A silent receiver blocks release.
-7. Create `/etc/kamori/backup.env` from
+8. Create `/etc/kamori/backup.env` from
    `deploy/backup/backup.env.example`, provision the restricted TLS identity,
    and run `sudo deploy/backup/install-backup-worker deploy/backup`.
 
@@ -121,17 +126,25 @@ must be readable only by root and numeric container uid `10001`; never reuse the
 replication or backup identities. The database URL uses `sslmode=verify-full`,
 and the generated primary server certificate contains `10.42.0.21` in its SAN.
 
-The `Deploy cloud server` workflow runs on a self-hosted runner carrying the
-`kamori-beta` label on the ops node. Give that runner a deploy-only SSH key for
-the two private app IPs on TCP port `2022` and pinned nonstandard-port host keys
-through the protected `production` GitHub environment. It must not hold
-database, JWT, B2, or Pulumi secrets.
+Generate a dedicated Ed25519 deployment key. Copy the public half plus the
+reviewed `deploy/cloud-server` directory to each app node through the operator
+bastion path, then run `bootstrap-host BUNDLE_DIR DEPLOY_PUBLIC_KEY_FILE` as
+root. This one-time trusted bootstrap creates a password-locked `deploy` user,
+installs the root-owned release entrypoints, and limits sudo to those fixed
+commands. CI must never rerun the bootstrap or copy executable files to a host.
+
+The `Deploy cloud server` workflow runs on the self-hosted runner carrying the
+`kamori-beta` label. Store the private half as the protected
+`BETA_DEPLOY_SSH_PRIVATE_KEY` Environment secret and store pinned host keys in
+`BETA_SSH_KNOWN_HOSTS`. The runner uses the job-scoped `GITHUB_TOKEN` to pull
+packages and must not hold database, JWT, B2, or Pulumi secrets.
 
 The workflow builds and pushes immutable API, web, operator-console, and edge
 digests, applies migrations once, then rolls app node 1 and app node 2 as one
-release. Each node checks `/health/ready`; a failed check restores the complete
-previous release automatically. CI/CD does not probe public endpoints after
-deployment; the dedicated external monitoring service owns that responsibility.
+release. CI/CD performs no endpoint, readiness, or uptime probe. Container
+health checks gate local service dependency startup, the Hetzner load balancer
+routes only to runtime-healthy targets, and the dedicated external monitoring
+service independently owns public availability checks and alerting.
 
 ## 4. Create the first operator
 
@@ -150,13 +163,13 @@ fresh key assertion, TOTP, reason, and exact confirmation.
 
 ## 5. Release gates
 
-- PostgreSQL primary/standby replication and fencing are configured and the
-  failover runbook has passed on disposable data.
-- A PITR restore and a B2-to-Hetzner blob restore have been timed and verified.
+- PostgreSQL WAL archiving and scheduled encrypted backups are configured.
+- A PostgreSQL PITR restore and a B2-to-Hetzner blob restore have been timed
+  and verified.
 - The `postgres_backup`, `blob_replication`, and `object_cleanup` heartbeats are
   current and green in the operator console.
 - Both app targets independently pass readiness through the load balancer.
-- Prometheus sees both app nodes and all five node exporters.
+- Prometheus sees both app nodes and all four node exporters.
 - Alertmanager delivers a synthetic critical alert to a human.
 - Quota alerts at account 80/95% and egress 10/14 TB are loaded.
 - The dedicated external monitoring service checks API readiness, user web,

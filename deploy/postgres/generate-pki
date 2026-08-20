@@ -62,15 +62,12 @@ issue_certificate() {
 }
 
 issue_certificate "db-primary" "kamori-db-primary" "serverAuth" "IP:10.42.0.21"
-issue_certificate "db-standby" "kamori-db-standby" "serverAuth" "IP:10.42.0.22"
 issue_certificate "app-client" "kamori_app" "clientAuth" "URI:spiffe://kamori.app/postgres/app"
-issue_certificate "replication-client" "kamori_replication" "clientAuth" "URI:spiffe://kamori.app/postgres/replication"
 issue_certificate "jobs-client" "kamori_jobs" "clientAuth" "URI:spiffe://kamori.app/postgres/jobs"
 
-openssl verify -purpose sslserver -CAfile "$ca_cert" \
-  "$output_dir/db-primary.crt" "$output_dir/db-standby.crt"
+openssl verify -purpose sslserver -CAfile "$ca_cert" "$output_dir/db-primary.crt"
 openssl verify -purpose sslclient -CAfile "$ca_cert" \
-  "$output_dir/app-client.crt" "$output_dir/replication-client.crt" "$output_dir/jobs-client.crt"
+  "$output_dir/app-client.crt" "$output_dir/jobs-client.crt"
 
 chmod 0600 "$output_dir"/*.key
 chmod 0644 "$output_dir"/*.crt

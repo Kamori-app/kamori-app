@@ -203,13 +203,14 @@ never usernames, space IDs, content, tokens, keys, or ciphertext payloads.
 ## 11. Operations and deployment
 
 The hosted-beta Pulumi Go stack declares a Hetzner EU private network, two app
-nodes, PostgreSQL primary/standby, an ops node, protected volumes, firewall,
-and load balancer. Backblaze B2 is the primary ciphertext store and a private
-Hetzner Object Storage bucket is the independent DR target. Deployment remains
+nodes, one PostgreSQL primary with continuous encrypted PITR, an ops node,
+protected volumes, firewall, and load balancer. Backblaze B2 is the primary
+ciphertext store and a private Hetzner Object Storage bucket is the independent
+DR target. Deployment remains
 an explicit operator action; CI does not provision production by default.
 
 The repository includes container definitions, Caddy routing, Prometheus,
-Grafana, Alertmanager, backup/restore and manual failover scripts/runbooks, and
+Grafana, Alertmanager, backup/restore scripts/runbooks, and
 GitHub Actions for verification and controlled infrastructure/deploy paths.
 PostgreSQL is authoritative. Valkey contains only ephemeral auth/rate-limit
 state and cannot be required for durable correctness.
@@ -242,8 +243,8 @@ admin and desktop checks/builds, Flutter analyze/tests plus real Android/iOS
 native builds, container builds, and Pulumi Go formatting/vet/tests. Lockfiles
 and generated FRB/WASM bindings are committed.
 
-Before a public beta, operators must also execute and record the database
-restore/failover exercise, backup verification, supported DAV-client matrix,
+Before a public beta, operators must also execute and record the database PITR
+restore exercise, backup verification, supported DAV-client matrix,
 signed artifact smoke tests, mobile system-projection tests on physical
 devices, dependency/license review, and the legal checklist. No documentation
 may claim an independent security audit until one has actually occurred.

@@ -10,9 +10,13 @@ cloud_image=$1
 web_image=$2
 admin_image=$3
 edge_image=$4
-for image in "$cloud_image" "$web_image" "$admin_image" "$edge_image"; do
-  if [[ ! "$image" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]; then
-    echo "deployment requires immutable GHCR digests" >&2
+expected_repositories=(kamori-cloud kamori-web kamori-admin kamori-edge)
+images=("$cloud_image" "$web_image" "$admin_image" "$edge_image")
+for index in "${!images[@]}"; do
+  image=${images[$index]}
+  repository=${expected_repositories[$index]}
+  if [[ ! "$image" =~ ^ghcr\.io/kamori-app/${repository}@sha256:[a-f0-9]{64}$ ]]; then
+    echo "deployment requires an immutable digest from ghcr.io/kamori-app/${repository}" >&2
     exit 2
   fi
 done
@@ -49,19 +53,7 @@ temporary_release=$(mktemp /etc/kamori/release.env.XXXXXX)
 } > "$temporary_release"
 chmod 0600 "$temporary_release"
 mv "$temporary_release" "$release_file"
-systemctl restart kamori-cloud.service
-
-healthy=0
-for _ in $(seq 1 30); do
-  if curl --fail --silent --show-error --max-time 3 \
-    --header 'Host: api.kamori.app' http://127.0.0.1:8080/health/ready >/dev/null; then
-    healthy=1
-    break
-  fi
-  sleep 2
-done
-
-if [[ "$healthy" == "1" ]]; then
+if systemctl restart kamori-cloud.service; then
   if [[ -n "$previous_release" ]]; then
     rm -f "$previous_release"
   fi
@@ -69,12 +61,11 @@ if [[ "$healthy" == "1" ]]; then
   exit 0
 fi
 
-echo "new release failed readiness; rolling back" >&2
+echo "service restart failed; rolling back the release file" >&2
 if [[ -n "$previous_release" ]]; then
   mv "$previous_release" "$release_file"
   systemctl restart kamori-cloud.service
 else
   systemctl stop kamori-cloud.service || true
 fi
-journalctl -u kamori-cloud.service --since '-5 minutes' --no-pager -n 100 >&2 || true
 exit 1

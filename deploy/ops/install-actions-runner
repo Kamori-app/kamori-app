@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  echo "install-actions-runner must run as root" >&2
+  exit 1
+fi
+if [[ $# -ne 1 ]]; then
+  echo "usage: install-actions-runner REGISTRATION_TOKEN" >&2
+  exit 2
+fi
+
+registration_token=$1
+runner_version=2.336.0
+runner_sha256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+runner_archive="actions-runner-linux-x64-${runner_version}.tar.gz"
+runner_url="https://github.com/actions/runner/releases/download/v${runner_version}/${runner_archive}"
+runner_dir=/opt/actions-runner
+runner_user=github-runner
+
+if ! id "$runner_user" >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /var/lib/github-runner \
+    --shell /usr/sbin/nologin "$runner_user"
+fi
+if [[ -e "$runner_dir/.runner" ]]; then
+  echo "an Actions runner is already configured in $runner_dir" >&2
+  exit 1
+fi
+
+archive=$(mktemp /tmp/actions-runner.XXXXXX.tar.gz)
+trap 'rm -f "$archive"' EXIT
+curl --fail --location --proto '=https' --tlsv1.3 \
+  --output "$archive" "$runner_url"
+printf '%s  %s\n' "$runner_sha256" "$archive" | sha256sum --check --strict
+
+install -d -o "$runner_user" -g "$runner_user" -m 0750 "$runner_dir"
+tar --extract --gzip --file "$archive" --directory "$runner_dir"
+chown -R "$runner_user:$runner_user" "$runner_dir"
+"$runner_dir/bin/installdependencies.sh"
+
+runuser -u "$runner_user" -- "$runner_dir/config.sh" \
+  --unattended \
+  --url https://github.com/Kamori-app/kamori-app \
+  --token "$registration_token" \
+  --name kamori-ops-production \
+  --labels kamori-beta \
+  --work _work \
+  --replace
+"$runner_dir/svc.sh" install "$runner_user"
+"$runner_dir/svc.sh" start

@@ -347,6 +347,13 @@ jobs:
           cache-dependency-path: infra/go.sum
       - name: Verify modules
         run: go mod verify
+      - name: Validate deployment scripts
+        run: |
+          find ../deploy -type f -perm -u=x -exec bash -n {} +
+          if ../deploy/cloud-server/deploy-cloud-server bad bad bad bad; then
+            echo "deployment script accepted mutable image references" >&2
+            exit 1
+          fi
       - name: Format check
         run: test -z "$(gofmt -l .)"
       - name: Static analysis
