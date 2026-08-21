@@ -30,13 +30,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image_names
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "cloud=ghcr.io/$owner/kamori-cloud" >> "$GITHUB_OUTPUT"
+          echo "web=ghcr.io/$owner/kamori-web" >> "$GITHUB_OUTPUT"
+          echo "admin=ghcr.io/$owner/kamori-admin" >> "$GITHUB_OUTPUT"
+          echo "edge=ghcr.io/$owner/kamori-edge" >> "$GITHUB_OUTPUT"
       - id: cloud
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: apps/cloud-server/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kamori-cloud:${{ github.sha }}
+          tags: ${{ steps.image_names.outputs.cloud }}:${{ github.sha }}
           cache-from: type=gha,scope=cloud-server
           cache-to: type=gha,mode=max,scope=cloud-server
       - id: web
@@ -45,7 +54,7 @@ jobs:
           context: .
           file: apps/web-frontend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kamori-web:${{ github.sha }}
+          tags: ${{ steps.image_names.outputs.web }}:${{ github.sha }}
           cache-from: type=gha,scope=web-frontend
           cache-to: type=gha,mode=max,scope=web-frontend
       - id: admin
@@ -54,7 +63,7 @@ jobs:
           context: .
           file: apps/admin-frontend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kamori-admin:${{ github.sha }}
+          tags: ${{ steps.image_names.outputs.admin }}:${{ github.sha }}
           cache-from: type=gha,scope=admin-frontend
           cache-to: type=gha,mode=max,scope=admin-frontend
       - id: edge
@@ -63,7 +72,7 @@ jobs:
           context: .
           file: deploy/edge/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kamori-edge:${{ github.sha }}
+          tags: ${{ steps.image_names.outputs.edge }}:${{ github.sha }}
           cache-from: type=gha,scope=edge
           cache-to: type=gha,mode=max,scope=edge
       - id: reference
@@ -72,12 +81,15 @@ jobs:
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
           ADMIN_DIGEST: ${{ steps.admin.outputs.digest }}
           EDGE_DIGEST: ${{ steps.edge.outputs.digest }}
-          OWNER: ${{ github.repository_owner }}
+          CLOUD_REPOSITORY: ${{ steps.image_names.outputs.cloud }}
+          WEB_REPOSITORY: ${{ steps.image_names.outputs.web }}
+          ADMIN_REPOSITORY: ${{ steps.image_names.outputs.admin }}
+          EDGE_REPOSITORY: ${{ steps.image_names.outputs.edge }}
         run: |
-          echo "cloud-image=ghcr.io/${OWNER,,}/kamori-cloud@${CLOUD_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "web-image=ghcr.io/${OWNER,,}/kamori-web@${WEB_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "admin-image=ghcr.io/${OWNER,,}/kamori-admin@${ADMIN_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "edge-image=ghcr.io/${OWNER,,}/kamori-edge@${EDGE_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "cloud-image=$CLOUD_REPOSITORY@$CLOUD_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "web-image=$WEB_REPOSITORY@$WEB_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "admin-image=$ADMIN_REPOSITORY@$ADMIN_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "edge-image=$EDGE_REPOSITORY@$EDGE_DIGEST" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Rolling beta deployment
