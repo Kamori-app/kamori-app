@@ -1,11 +1,12 @@
 name: kamori-hosted
 runtime: go
 description: Kamori hosted MVP infrastructure on Hetzner with Porkbun DNS, B2, and Hetzner S3-compatible storage
-# Pulumi 3.258.0 cannot write update locks to this Backblaze B2 DIY backend.
-# Keep this aligned with the infrastructure workflow; see README.md.
-requiredPulumiVersion: "=3.257.0"
+# Pulumi CLI 3.245.0 and newer cannot write update locks to this Backblaze B2
+# DIY backend. Keep the pre-regression CLI on the legacy AWS SDK v1 path and
+# aligned with the infrastructure workflow; see README.md.
+requiredPulumiVersion: "=3.244.0"
 backend:
-  url: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true
+  url: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&s3ForcePathStyle=true
 packages:
   porkbun:
     source: terraform-provider
