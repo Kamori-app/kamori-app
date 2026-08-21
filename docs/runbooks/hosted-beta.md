@@ -27,15 +27,18 @@ updates:
 1. With `hostProvisioningPhase=retire`, run `Hosted infrastructure / preview`,
    confirm that only host/volume protections change, then run `up`.
 2. Set `hostProvisioningPhase=replace`, preview the expected replacement of
-   four empty VMs and the empty PostgreSQL volume, then run `up`.
+   four VMs, two load-balancer targets, and the PostgreSQL volume attachment.
+   The PostgreSQL data volume and stable ops public IP must remain unchanged.
+   Then run `up`.
 3. Set `hostProvisioningPhase=protect`, preview protection-only changes and run
    `up` again.
 
 The `replace` update performs the complete bootstrap through role-specific
-cloud-init. Pulumi generates PostgreSQL PKI, SSH host certificates, the deploy
-identity, jobs/backup/Grafana secrets, a stable ops public IPv4, role-specific
-firewalls, and the private-network egress route. App and database nodes receive
-no public IP addresses. `ops` provides NAT and is the only SSH bastion.
+cloud-init. Pulumi generates PostgreSQL PKI, complete matching SSH host
+keypairs and certificates, the deploy identity, jobs/backup/Grafana secrets, a
+stable ops public IPv4, role-specific firewalls, and the private-network egress
+route. App and database nodes receive no public IP addresses. `ops` provides
+NAT and is the only SSH bastion.
 
 No operator copies files, edits `/etc/kamori`, runs bootstrap scripts, installs
 a self-hosted runner, learns host keys from the network, or supplies a local PKI
