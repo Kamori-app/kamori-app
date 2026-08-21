@@ -10,6 +10,23 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func TestTLSAllowedUsesMatchProviderWireValues(t *testing.T) {
+	values := []string{
+		tlsUseCertSigning,
+		tlsUseCRLSigning,
+		tlsUseDigitalSignature,
+		tlsUseServerAuth,
+		tlsUseClientAuth,
+	}
+	for _, value := range values {
+		for _, character := range value {
+			if character >= 'A' && character <= 'Z' {
+				t.Fatalf("TLS allowed use %q is not a provider wire value", value)
+			}
+		}
+	}
+}
+
 func TestSignSSHHostCertificatePinsTheExpectedPrincipal(t *testing.T) {
 	_, caPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
