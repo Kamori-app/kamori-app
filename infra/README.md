@@ -35,9 +35,12 @@ dedicated bucket-scoped Application Key is a bootstrap credential supplied as
 AWS-compatible environment variables; it is not stored inside Pulumi config.
 AWS SDK v2 request and response checksum behavior is fixed to `when_required`
 for compatibility with the B2 S3 endpoint; local operators and CI must retain
-those environment settings. Pulumi CLI is pinned to `3.258.0`, whose AWS
-transfer manager `v0.3.5` respects them. Do not use `3.257.0`, which bundles
-the affected `v0.2.4` implementation.
+those environment settings. Pulumi CLI is temporarily pinned to `3.257.0`.
+Pulumi `3.258.0` updates the `gocloud.dev`/AWS S3 upload stack and can read the
+backend during `preview`, but B2 rejects its update-lock `PutObject` before an
+`up` can start. Keep the CLI pin separate from the Go SDK dependency version.
+Upgrade the CLI only after a newer release succeeds at both `preview` and a
+no-op `up` against this bucket; changing the pin does not migrate state.
 
 Create a dedicated Porkbun API credential restricted to `kamori.app` and store
 both halves as Pulumi secrets. Pulumi keeps Porkbun authoritative, creates the

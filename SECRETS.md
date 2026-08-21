@@ -50,17 +50,26 @@ history. The backend needs a dedicated B2 Application Key restricted to the
 private `kamori-production-pulumi-state` bucket. Do not reuse the API runtime
 key or the PostgreSQL-backup key.
 
-Use Pulumi CLI `3.258.0`, which is pinned in `infra/Pulumi.yaml` and the
-infrastructure workflow. It bundles AWS `feature/s3/transfermanager` `v0.3.5`,
-which respects the standard checksum compatibility settings. Pulumi `3.257.0`
-must not be used with this B2 backend because its `v0.2.4` transfer manager
-always emits an optional CRC32 header that B2 rejects.
+Use Pulumi CLI `3.257.0`, which is pinned in `infra/Pulumi.yaml` and the
+infrastructure workflow. Pulumi `3.258.0` can read this B2 backend and complete
+a preview, but its updated `gocloud.dev`/AWS S3 upload stack is rejected by B2
+when it writes the update lock: `Storage class not supported on this cluster:
+STANDARD`. That failure happens before any provider resource is changed. The Go
+SDK dependency can remain at `3.258.0`; this compatibility pin applies to the
+CLI that owns the DIY backend.
 
-Install or update to the pinned CLI:
+Treat the pin as temporary and explicit, not as a floating downgrade. Test a
+newer CLI with both a preview and a no-op update against this bucket before
+changing both pins. A preview alone is insufficient because it does not
+exercise the failing update-lock write.
+
+Install the pinned CLI with Pulumi's official installer and call that exact
+binary if another package manager still exposes a newer release first in
+`PATH`:
 
 ```bash
-brew upgrade pulumi
-pulumi version
+curl -fsSL https://get.pulumi.com | sh -s -- --version 3.257.0
+~/.pulumi/bin/pulumi version
 ```
 
 Export the backend credentials and passphrase into the current Fish session.
