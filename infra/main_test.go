@@ -25,3 +25,14 @@ func TestDefaultServerTypesMatchTheProductionArchitecture(t *testing.T) {
 		}
 	}
 }
+
+func TestHostProvisioningPhaseIsExplicitlyBounded(t *testing.T) {
+	for _, phase := range []string{hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect} {
+		if err := validateHostProvisioningPhase(phase); err != nil {
+			t.Fatalf("valid phase %q rejected: %v", phase, err)
+		}
+	}
+	if err := validateHostProvisioningPhase("destroy"); err == nil {
+		t.Fatal("unknown destructive phase was accepted")
+	}
+}

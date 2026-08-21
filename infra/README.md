@@ -69,34 +69,43 @@ internet. If first issuance reports an ACME delegation error, wait at least the
 certificate or add a scheduled renewal workflow.
 
 Create separate bucket-scoped Backblaze keys for the API, PostgreSQL backup,
-and blob-replication jobs. Only the API key is a Pulumi input; the other two stay on
-their dedicated hosts. SSH listens on TCP port `2022` on every node. Only the
-ops/bastion node exposes that port publicly, protected by key-only
-authentication and Fail2ban; app and database nodes accept it only from the ops
-node over the private network. No administrator source-IP configuration is
+and blob-replication jobs. All three are encrypted Pulumi inputs; cloud-init
+delivers each credential only to the role that needs it. SSH listens on TCP
+port `2022` on every node. Only the ops/bastion node has a public address and
+exposes that port, protected by key-only authentication and Fail2ban. App and
+database nodes have private addresses only and route required outbound traffic
+through the ops NAT gateway. No administrator source-IP configuration is
 required.
 Application and provider secrets stay in encrypted Pulumi config. GitHub stores
 the passphrase that unlocks that config and the dedicated B2 credential needed
 to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud
 or a `PULUMI_ACCESS_TOKEN`.
 
-VM creation itself uses the Hetzner API, not SSH. Hetzner injects the configured
-public keys, then local cloud-init validates the hardened OpenSSH configuration
-and moves the daemon from the image default to `2022`. The firewall exposes
-public `2022` only on the ops/bastion node and includes a private-source rule
-for connections from ops to the other nodes. Do not temporarily expose `22`;
-use the Hetzner Console for failed first-boot recovery.
+VM creation itself uses the Hetzner API, not SSH. Pulumi generates a persistent
+SSH host CA, a certified host identity per node, and a dedicated deployment
+identity. Cloud-init installs the identities, validates the hardened OpenSSH
+configuration, and moves the daemon from the image default to `2022`. There is
+no `ssh-keyscan` trust-on-first-use step. The operator key configured in Hetzner
+remains the break-glass identity. Do not temporarily expose `22`; use the
+Hetzner Console for failed first-boot recovery.
+
+Pulumi also generates the private PostgreSQL CA, server/client certificates,
+the restricted jobs-role password, the pgBackRest repository cipher, and the
+Grafana administrator password. These values are encrypted in Pulumi state and
+installed only through role-specific cloud-init. No local PKI directory or
+manual `/etc/kamori` edits are part of provisioning.
 
 ## Application rollout
 
-Base nodes are hardened by cloud-init and expose node-exporter only on the
-private network. The manually approved `Deploy cloud server` workflow builds
-four GHCR images, addresses them by digest, and rolls the two app nodes through
-the self-hosted ops runner over private SSH on port `2022`. The workflow logs in
-with its short-lived GitHub token and may invoke only preinstalled root-owned
-deployment entrypoints through the restricted `deploy` account. It never copies
-runner-controlled executable code into a privileged path and performs no
-deployment or uptime probes. Host scripts and the
+Base nodes are fully provisioned and hardened by cloud-init and expose
+node-exporter only on the private network. The manually approved `Deploy cloud
+server` workflow builds four GHCR images, addresses them by digest, and rolls
+the two app nodes from a GitHub-hosted runner through the ops SSH bastion. The
+workflow logs in with its short-lived GitHub token and may invoke only
+preinstalled root-owned deployment entrypoints through the restricted `deploy`
+account. The bastion key permits only forwarding to the two app SSH endpoints.
+The workflow never copies runner-controlled executable code into a privileged
+path and performs no deployment or uptime probes. Host scripts and the
 environment template live in
 [`deploy/cloud-server`](../deploy/cloud-server); the Prometheus, Alertmanager,
 Grafana, and ephemeral Valkey stack lives in [`deploy/ops`](../deploy/ops).
@@ -108,6 +117,23 @@ The end-to-end bootstrap, secret boundaries, and release gates are in the
 [`hosted-beta` runbook](../docs/runbooks/hosted-beta.md). Pulumi provisioning
 alone is not evidence that PITR restore, blob replication, or alert delivery
 works.
+
+## Controlled first replacement
+
+`hostProvisioningPhase` makes the initial replacement of the empty beta hosts
+explicit and reviewable:
+
+1. `retire` disables Pulumi and Hetzner delete/rebuild protection without
+   changing host configuration.
+2. `replace` creates the generated identities and passwords, recreates the four
+   empty servers and PostgreSQL volume, removes public networking from app/DB,
+   and bootstraps every service.
+3. `protect` reenables Pulumi and Hetzner protection after the replacement is
+   complete.
+
+Each transition requires a separate protected Pulumi preview and update. The
+application deployment remains a separate manually approved workflow. CI/CD
+does not perform service probes.
 
 ## Parameterized provider maintenance
 

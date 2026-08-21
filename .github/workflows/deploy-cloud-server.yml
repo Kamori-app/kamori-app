@@ -82,7 +82,7 @@ jobs:
   deploy:
     name: Rolling beta deployment
     needs: image
-    runs-on: [self-hosted, linux, x64, kamori-beta]
+    runs-on: ubuntu-latest
     environment: production
     env:
       SSH_PORT: "2022"
@@ -94,8 +94,9 @@ jobs:
         env:
           APP_ONE: ${{ vars.BETA_APP_ONE_HOST }}
           APP_TWO: ${{ vars.BETA_APP_TWO_HOST }}
+          OPS_HOST: ${{ vars.BETA_OPS_HOST }}
           DEPLOY_KEY: ${{ secrets.BETA_DEPLOY_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ secrets.BETA_SSH_KNOWN_HOSTS }}
+          HOST_CA: ${{ vars.BETA_SSH_HOST_CA_PUBLIC_KEY }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_USER: ${{ github.actor }}
           CLOUD_IMAGE: ${{ needs.image.outputs.cloud-image }}
@@ -108,22 +109,50 @@ jobs:
           known_hosts_file="$RUNNER_TEMP/kamori-ssh/known_hosts"
           trap 'rm -rf "$RUNNER_TEMP/kamori-ssh"' EXIT
           printf '%s\n' "$DEPLOY_KEY" > "$key_file"
-          printf '%s\n' "$KNOWN_HOSTS" > "$known_hosts_file"
+          printf '@cert-authority kamori-beta-ops,kamori-beta-app-1,kamori-beta-app-2,[kamori-beta-ops]:2022,[kamori-beta-app-1]:2022,[kamori-beta-app-2]:2022 %s\n' "$HOST_CA" > "$known_hosts_file"
           chmod 0600 "$key_file" "$known_hosts_file"
-          ssh_options=(
-            -i "$key_file"
-            -p "$SSH_PORT"
-            -o IdentitiesOnly=yes
-            -o StrictHostKeyChecking=yes
-            -o "UserKnownHostsFile=$known_hosts_file"
-          )
+          ssh_config="$RUNNER_TEMP/kamori-ssh/config"
+          cat > "$ssh_config" <<EOF
+          Host kamori-beta-ops
+            HostName $OPS_HOST
+            HostKeyAlias kamori-beta-ops
+            User deploy
+            Port $SSH_PORT
+            IdentityFile $key_file
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $known_hosts_file
 
-          for host in "$APP_ONE" "$APP_TWO"; do
-            printf '%s' "$REGISTRY_TOKEN" | ssh "${ssh_options[@]}" "deploy@$host" \
+          Host kamori-beta-app-1
+            HostName $APP_ONE
+            HostKeyAlias kamori-beta-app-1
+            User deploy
+            Port $SSH_PORT
+            IdentityFile $key_file
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $known_hosts_file
+            ProxyJump kamori-beta-ops
+
+          Host kamori-beta-app-2
+            HostName $APP_TWO
+            HostKeyAlias kamori-beta-app-2
+            User deploy
+            Port $SSH_PORT
+            IdentityFile $key_file
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $known_hosts_file
+            ProxyJump kamori-beta-ops
+          EOF
+          chmod 0600 "$ssh_config"
+
+          for host in kamori-beta-app-1 kamori-beta-app-2; do
+            printf '%s' "$REGISTRY_TOKEN" | ssh -F "$ssh_config" "$host" \
               "sudo /usr/local/sbin/kamori-registry-login '$REGISTRY_USER'"
           done
 
-          ssh "${ssh_options[@]}" "deploy@$APP_ONE" \
+          ssh -F "$ssh_config" kamori-beta-app-1 \
             "sudo /usr/local/sbin/kamori-deploy-migrate '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
-          ssh "${ssh_options[@]}" "deploy@$APP_TWO" \
+          ssh -F "$ssh_config" kamori-beta-app-2 \
             "sudo /usr/local/sbin/kamori-deploy '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
