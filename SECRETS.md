@@ -50,14 +50,18 @@ history. The backend needs a dedicated B2 Application Key restricted to the
 private `kamori-production-pulumi-state` bucket. Do not reuse the API runtime
 key or the PostgreSQL-backup key.
 
-Use Pulumi CLI `3.244.0`, which is pinned in `infra/Pulumi.yaml` and the
-infrastructure workflow. It is the last release before Pulumi moved this DIY
-backend to the AWS SDK v2 upload path. With this B2 endpoint, CLI `3.257.0`
-fails while writing the update lock because B2 rejects its checksum-algorithm
-header; CLI `3.258.0` gets past that incompatibility but B2 rejects its
-`STANDARD` storage-class header. Both failures happen before any provider
-resource is changed. The Go SDK dependency can remain at `3.258.0`; this
-compatibility pin applies only to the CLI that owns the DIY backend.
+Use Pulumi CLI `3.258.0`, which is pinned in `infra/Pulumi.yaml` and the
+infrastructure workflow. The pin, AWS SDK v2 URL and checksum settings below
+form one tested backend contract: this exact configuration has completed
+production previews and updates against the B2 bucket. The Go SDK dependency
+uses the same release.
+
+B2 may reject an update-lock `PutObject` during a provider-side storage-cluster
+incident even when a preview succeeds. Such a failure happens before any
+infrastructure provider resource is changed. Do not change Pulumi versions or
+backend parameters based on one failed update, and do not add blind retries.
+Confirm the B2 service state, preserve the failed run and request ID for B2
+support, then rerun the same reviewed update after the incident is resolved.
 
 Treat the pin as temporary and explicit, not as a floating downgrade. Test a
 newer CLI with both a preview and a no-op update against this bucket before
@@ -69,7 +73,7 @@ binary if another package manager still exposes a newer release first in
 `PATH`:
 
 ```bash
-curl -fsSL https://get.pulumi.com | sh -s -- --version 3.244.0
+curl -fsSL https://get.pulumi.com | sh -s -- --version 3.258.0
 ~/.pulumi/bin/pulumi version
 ```
 
@@ -83,21 +87,23 @@ echo
 read -gx -s -P 'Pulumi config passphrase: ' PULUMI_CONFIG_PASSPHRASE
 echo
 set -gx AWS_REGION eu-central-003
+set -gx AWS_REQUEST_CHECKSUM_CALCULATION when_required
+set -gx AWS_RESPONSE_CHECKSUM_VALIDATION when_required
 ```
 
 `AWS_ACCESS_KEY_ID` is an identifier rather than a secret. Do not persist
 `AWS_SECRET_ACCESS_KEY` or `PULUMI_CONFIG_PASSPHRASE` with Fish `set -U` or
 `set -Ux`: universal variables are stored unencrypted on disk. Load them from
-the password manager for each administrative session instead. Do not add
-`awssdk=v2` to the backend URL or AWS SDK v2 checksum compatibility variables:
-the pinned CLI deliberately uses its older AWS SDK v1 backend implementation.
+the password manager for each administrative session instead. The two checksum
+settings keep AWS SDK v2 from adding optional checksum headers rejected by B2;
+required checksums remain enabled.
 
 Authenticate to the configured B2 backend, register the existing logical
 production stack there, and verify the selected backend:
 
 ```bash
 cd infra
-pulumi login 's3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&s3ForcePathStyle=true'
+pulumi login 's3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true'
 pulumi stack init production --secrets-provider=passphrase
 pulumi stack select production
 pulumi whoami --verbose

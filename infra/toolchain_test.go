@@ -48,8 +48,8 @@ func TestPulumiBackendMatchesInfrastructureWorkflow(t *testing.T) {
 			projectBackend, workflowBackend)
 	}
 
-	if regexp.MustCompile(`[?&]awssdk=v2(?:&|$)`).MatchString(projectBackend) {
-		t.Fatal("Backblaze B2 backend must use Pulumi's legacy AWS SDK v1 path")
+	if !regexp.MustCompile(`[?&]awssdk=v2(?:&|$)`).MatchString(projectBackend) {
+		t.Fatal("Backblaze B2 backend must use the proven AWS SDK v2 path")
 	}
 }
 

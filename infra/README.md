@@ -33,15 +33,18 @@ Pulumi state is stored in the private
 `Pulumi.yaml`. Local operators and GitHub Actions use the same backend. Its
 dedicated bucket-scoped Application Key is a bootstrap credential supplied as
 AWS-compatible environment variables; it is not stored inside Pulumi config.
-Pulumi CLI is temporarily pinned to `3.244.0`, the last release before this DIY
-backend moved to the AWS SDK v2 upload path. B2 rejects the update-lock
-`PutObject` from CLI `3.257.0` because of its checksum-algorithm header and from
-CLI `3.258.0` because of its `STANDARD` storage-class header. The backend URL
-therefore deliberately omits `awssdk=v2`; local operators and CI both use the
-legacy AWS SDK v1 implementation. Keep the CLI pin separate from the Go SDK
-dependency version.
-Upgrade the CLI only after a newer release succeeds at both `preview` and a
-no-op `up` against this bucket; changing the pin does not migrate state.
+Pulumi CLI and the Go SDK are pinned to `3.258.0`. The backend deliberately uses
+AWS SDK v2 with optional request and response checksums limited to
+`when_required`; local operators and CI must keep this complete contract
+aligned. It has completed production previews and updates against the B2
+bucket. Upgrade only after a newer release succeeds at both `preview` and a
+no-op `up`; changing the pin does not migrate state.
+
+A preview exercises state reads but not the update-lock write. If B2 rejects a
+lock `PutObject` during a provider incident, Pulumi stops before changing any
+infrastructure resource. Preserve the run and request ID for provider support
+and rerun the reviewed operation only after B2 recovers; do not paper over the
+failure with automatic retries or unreviewed backend changes.
 
 Create a dedicated Porkbun API credential restricted to `kamori.app` and store
 both halves as Pulumi secrets. Pulumi keeps Porkbun authoritative, creates the
