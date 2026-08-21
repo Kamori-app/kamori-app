@@ -11,13 +11,11 @@ test -r /etc/kamori/node-role
 install -d -m 0755 /usr/local/lib/kamori
 install -m 0755 "$bundle_dir/postgres-lib" /usr/local/lib/kamori/postgres-lib
 install -m 0755 "$bundle_dir/bootstrap-primary" /usr/local/lib/kamori/bootstrap-primary
-install -m 0755 "$bundle_dir/bootstrap-standby" /usr/local/lib/kamori/bootstrap-standby
 install -m 0755 "$bundle_dir/run-pgbackrest-backup" /usr/local/lib/kamori/run-pgbackrest-backup
 install -m 0644 "$bundle_dir/kamori-pgbackrest-backup.service" /usr/local/lib/kamori/
 install -m 0644 "$bundle_dir/kamori-pgbackrest-backup.timer" /usr/local/lib/kamori/
 role=$(tr -d '[:space:]' < /etc/kamori/node-role)
 case "$role" in
   db-primary) exec /usr/local/lib/kamori/bootstrap-primary ;;
-  db-standby) exec /usr/local/lib/kamori/bootstrap-standby ;;
   *) echo "refusing PostgreSQL bootstrap for node role $role" >&2; exit 1 ;;
 esac

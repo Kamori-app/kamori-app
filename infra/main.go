@@ -17,30 +17,11 @@ const (
 	defaultAppServerType      = "cx23"
 	defaultOpsServerType      = "cx23"
 	defaultDatabaseServerType = "cx33"
-	standbyModeEnabled        = "enabled"
-	standbyModeRetiring       = "retiring"
-	standbyModeDisabled       = "disabled"
 
 	// The generated Go SDK documents camelCase values, but the bridged hcloud
 	// provider validates the Terraform wire value.
 	loadBalancerAlgorithm = "least_connections"
 )
-
-func databaseStandbyMode(cfg *config.Config) (string, error) {
-	return normalizeDatabaseStandbyMode(cfg.Get("databaseStandbyMode"))
-}
-
-func normalizeDatabaseStandbyMode(mode string) (string, error) {
-	if mode == "" {
-		mode = standbyModeEnabled
-	}
-	switch mode {
-	case standbyModeEnabled, standbyModeRetiring, standbyModeDisabled:
-		return mode, nil
-	default:
-		return "", fmt.Errorf("databaseStandbyMode must be %q, %q, or %q", standbyModeEnabled, standbyModeRetiring, standbyModeDisabled)
-	}
-}
 
 type nodeSpec struct {
 	name       string
@@ -183,11 +164,6 @@ func main() {
 		if err != nil {
 			return err
 		}
-		standbyMode, err := databaseStandbyMode(cfg)
-		if err != nil {
-			return err
-		}
-
 		sshKeys := splitRequiredCSV(cfg.Require("sshKeys"), "sshKeys")
 
 		network, err := hcloud.NewNetwork(ctx, "private-network", &hcloud.NetworkArgs{
@@ -248,9 +224,6 @@ func main() {
 			{name: "db-primary", role: "db-primary", serverType: cfg.Get("dbServerType"), location: "nbg1", privateIP: databasePrimaryPrivateIP},
 			{name: "ops", role: "ops", serverType: cfg.Get("opsServerType"), location: "hel1", privateIP: valkeyPrivateIP},
 		}
-		if standbyMode != standbyModeDisabled {
-			nodes = append(nodes, nodeSpec{name: "db-standby", role: "db-standby", serverType: cfg.Get("dbServerType"), location: "fsn1", privateIP: databaseStandbyPrivateIP})
-		}
 		servers := make(map[string]*hcloud.Server, len(nodes))
 		for _, spec := range nodes {
 			if spec.serverType == "" {
@@ -267,7 +240,6 @@ func main() {
 			if spec.role == "ops" {
 				firewallIDs = append(firewallIDs, idToInt(operatorFirewall.ID()))
 			}
-			protectResource := spec.role != "db-standby" || standbyMode == standbyModeEnabled
 			args := &hcloud.ServerArgs{
 				Name:              pulumi.String("kamori-beta-" + spec.name),
 				Image:             pulumi.String("ubuntu-24.04"),
@@ -280,8 +252,8 @@ func main() {
 				Labels:            commonLabels(spec.role),
 				PublicNets:        hcloud.ServerPublicNetArray{&hcloud.ServerPublicNetArgs{Ipv4Enabled: pulumi.Bool(true), Ipv6Enabled: pulumi.Bool(true)}},
 				Networks:          hcloud.ServerNetworkTypeArray{&hcloud.ServerNetworkTypeArgs{SubnetId: subnet.ID(), Ip: pulumi.String(spec.privateIP), AliasIps: pulumi.StringArray{}}},
-				DeleteProtection:  pulumi.Bool(protectResource),
-				RebuildProtection: pulumi.Bool(protectResource),
+				DeleteProtection:  pulumi.Bool(true),
+				RebuildProtection: pulumi.Bool(true),
 			}
 			if spec.role == "app" {
 				args.PlacementGroupId = idToInt(appPlacement.ID()).ToIntPtrOutput()
@@ -303,25 +275,18 @@ func main() {
 					})
 				}).(pulumi.StringOutput)
 			}
-			server, err := hcloud.NewServer(ctx, spec.name, args, opts, pulumi.Protect(protectResource), pulumi.DependsOn([]pulumi.Resource{subnet, firewall, operatorFirewall}))
+			server, err := hcloud.NewServer(ctx, spec.name, args, opts, pulumi.Protect(true), pulumi.DependsOn([]pulumi.Resource{subnet, firewall, operatorFirewall}))
 			if err != nil {
 				return err
 			}
 			servers[spec.name] = server
 		}
 
-		databaseNodes := []string{"db-primary"}
-		if standbyMode != standbyModeDisabled {
-			databaseNodes = append(databaseNodes, "db-standby")
-		}
-		for _, name := range databaseNodes {
-			protectResource := name != "db-standby" || standbyMode == standbyModeEnabled
-			_, err = hcloud.NewVolume(ctx, name+"-data", &hcloud.VolumeArgs{
-				Name: pulumi.String("kamori-beta-" + name + "-data"), Size: pulumi.Int(80), ServerId: idToInt(servers[name].ID()).ToIntPtrOutput(), Format: pulumi.String("ext4"), Automount: pulumi.Bool(true), DeleteProtection: pulumi.Bool(protectResource), Labels: commonLabels("postgres-data"),
-			}, opts, pulumi.Protect(protectResource))
-			if err != nil {
-				return err
-			}
+		_, err = hcloud.NewVolume(ctx, "db-primary-data", &hcloud.VolumeArgs{
+			Name: pulumi.String("kamori-beta-db-primary-data"), Size: pulumi.Int(80), ServerId: idToInt(servers["db-primary"].ID()).ToIntPtrOutput(), Format: pulumi.String("ext4"), Automount: pulumi.Bool(true), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("postgres-data"),
+		}, opts, pulumi.Protect(true))
+		if err != nil {
+			return err
 		}
 
 		loadBalancer, err := hcloud.NewLoadBalancer(ctx, "public-load-balancer", &hcloud.LoadBalancerArgs{
@@ -393,10 +358,6 @@ func main() {
 		ctx.Export("drBlobEndpoint", pulumi.String(hetznerObjectEndpoint))
 		ctx.Export("budgetGuardrails", pulumi.String(encodedGuardrails))
 		ctx.Export("databasePrimaryPrivateIP", pulumi.String(databasePrimaryPrivateIP))
-		if standbyMode != standbyModeDisabled {
-			ctx.Export("databaseStandbyPrivateIP", pulumi.String(databaseStandbyPrivateIP))
-		}
-		ctx.Export("databaseStandbyMode", pulumi.String(standbyMode))
 		ctx.Export("appOnePrivateIP", pulumi.String("10.42.0.11"))
 		ctx.Export("appTwoPrivateIP", pulumi.String("10.42.0.12"))
 		ctx.Export("opsPrivateIP", pulumi.String(valkeyPrivateIP))
@@ -483,7 +444,7 @@ func baseCloudInit(role string, secrets appHostSecrets) string {
 	case "ops":
 		extraPackages = "  - docker.io\n  - docker-compose-v2\n"
 		extraCommands = "  - [systemctl, enable, --now, docker]\n"
-	case "db-primary", "db-standby":
+	case "db-primary":
 		extraPackages = "  - postgresql\n  - postgresql-client\n  - pgbackrest\n"
 	}
 	return fmt.Sprintf(`#cloud-config

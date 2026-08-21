@@ -8,18 +8,6 @@ load_postgres_env() {
   source "$env_file"
   : "${POSTGRES_VERSION:?POSTGRES_VERSION is required}"
   : "${POSTGRES_PRIMARY_IP:?POSTGRES_PRIMARY_IP is required}"
-  POSTGRES_STANDBY_ENABLED=${POSTGRES_STANDBY_ENABLED:-false}
-  case "$POSTGRES_STANDBY_ENABLED" in
-    true)
-      : "${POSTGRES_STANDBY_IP:?POSTGRES_STANDBY_IP is required when standby is enabled}"
-      : "${POSTGRES_REPLICATION_PASSWORD:?POSTGRES_REPLICATION_PASSWORD is required when standby is enabled}"
-      ;;
-    false) ;;
-    *)
-      echo "POSTGRES_STANDBY_ENABLED must be true or false" >&2
-      exit 1
-      ;;
-  esac
   : "${POSTGRES_DATA_DIR:?POSTGRES_DATA_DIR is required}"
   : "${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}"
   : "${POSTGRES_JOBS_PASSWORD:?POSTGRES_JOBS_PASSWORD is required}"
@@ -33,10 +21,7 @@ load_postgres_env() {
     echo "POSTGRES_DATA_DIR must point inside an explicit Hetzner volume mount" >&2
     exit 1
   fi
-  export POSTGRES_VERSION POSTGRES_PRIMARY_IP POSTGRES_STANDBY_ENABLED POSTGRES_DATA_DIR
-  if [[ "$POSTGRES_STANDBY_ENABLED" == "true" ]]; then
-    export POSTGRES_STANDBY_IP POSTGRES_REPLICATION_PASSWORD
-  fi
+  export POSTGRES_VERSION POSTGRES_PRIMARY_IP POSTGRES_DATA_DIR
 }
 
 install_postgres_packages() {
@@ -112,14 +97,6 @@ write_postgres_config() {
   local node_ip=$1
   local archive_mode=$2
   local conf_dir="/etc/postgresql/${POSTGRES_VERSION}/main"
-  local max_wal_senders=0
-  local max_replication_slots=0
-  local replication_hba=
-  if [[ "$POSTGRES_STANDBY_ENABLED" == "true" ]]; then
-    max_wal_senders=4
-    max_replication_slots=1
-    replication_hba="hostssl replication  kamori_replication 10.42.0.0/16       scram-sha-256 clientcert=verify-ca"
-  fi
   cat > "$conf_dir/conf.d/90-kamori.conf" <<EOF
 data_directory = '${POSTGRES_DATA_DIR}'
 listen_addresses = '127.0.0.1,${node_ip}'
@@ -130,8 +107,8 @@ ssl_key_file = '${conf_dir}/server.key'
 ssl_ca_file = '${conf_dir}/root.crt'
 ssl_min_protocol_version = 'TLSv1.3'
 wal_level = replica
-max_wal_senders = ${max_wal_senders}
-max_replication_slots = ${max_replication_slots}
+max_wal_senders = 0
+max_replication_slots = 0
 wal_log_hints = on
 archive_mode = '${archive_mode}'
 archive_command = 'pgbackrest --stanza=kamori archive-push %p'
@@ -148,7 +125,6 @@ local   all          postgres                              peer
 local   all          all                                   scram-sha-256
 hostssl kamori       kamori_app         10.42.0.0/16       scram-sha-256 clientcert=verify-ca
 hostssl kamori       kamori_jobs        10.42.0.0/16       scram-sha-256 clientcert=verify-ca
-${replication_hba}
 EOF
   chown postgres:postgres "$conf_dir/conf.d/90-kamori.conf" "$conf_dir/pg_hba.conf"
   chmod 0640 "$conf_dir/conf.d/90-kamori.conf" "$conf_dir/pg_hba.conf"
