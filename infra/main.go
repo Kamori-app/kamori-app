@@ -54,15 +54,6 @@ type cloudEnvSecrets struct {
 	metricsBearerToken   string
 }
 
-type appHostSecrets struct {
-	opaqueServerSetup         string
-	refreshRotationKey        string
-	runtimeEnv                string
-	postgresCACertificate     string
-	postgresClientCertificate string
-	postgresClientKey         string
-}
-
 func envLine(name, value string) string {
 	return name + "=" + strconv.Quote(value) + "\n"
 }
@@ -121,10 +112,6 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		"KAMORI_AUTH_RATE_LIMIT_PER_MINUTE=30\n" +
 		"KAMORI_API_RATE_LIMIT_PER_MINUTE=1200\n" +
 		"RUST_LOG=cloud_server=info,tower_http=warn\n"
-}
-
-func indentCloudConfigBlock(value string) string {
-	return "      " + strings.ReplaceAll(strings.TrimSuffix(value, "\n"), "\n", "\n      ")
 }
 
 func main() {
@@ -302,101 +289,4 @@ func idToInt(id pulumi.IDOutput) pulumi.IntOutput {
 		}
 		return parsed, nil
 	}).(pulumi.IntOutput)
-}
-
-func baseCloudInit(role string, secrets appHostSecrets) string {
-	extraPackages := ""
-	extraCommands := ""
-	opaqueSetupFile := ""
-	switch role {
-	case "app":
-		extraPackages = "  - docker.io\n"
-		extraCommands = "  - [systemctl, enable, --now, docker]\n  - [chown, '10001:10001', /etc/kamori/cloud.env]\n  - [chown, '10001:10001', /etc/kamori/secrets/opaque-server-setup]\n  - [chown, '10001:10001', /etc/kamori/secrets/refresh-rotation-key]\n  - [chown, '10001:10001', /etc/kamori/postgres-ca.crt]\n  - [chown, '10001:10001', /etc/kamori/postgres-client.crt]\n  - [chown, '10001:10001', /etc/kamori/postgres-client.key]\n"
-		opaqueSetupFile = fmt.Sprintf(`  - path: /etc/kamori/secrets/opaque-server-setup
-    owner: root:root
-    permissions: '0400'
-    content: |
-      %s
-  - path: /etc/kamori/secrets/refresh-rotation-key
-    owner: root:root
-    permissions: '0400'
-    content: |
-      %s
-  - path: /etc/kamori/cloud.env
-    owner: root:root
-    permissions: '0400'
-    content: |
-%s
-  - path: /etc/kamori/postgres-ca.crt
-    owner: root:root
-    permissions: '0444'
-    content: |
-%s
-  - path: /etc/kamori/postgres-client.crt
-    owner: root:root
-    permissions: '0444'
-    content: |
-%s
-  - path: /etc/kamori/postgres-client.key
-    owner: root:root
-    permissions: '0400'
-    content: |
-%s
-`, secrets.opaqueServerSetup, secrets.refreshRotationKey, indentCloudConfigBlock(secrets.runtimeEnv), indentCloudConfigBlock(secrets.postgresCACertificate), indentCloudConfigBlock(secrets.postgresClientCertificate), indentCloudConfigBlock(secrets.postgresClientKey))
-	case "ops":
-		extraPackages = "  - docker.io\n  - docker-compose-v2\n"
-		extraCommands = "  - [systemctl, enable, --now, docker]\n"
-	case "db-primary":
-		extraPackages = "  - postgresql\n  - postgresql-client\n  - pgbackrest\n"
-	}
-	return fmt.Sprintf(`#cloud-config
-package_update: true
-package_upgrade: true
-packages:
-  - unattended-upgrades
-  - fail2ban
-  - ca-certificates
-  - curl
-  - jq
-  - chrony
-  - prometheus-node-exporter
-%swrite_files:
-  - path: /etc/kamori/node-role
-    owner: root:root
-    permissions: '0644'
-    content: %s
-%s  - path: /etc/sysctl.d/60-kamori-hardening.conf
-    owner: root:root
-    permissions: '0644'
-    content: |
-      kernel.kptr_restrict=2
-      kernel.dmesg_restrict=1
-      fs.protected_hardlinks=1
-      fs.protected_symlinks=1
-  - path: /etc/ssh/sshd_config.d/60-kamori-hardening.conf
-    owner: root:root
-    permissions: '0644'
-    content: |
-      Port %s
-      PasswordAuthentication no
-      KbdInteractiveAuthentication no
-      PermitRootLogin prohibit-password
-      X11Forwarding no
-  - path: /etc/fail2ban/jail.d/kamori-sshd.local
-    owner: root:root
-    permissions: '0644'
-    content: |
-      [sshd]
-      enabled = true
-      port = %s
-      backend = systemd
-runcmd:
-  - [systemctl, enable, --now, unattended-upgrades]
-  - [systemctl, enable, --now, fail2ban]
-  - [systemctl, enable, --now, chrony]
-  - [systemctl, enable, --now, prometheus-node-exporter]
-  - [sshd, -t]
-  - [systemctl, reload, ssh]
-%s  - [sysctl, --system]
-`, extraPackages, role, opaqueSetupFile, sshPort, sshPort, extraCommands)
 }

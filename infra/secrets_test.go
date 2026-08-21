@@ -33,31 +33,3 @@ func TestRenderCloudEnvQuotesSecretValuesAndKeepsRequiredGuards(t *testing.T) {
 		}
 	}
 }
-
-func TestBaseCloudInitKeepsSecretsInRootOnlyFiles(t *testing.T) {
-	cloudInit := baseCloudInit("app", appHostSecrets{
-		opaqueServerSetup:         "opaque-value",
-		refreshRotationKey:        "rotation-value",
-		runtimeEnv:                "KAMORI_JWT_SECRET=secret\n",
-		postgresCACertificate:     "CA CERTIFICATE",
-		postgresClientCertificate: "CLIENT CERTIFICATE",
-		postgresClientKey:         "CLIENT PRIVATE KEY",
-	})
-	for _, expected := range []string{
-		"/etc/kamori/secrets/opaque-server-setup",
-		"/etc/kamori/secrets/refresh-rotation-key",
-		"/etc/kamori/cloud.env",
-		"/etc/kamori/postgres-ca.crt",
-		"/etc/kamori/postgres-client.crt",
-		"/etc/kamori/postgres-client.key",
-		"permissions: '0400'",
-		"chown, '10001:10001', /etc/kamori/cloud.env",
-		"Port 2022",
-		"port = 2022",
-		"[sshd, -t]",
-	} {
-		if !strings.Contains(cloudInit, expected) {
-			t.Fatalf("cloud-init is missing %q", expected)
-		}
-	}
-}
