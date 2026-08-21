@@ -231,12 +231,13 @@ pulumi config set kamori:sshKeys operator-key
 
 The stock image may briefly activate SSH through `ssh.socket` on `22`, but the
 Hetzner firewall never exposes that port. Before package installation,
-cloud-init validates the hardened configuration with `sshd -t`, disables
-socket activation, enables `ssh.service`, and starts it on `2022`. This order
-also keeps SSH administration available if a later package mirror is slow or
-unavailable. If the transition fails, inspect
-`/var/log/cloud-init-output.log` through the authenticated Hetzner Console; do
-not expose `22` as a workaround.
+cloud-init validates the hardened configuration with `sshd -t`, reloads
+systemd, and restarts Ubuntu's native `ssh.socket`. Its drop-in first clears
+the image's default listener and then binds only `2022`; it does not switch to
+the standalone `ssh.service`. This order also keeps SSH administration
+available if a later package mirror is slow or unavailable. If the transition
+fails, inspect `/var/log/cloud-init-output.log` through the authenticated
+Hetzner Console; do not expose `22` as a workaround.
 
 TLS certificate IDs are not configuration. Pulumi creates a protected Hetzner
 DNS zone used only for ACME validation, delegates the four challenge names for

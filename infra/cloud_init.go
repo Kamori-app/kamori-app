@@ -120,6 +120,10 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
 HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com
 `, sshPort)},
+		{path: "/etc/systemd/system/ssh.socket.d/60-kamori-listen.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`[Socket]
+ListenStream=
+ListenStream=%s
+`, sshPort)},
 		{path: "/etc/fail2ban/jail.d/kamori-sshd.local", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`[sshd]
 enabled = true
 port = %s
@@ -197,10 +201,9 @@ Acquire::ForceIPv4 "true";
 Acquire::Retries "10";
 EOF
 sshd -t
-systemctl disable --now ssh.socket
 systemctl daemon-reload
-systemctl enable ssh.service
-systemctl restart ssh.service
+systemctl enable ssh.socket
+systemctl restart ssh.socket
 for attempt in $(seq 1 120); do
   if apt-get update && apt-get install -y --no-install-recommends %s; then
     break
