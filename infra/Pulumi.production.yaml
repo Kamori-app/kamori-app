@@ -1,5 +1,6 @@
 encryptionsalt: v1:b2/LH1+YaqU=:v1:3NvGjk46y0U1qIWc:ZZWxBnh68U9rOKthDHruODIio9wbqg==
 config:
+  kamori:hostProvisioningPhase: retire
   kamori:opaqueServerSetup:
     secure: v1:GfSbHGbH+WthS4uW:X/f1BA8gLNVEc1DpMidNRyA0m0RfzNZlwpL6qMmW7QqjKMveHQUs/nmrS0/g3UpBivRfBqX9S8dukZhCUG5SVRxfbZWfLNOPaTYHgVDFvQ2QpqeFR/7So7NfNt6Ofsdl+QO8hx/P+T7JSIczGva98m1Ou5erXZQrmb2JFNqAib1swVRvET6EEsTrav27IX88TG2bAlQR+S1oUJSXLJ/XVZTCaWUUtRqlWlF4PyQvK+U1D0qlw10QGYe/hvc=
   kamori:refreshRotationKey:

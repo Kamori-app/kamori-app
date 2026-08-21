@@ -251,18 +251,19 @@ cannot be safely corrected by renaming the key. The API needs object
 `listFiles`, `readFiles`, `writeFiles`, and `deleteFiles` capabilities; it must
 not have `writeBuckets`, `deleteBuckets`, or key-management capabilities.
 
-Before PostgreSQL bootstrap, create a second key named
-`kamori-production-postgres-backup` with access only to
-`kamori-production-postgres` and **Read and Write** access. Store its displayed
-`keyID` as `PGBACKREST_S3_KEY_ID` and its one-time `applicationKey` as
-`PGBACKREST_S3_APPLICATION_KEY` in the root-owned
-`/etc/kamori/postgres.env`; neither value belongs in Pulumi.
+Before the automated host replacement, create a second key named
+`kamori-production-postgres` with access only to
+`kamori-production-postgres`, **Read and Write** access, and **Allow List All
+Bucket Names** enabled for S3 SDK compatibility. Store its displayed `keyID`
+and one-time `applicationKey` in the two encrypted Pulumi settings documented
+below. Do not copy either value to a host; role-specific cloud-init writes the
+root-owned pgBackRest environment.
 
-Before enabling cross-provider blob replication, create a third key named
-`kamori-production-replication-source` with **Read Only** access only to
-`kamori-production-primary`. Store it as `PRIMARY_S3_KEY_ID` and
-`PRIMARY_S3_APPLICATION_KEY` in the root-owned `/etc/kamori/backup.env` on the
-ops node. Do not reuse the read-write API key for replication.
+Create a third key named `kamori-production-replication` with **Read Only**
+access only to `kamori-production-primary` and **Allow List All Bucket Names**
+enabled. Store it in the two encrypted Pulumi settings documented below. Do not
+reuse the read-write API key for replication. Pulumi delivers this identity
+only to the ops backup worker.
 
 Hetzner Object Storage topology is not operator configuration. Pulumi fixes the
 reviewed DR location to `fsn1`, derives the endpoint
@@ -274,6 +275,44 @@ migration in `infra`, not a secret-setting step.
 Hetzner does not expose S3 credential creation through its S3 API. The access
 and secret keys below are therefore the only manual Object Storage bootstrap
 inputs.
+
+### Current operator checklist
+
+While the provisioning change is being reviewed, create and retain the two
+Backblaze pairs described above. Do not paste them into chat, GitHub, a server,
+or a command argument. After the change is merged, from `infra` run:
+
+```bash
+pulumi stack select production
+pulumi config set --secret kamori:postgresBackupKeyId
+pulumi config set --secret kamori:postgresBackupApplicationKey
+pulumi config set --secret kamori:b2ReplicationKeyId
+pulumi config set --secret kamori:b2ReplicationApplicationKey
+pulumi config
+git diff -- Pulumi.production.yaml
+```
+
+Each `config set --secret` command opens a hidden prompt. The diff must contain
+only `secure:` ciphertext for these four values. Do not change
+`hostProvisioningPhase` until the `retire` update has completed successfully.
+
+After the subsequent `replace` update, transfer the generated deployment
+outputs directly into the protected GitHub Environment:
+
+```bash
+pulumi stack output deploySshPrivateKey --show-secrets \
+  | gh secret set BETA_DEPLOY_SSH_PRIVATE_KEY --env production
+pulumi stack output sshHostCaPublicKey \
+  | gh variable set BETA_SSH_HOST_CA_PUBLIC_KEY --env production
+pulumi stack output opsPublicIPv4 \
+  | gh variable set BETA_OPS_HOST --env production
+gh variable set BETA_APP_ONE_HOST --env production --body 10.42.0.11
+gh variable set BETA_APP_TWO_HOST --env production --body 10.42.0.12
+```
+
+These commands do not configure a host. They cross the one intentional trust
+boundary between the encrypted Pulumi state and the protected deployment
+workflow. The app host variables remain `10.42.0.11` and `10.42.0.12`.
 
 ### `kamori:hcloudToken` — Hetzner infrastructure API token
 
@@ -383,8 +422,7 @@ pulumi config set --secret kamori:hetznerObjectSecretKey
 ### `kamori:databasePassword` — application PostgreSQL role password
 
 - **Classification:** runtime secret.
-- **Value:** a strong random password for the dedicated `kamori_app` role. Use
-  the same value as `POSTGRES_APP_PASSWORD` when bootstrapping the primary.
+- **Value:** a strong random password for the dedicated `kamori_app` role.
 - **Purpose:** authenticates both API nodes to PostgreSQL in addition to their
   dedicated client certificate.
 - **Dependencies:** the primary bootstrap creates the `kamori_app` role with
@@ -399,10 +437,10 @@ pulumi config set --secret kamori:hetznerObjectSecretKey
 pulumi config set --secret kamori:databasePassword
 ```
 
-Generate the value with `openssl rand -base64 48`, paste it at Pulumi's hidden
-prompt, and place the identical value in `POSTGRES_APP_PASSWORD` in the
-root-owned `/etc/kamori/postgres.env` on the primary during database bootstrap.
-Do not copy the generated URL between systems.
+Generate the value with `openssl rand -base64 48` and paste it at Pulumi's
+hidden prompt. Pulumi places the identical value in the root-owned PostgreSQL
+environment and the application connection URL. Do not create either file or
+copy the generated URL between systems.
 
 Pulumi renders the following shape into `/etc/kamori/cloud.env`; this is an
 output, not a configuration value:
@@ -415,8 +453,7 @@ postgres://kamori_app:URL_ENCODED_PASSWORD@10.42.0.21:5432/kamori?sslmode=verify
 
 - **Classification:** runtime secret.
 - **Value:** a strong random password dedicated to the production Valkey
-  instance. Use the same value as `VALKEY_PASSWORD` in the root-owned
-  `/etc/kamori/ops.env` on the ops node.
+  instance.
 - **Purpose:** authenticates API nodes to the ephemeral state store used for
   short-lived OPAQUE flows, device-authorization flows, and rate-limit windows.
   PostgreSQL remains authoritative.
@@ -432,93 +469,30 @@ postgres://kamori_app:URL_ENCODED_PASSWORD@10.42.0.21:5432/kamori?sslmode=verify
 pulumi config set --secret kamori:valkeyPassword
 ```
 
-Generate it with `openssl rand -base64 48`, paste it at Pulumi's hidden prompt,
-and put the identical value in `/etc/kamori/ops.env`. Pulumi safely encodes the
-password and renders `redis://:URL_ENCODED_PASSWORD@10.42.0.31:6379/0` into the
-app environment.
+Generate it with `openssl rand -base64 48` and paste it at Pulumi's hidden
+prompt. Pulumi places it in the root-owned ops environment and safely renders
+`redis://:URL_ENCODED_PASSWORD@10.42.0.31:6379/0` into the app environment.
 
-### Generate the private PostgreSQL PKI
+### Pulumi-managed private PostgreSQL PKI
 
-These certificates do not come from Hetzner, Porkbun, or the public web TLS
-certificate. PostgreSQL uses a separate private CA because its endpoints are
-private IP addresses and because clients authenticate with dedicated mTLS
-identities.
+These certificates do not come from Hetzner, Porkbun, Caddy, or the public web
+TLS certificate. PostgreSQL uses a separate private CA because its endpoint is
+a private IP and both application and jobs clients use mTLS identities.
 
-Run the committed generator once, writing directly to an encrypted volume
-outside the repository. The destination must not already exist:
+Pulumi generates and retains:
 
-```bash
-../deploy/postgres/generate-pki /path/on/encrypted/offline-volume/kamori-postgres-pki
-```
+- an ECDSA P-384 root CA valid for ten years;
+- a server certificate for `10.42.0.21`;
+- a `kamori_app` client certificate for both app nodes;
+- a separate `kamori_jobs` client certificate for the ops worker;
+- a 30-day early-renewal window for the 397-day leaf certificates.
 
-The generator creates an ECDSA P-384 root CA valid for ten years and three
-separate 397-day leaf identities. It refuses to overwrite an existing PKI and
-verifies every resulting chain. Distribute the files as follows:
-
-| Generated file | Destination | Purpose |
-|---|---|---|
-| `postgres-ca.key` | Encrypted offline recovery storage only | Signs renewals; never copy to Pulumi, GitHub, or a host |
-| `postgres-ca.crt` | Pulumi, primary DB node, and ops backup worker | Trust anchor; public but integrity-sensitive |
-| `db-primary.crt` / `.key` | Primary as `/etc/kamori/tls/postgres.crt` / `.key` | Primary server identity for `10.42.0.21` |
-| `app-client.crt` / `.key` | Pulumi parameters below | API identity used by both replaceable app nodes |
-| `jobs-client.crt` / `.key` | Ops backup worker as `/etc/kamori/tls/jobs-client.crt` / `.key` | Restricted `kamori_jobs` identity |
-
-Copy only the files listed for each host, set private keys to mode `0600`, and
-set certificates to `0644`. The CA private key is the only signing authority;
-its compromise requires replacing the complete PostgreSQL trust domain. Record
-the leaf expiration dates and schedule a reviewed renewal at least 30 days
-before expiry. The current model has no online certificate revocation, so a
-compromised client identity also requires immediate role-password rotation.
-
-### `kamori:postgresCaCertificate` — trusted PostgreSQL CA
-
-- **Classification:** public, integrity-sensitive configuration.
-- **Value:** the complete PEM contents of the generated `postgres-ca.crt`.
-- **Purpose:** lets the API verify that it reached the intended PostgreSQL
-  server rather than a TLS interceptor.
-- **Dependencies:** the Pulumi-derived database URL uses
-  `sslmode=verify-full`; the server
-  certificate must contain its private address or verified hostname in SAN.
-- **Rotation:** trust old and new CA during a staged CA rollover; never replace
-  the only trusted CA before issuing and deploying replacement certificates.
-
-```bash
-pulumi config set --raw kamori:postgresCaCertificate \
-  < /path/on/encrypted/offline-volume/kamori-postgres-pki/postgres-ca.crt
-```
-
-### `kamori:postgresClientCertificate` — PostgreSQL app identity
-
-- **Classification:** public, integrity-sensitive configuration.
-- **Value:** the complete PEM contents of the generated `app-client.crt`,
-  issued only for the `kamori_app` database identity.
-- **Purpose:** PostgreSQL uses it to authenticate API nodes independently of
-  network location.
-- **Dependencies:** must match `postgresClientKey` and the PostgreSQL role/TLS
-  policy.
-
-```bash
-pulumi config set --raw kamori:postgresClientCertificate \
-  < /path/on/encrypted/offline-volume/kamori-postgres-pki/app-client.crt
-```
-
-### `kamori:postgresClientKey` — PostgreSQL app private key
-
-- **Classification:** high-value runtime private key.
-- **Value:** the complete unencrypted PEM contents of the generated
-  `app-client.key`.
-- **Purpose:** proves possession of the `kamori_app` client identity during the
-  TLS handshake.
-- **Storage:** Pulumi writes it with mode `0400`; the API container mounts it
-  read-only.
-- **Compromise:** replace the client certificate/key pair and rotate the
-  database role password. Replacing only one half breaks every database
-  connection.
-
-```bash
-pulumi config set --secret --raw kamori:postgresClientKey \
-  < /path/on/encrypted/offline-volume/kamori-postgres-pki/app-client.key
-```
+Private keys remain encrypted in the passphrase-protected Pulumi state and are
+written only into the role-specific cloud-init for the host that needs them.
+There is no local PKI path, certificate upload, or manual host distribution.
+Pulumi state and the passphrase are therefore part of the PKI trust boundary;
+compromise requires rotating the complete private trust domain. A managed CA
+or KMS/HSM is a post-beta hardening option, not a beta bootstrap dependency.
 
 ### `kamori:jwtSecret` — access-token signing key
 
@@ -597,6 +571,66 @@ pulumi config set --secret kamori:b2RuntimeKeyId
 
 ```bash
 pulumi config set --secret kamori:b2RuntimeApplicationKey
+```
+
+### `kamori:postgresBackupKeyId` — PostgreSQL backup key ID
+
+- **Classification:** bucket-scoped runtime credential identifier stored as a
+  secret.
+- **Value:** the `keyID` of `kamori-production-postgres`, restricted to the
+  private `kamori-production-postgres` bucket with Read and Write access.
+- **Purpose:** lets pgBackRest write WAL/full/differential backups, read them
+  for restore, and expire retained backup objects.
+- **Boundary:** it must not access the primary blob bucket, Pulumi state, the DR
+  bucket, bucket administration, or key administration.
+- **Delivery:** Pulumi writes it only into the root-owned PostgreSQL
+  environment on `db-primary`; it is not a GitHub secret.
+
+```bash
+pulumi config set --secret kamori:postgresBackupKeyId
+```
+
+### `kamori:postgresBackupApplicationKey` — PostgreSQL backup secret
+
+- **Classification:** high-value backup credential secret.
+- **Value:** the one-time `applicationKey` paired with
+  `postgresBackupKeyId`.
+- **Purpose:** signs pgBackRest's S3-compatible requests.
+- **Compromise:** create a replacement bucket-scoped pair, update both Pulumi
+  values, apply the stack, confirm the dedicated backup service externally,
+  and then revoke the old pair.
+
+```bash
+pulumi config set --secret kamori:postgresBackupApplicationKey
+```
+
+### `kamori:b2ReplicationKeyId` — DR source read-only key ID
+
+- **Classification:** bucket-scoped runtime credential identifier stored as a
+  secret.
+- **Value:** the `keyID` of `kamori-production-replication`, restricted to
+  `kamori-production-primary` with Read Only access.
+- **Purpose:** lets the ops worker copy encrypted application blobs into the
+  independent Hetzner DR bucket and verify sampled ciphertext.
+- **Boundary:** it cannot upload, overwrite, or delete primary objects and must
+  not access PostgreSQL backups or Pulumi state.
+
+```bash
+pulumi config set --secret kamori:b2ReplicationKeyId
+```
+
+### `kamori:b2ReplicationApplicationKey` — DR source read-only secret
+
+- **Classification:** runtime credential secret.
+- **Value:** the one-time `applicationKey` paired with
+  `b2ReplicationKeyId`.
+- **Delivery:** Pulumi writes it only to the root-owned backup environment on
+  `ops`; it is not shared with app or database hosts.
+- **Rotation:** replace both replication values together and revoke the old
+  pair only after the updated ops host configuration is applied.
+
+```bash
+pulumi config set --secret kamori:b2ReplicationApplicationKey
 ```
 
 ### `kamori:metricsBearerToken` — Prometheus scrape credential
@@ -737,12 +771,12 @@ setup file. Sticky sessions are neither required nor accepted as an
 authentication correctness mechanism.
 
 Because cloud-init is creation-time configuration, changing a host-delivered
-secret is a rolling node-replacement operation, not an in-place file edit.
-Preview must show one app node at a time, with the other node healthy behind the
-load balancer. Temporarily remove Pulumi and Hetzner protection only for the
-single reviewed replacement, restore protection immediately, and never replace
-both app nodes in one update. Routine application CD does not rewrite
-`/etc/kamori/cloud.env`.
+secret is a node-replacement operation, not an in-place file edit. The initial
+`replace` phase intentionally recreates all empty beta hosts and is therefore a
+bootstrap maintenance window. After the first deployment, never use that phase
+as a routine secret-rotation mechanism: implement and exercise a per-node
+replacement procedure before rotating a host-delivered secret. Routine
+application CD does not rewrite `/etc/kamori/cloud.env` or replace a host.
 
 After the application migration runs, each server records the SHA-256
 fingerprint of its setup in `server_security_config`. A node with a different
@@ -788,60 +822,51 @@ decrypt-and-reencrypt migration first. Never replace those values in isolation.
 
 ## 7. Add deployment-only GitHub secrets
 
-Runtime secrets remain in Pulumi, but the workflows also need credentials for
-SSH deployment and signed client artifacts. Keep these in GitHub Environments;
-they are not application configuration and must not be copied into Pulumi.
+Runtime secrets remain in Pulumi, but the deployment workflow needs the private
+half of the Pulumi-generated deployment identity. Copy it once into the
+protected GitHub `production` Environment after the `replace` infrastructure
+update. Do not generate or distribute host keys manually.
 
 ### `BETA_DEPLOY_SSH_PRIVATE_KEY` — deployment-only SSH identity
 
 - **GitHub location:** `production` Environment secret.
-- **Value:** the complete private half of a dedicated Ed25519 key generated
-  only for application deployment. Generate it without reusing an operator key:
+- **Value:** the complete private half of the Pulumi-generated
+  `ssh-deploy-key`. Transfer it directly from the encrypted stack output:
 
   ```bash
-  ssh-keygen -t ed25519 -a 100 -N '' -f ./kamori-production-deploy -C kamori-production-deploy
+  pulumi stack output deploySshPrivateKey --show-secrets \
+    | gh secret set BETA_DEPLOY_SSH_PRIVATE_KEY --env production
   ```
 
-- **Purpose:** authenticates the protected self-hosted job as `deploy` to
-  `10.42.0.11` and `10.42.0.12` over private TCP `2022`.
-- **Dependencies:** before enabling the workflow, an operator must copy the
-  public half and a reviewed checkout of `deploy/cloud-server` to each app node,
-  then run `bootstrap-host BUNDLE_DIR DEPLOY_PUBLIC_KEY_FILE` as root. That
-  creates the password-locked account and root-owned entrypoints. CI is never
-  allowed to run this bootstrap or install executable host files.
+- **Purpose:** authenticates a protected GitHub-hosted job through `ops` and
+  then as `deploy` to the two private app nodes on TCP `2022`.
+- **Dependencies:** Pulumi cloud-init installs the public half, password-locks
+  the account, and installs root-owned deployment entrypoints. No SSH session
+  or copied repository checkout is used for bootstrap.
 - **Boundary:** the private key is materialized only under `RUNNER_TEMP` for the
-  deployment step and deleted by a shell trap. The account is not in the Docker
-  group and sudo permits only three fixed root-owned wrappers. Never copy an
-  operator key to GitHub or give this key access to database or ops logins.
-- **Rotation:** rerun the trusted bootstrap on both nodes with the replacement
-  public key, update the Environment secret, run one deployment, then destroy
-  the previous key. Because `authorized_keys` is replaced atomically, do both
-  nodes in one controlled maintenance session.
+  deployment step and deleted by a shell trap. The app account is not in the
+  Docker group and sudo permits only three fixed root-owned wrappers. The ops
+  authorization permits only TCP forwarding to the two private app SSH
+  endpoints and forces `/bin/false` for session commands.
+- **Rotation:** replace the Pulumi `ssh-deploy-key` resource in a reviewed
+  update, transfer the new output to GitHub, deploy once, then remove the old
+  GitHub value. Server distribution remains automatic.
 
-### `BETA_SSH_KNOWN_HOSTS` — pinned app-node SSH identities
+### `BETA_SSH_HOST_CA_PUBLIC_KEY` — trusted host authority
 
-- **GitHub location:** `production` Environment secret.
-- **Value:** the complete OpenSSH `known_hosts` lines for both private app
-  addresses on port `2022`.
-- **Purpose:** lets the self-hosted ops runner reject a machine-in-the-middle or
-  a replaced node with an unapproved host key.
-- **Source:** obtain each fingerprint through the authenticated Hetzner Console
-  or another independent trusted channel, compare it with `ssh-keygen -lf`, and
-  only then copy the full public host-key line. An unauthenticated
-  `ssh-keyscan` result is not identity verification.
-- **Rotation:** node replacement changes the host key. Verify the new key before
-  replacing the corresponding line; never disable host-key checking to get a
-  deployment through.
+- **GitHub location:** `production` Environment variable, not a secret.
+- **Value:** the public OpenSSH key of Pulumi's generated host CA. Transfer it
+  without ever reading host keys from the network:
 
-A valid value resembles:
+  ```bash
+  pulumi stack output sshHostCaPublicKey \
+    | gh variable set BETA_SSH_HOST_CA_PUBLIC_KEY --env production
+  ```
 
-```text
-[10.42.0.11]:2022 ssh-ed25519 AAAA...
-[10.42.0.12]:2022 ssh-ed25519 AAAA...
-```
-
-An entry for plain `10.42.0.11` or port `22` does not authenticate a connection
-to port `2022` and will make deployment fail closed.
+- **Purpose:** authenticates the certified `ops`, `app-1`, and `app-2` host
+  identities without `ssh-keyscan` or trust on first use.
+- **Rotation:** update the GitHub variable only from the reviewed Pulumi stack
+  output. Never replace it with a value learned from the target network.
 
 ### GHCR authentication — no persistent secret
 
@@ -855,8 +880,8 @@ running containers and the next job refreshes it before pulling images.
 
 - **GitHub location:** `production` Environment variable, not a secret.
 - **Value:** `10.42.0.11`.
-- **Purpose:** tells the self-hosted runner which private host receives the
-  migration-first rollout.
+- **Purpose:** tells the GitHub-hosted runner which private host receives the
+  migration-first rollout through the ops bastion.
 - **Dependencies:** do not append a port; the workflow supplies `2022`.
   Swapping app one and app two changes which node runs database migrations.
 
@@ -867,6 +892,22 @@ running containers and the next job refreshes it before pulling images.
 - **Purpose:** identifies the second app node in the rolling deployment.
 - **Dependencies:** it must be a different private address from app one, and
   the ops firewall/private network must allow the connection on `2022`.
+
+### `BETA_OPS_HOST` — public bastion destination
+
+- **GitHub location:** `production` Environment variable, not a secret.
+- **Value:** the stable Pulumi-managed public IPv4 address of `ops`. Transfer it
+  after the `replace` update:
+
+  ```bash
+  pulumi stack output opsPublicIPv4 \
+    | gh variable set BETA_OPS_HOST --env production
+  ```
+
+- **Purpose:** gives the GitHub-hosted deployment job its only public SSH
+  destination. App and database nodes have no public IP addresses.
+- **Boundary:** do not put a username or port in the value; the workflow pins
+  user `deploy`, TCP `2022`, and the certified host alias independently.
 
 ### Release Environment boundary
 

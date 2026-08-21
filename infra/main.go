@@ -17,6 +17,9 @@ const (
 	defaultAppServerType      = "cx23"
 	defaultOpsServerType      = "cx23"
 	defaultDatabaseServerType = "cx33"
+	hostProvisioningRetire    = "retire"
+	hostProvisioningReplace   = "replace"
+	hostProvisioningProtect   = "protect"
 
 	// The generated Go SDK documents camelCase values, but the bridged hcloud
 	// provider validates the Terraform wire value.
@@ -29,6 +32,15 @@ type nodeSpec struct {
 	serverType string
 	location   string
 	privateIP  string
+}
+
+func validateHostProvisioningPhase(value string) error {
+	switch value {
+	case hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect:
+		return nil
+	default:
+		return fmt.Errorf("hostProvisioningPhase must be %q, %q, or %q", hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect)
+	}
 }
 
 type cloudEnvSecrets struct {
@@ -118,32 +130,13 @@ func indentCloudConfigBlock(value string) string {
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := config.New(ctx, "kamori")
-		opaqueServerSetup := cfg.RequireSecret("opaqueServerSetup")
-		refreshRotationKey := cfg.RequireSecret("refreshRotationKey")
-		postgresCACertificate := pulumi.String(cfg.Require("postgresCaCertificate"))
-		postgresClientCertificate := pulumi.String(cfg.Require("postgresClientCertificate"))
-		postgresClientKey := cfg.RequireSecret("postgresClientKey")
-		appRuntimeEnv := pulumi.All(
-			cfg.RequireSecret("databasePassword"),
-			cfg.RequireSecret("valkeyPassword"),
-			cfg.RequireSecret("jwtSecret"),
-			cfg.RequireSecret("adminTotpKek"),
-			cfg.RequireSecret("authTotpKek"),
-			cfg.RequireSecret("b2RuntimeKeyId"),
-			cfg.RequireSecret("b2RuntimeApplicationKey"),
-			cfg.RequireSecret("metricsBearerToken"),
-		).ApplyT(func(values []interface{}) string {
-			return renderCloudEnv(cloudEnvSecrets{
-				databasePassword:     values[0].(string),
-				valkeyPassword:       values[1].(string),
-				jwtSecret:            values[2].(string),
-				adminTotpKek:         values[3].(string),
-				authTotpKek:          values[4].(string),
-				objectStoreKeyID:     values[5].(string),
-				objectStoreSecretKey: values[6].(string),
-				metricsBearerToken:   values[7].(string),
-			}, backblazeEndpoint, backblazeRegion, backblazePrimaryBucket)
-		}).(pulumi.StringOutput)
+		hostProvisioningPhase := cfg.Get("hostProvisioningPhase")
+		if hostProvisioningPhase == "" {
+			hostProvisioningPhase = hostProvisioningRetire
+		}
+		if err := validateHostProvisioningPhase(hostProvisioningPhase); err != nil {
+			return err
+		}
 		provider, err := hcloud.NewProvider(ctx, "hetzner", &hcloud.ProviderArgs{
 			Token: cfg.RequireSecret("hcloudToken").ToStringPtrOutput(),
 		})
@@ -185,32 +178,6 @@ func main() {
 			return err
 		}
 
-		firewall, err := hcloud.NewFirewall(ctx, "host-firewall", &hcloud.FirewallArgs{
-			Name:   pulumi.String("kamori-beta-hosts"),
-			Labels: commonLabels("firewall"),
-			Rules: hcloud.FirewallRuleArray{
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String(sshPort), SourceIps: pulumi.StringArray{pulumi.String(valkeyPrivateIP + "/32")}, Description: pulumi.String("ops runner SSH")},
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("8080"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("load balancer to app")},
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("5432"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private PostgreSQL")},
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("6379"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private Valkey")},
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("9100"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private metrics")},
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String("9090"), SourceIps: pulumi.StringArray{pulumi.String("10.42.0.0/16")}, Description: pulumi.String("private Prometheus")},
-			},
-		}, opts)
-		if err != nil {
-			return err
-		}
-		operatorFirewall, err := hcloud.NewFirewall(ctx, "operator-firewall", &hcloud.FirewallArgs{
-			Name:   pulumi.String("kamori-beta-operator-access"),
-			Labels: commonLabels("operator-access"),
-			Rules: hcloud.FirewallRuleArray{
-				&hcloud.FirewallRuleArgs{Direction: pulumi.String("in"), Protocol: pulumi.String("tcp"), Port: pulumi.String(sshPort), SourceIps: pulumi.StringArray{pulumi.String("0.0.0.0/0"), pulumi.String("::/0")}, Description: pulumi.String("operator SSH to ops bastion")},
-			},
-		}, opts)
-		if err != nil {
-			return err
-		}
-
 		appPlacement, err := hcloud.NewPlacementGroup(ctx, "app-placement", &hcloud.PlacementGroupArgs{
 			Name: pulumi.String("kamori-beta-app"), Type: pulumi.String("spread"), Labels: commonLabels("app"),
 		}, opts)
@@ -218,76 +185,11 @@ func main() {
 			return err
 		}
 
-		nodes := []nodeSpec{
-			{name: "app-1", role: "app", serverType: cfg.Get("appServerType"), location: "nbg1", privateIP: "10.42.0.11"},
-			{name: "app-2", role: "app", serverType: cfg.Get("appServerType"), location: "fsn1", privateIP: "10.42.0.12"},
-			{name: "db-primary", role: "db-primary", serverType: cfg.Get("dbServerType"), location: "nbg1", privateIP: databasePrimaryPrivateIP},
-			{name: "ops", role: "ops", serverType: cfg.Get("opsServerType"), location: "hel1", privateIP: valkeyPrivateIP},
-		}
-		servers := make(map[string]*hcloud.Server, len(nodes))
-		for _, spec := range nodes {
-			if spec.serverType == "" {
-				switch spec.role {
-				case "app":
-					spec.serverType = defaultAppServerType
-				case "ops":
-					spec.serverType = defaultOpsServerType
-				default:
-					spec.serverType = defaultDatabaseServerType
-				}
-			}
-			firewallIDs := pulumi.IntArray{idToInt(firewall.ID())}
-			if spec.role == "ops" {
-				firewallIDs = append(firewallIDs, idToInt(operatorFirewall.ID()))
-			}
-			args := &hcloud.ServerArgs{
-				Name:              pulumi.String("kamori-beta-" + spec.name),
-				Image:             pulumi.String("ubuntu-24.04"),
-				ServerType:        pulumi.String(spec.serverType),
-				Location:          pulumi.String(spec.location),
-				SshKeys:           stringsToInputs(sshKeys),
-				FirewallIds:       firewallIDs,
-				Backups:           pulumi.Bool(true),
-				UserData:          pulumi.String(baseCloudInit(spec.role, appHostSecrets{})),
-				Labels:            commonLabels(spec.role),
-				PublicNets:        hcloud.ServerPublicNetArray{&hcloud.ServerPublicNetArgs{Ipv4Enabled: pulumi.Bool(true), Ipv6Enabled: pulumi.Bool(true)}},
-				Networks:          hcloud.ServerNetworkTypeArray{&hcloud.ServerNetworkTypeArgs{SubnetId: subnet.ID(), Ip: pulumi.String(spec.privateIP), AliasIps: pulumi.StringArray{}}},
-				DeleteProtection:  pulumi.Bool(true),
-				RebuildProtection: pulumi.Bool(true),
-			}
-			if spec.role == "app" {
-				args.PlacementGroupId = idToInt(appPlacement.ID()).ToIntPtrOutput()
-				args.UserData = pulumi.All(
-					opaqueServerSetup,
-					refreshRotationKey,
-					appRuntimeEnv,
-					postgresCACertificate,
-					postgresClientCertificate,
-					postgresClientKey,
-				).ApplyT(func(values []interface{}) string {
-					return baseCloudInit(spec.role, appHostSecrets{
-						opaqueServerSetup:         values[0].(string),
-						refreshRotationKey:        values[1].(string),
-						runtimeEnv:                values[2].(string),
-						postgresCACertificate:     values[3].(string),
-						postgresClientCertificate: values[4].(string),
-						postgresClientKey:         values[5].(string),
-					})
-				}).(pulumi.StringOutput)
-			}
-			server, err := hcloud.NewServer(ctx, spec.name, args, opts, pulumi.Protect(true), pulumi.DependsOn([]pulumi.Resource{subnet, firewall, operatorFirewall}))
-			if err != nil {
-				return err
-			}
-			servers[spec.name] = server
-		}
-
-		_, err = hcloud.NewVolume(ctx, "db-primary-data", &hcloud.VolumeArgs{
-			Name: pulumi.String("kamori-beta-db-primary-data"), Size: pulumi.Int(80), ServerId: idToInt(servers["db-primary"].ID()).ToIntPtrOutput(), Format: pulumi.String("ext4"), Automount: pulumi.Bool(true), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("postgres-data"),
-		}, opts, pulumi.Protect(true))
+		hosts, err := provisionHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, hostProvisioningPhase)
 		if err != nil {
 			return err
 		}
+		servers := hosts.servers
 
 		loadBalancer, err := hcloud.NewLoadBalancer(ctx, "public-load-balancer", &hcloud.LoadBalancerArgs{
 			Name: pulumi.String("kamori-beta-public"), LoadBalancerType: pulumi.String("lb11"), Location: pulumi.String("nbg1"), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("public-edge"), Algorithm: &hcloud.LoadBalancerAlgorithmArgs{Type: pulumi.String(loadBalancerAlgorithm)},

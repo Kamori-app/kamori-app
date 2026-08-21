@@ -17,8 +17,8 @@ load_postgres_env() {
   : "${PGBACKREST_S3_KEY_ID:?PGBACKREST_S3_KEY_ID is required}"
   : "${PGBACKREST_S3_APPLICATION_KEY:?PGBACKREST_S3_APPLICATION_KEY is required}"
   : "${PGBACKREST_CIPHER_PASS:?PGBACKREST_CIPHER_PASS is required}"
-  if [[ ! "$POSTGRES_DATA_DIR" =~ ^/mnt/HC_Volume_[A-Za-z0-9._-]+/postgresql/[0-9]+/main$ ]]; then
-    echo "POSTGRES_DATA_DIR must point inside an explicit Hetzner volume mount" >&2
+  if [[ ! "$POSTGRES_DATA_DIR" =~ ^/srv/kamori-postgres/postgresql/[0-9]+/main$ ]]; then
+    echo "POSTGRES_DATA_DIR must point inside the dedicated Kamori volume mount" >&2
     exit 1
   fi
   export POSTGRES_VERSION POSTGRES_PRIMARY_IP POSTGRES_DATA_DIR
