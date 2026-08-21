@@ -29,6 +29,30 @@ func TestPulumiCLIPinMatchesInfrastructureWorkflow(t *testing.T) {
 	}
 }
 
+func TestPulumiBackendMatchesInfrastructureWorkflow(t *testing.T) {
+	t.Parallel()
+
+	project, err := os.ReadFile("Pulumi.yaml")
+	if err != nil {
+		t.Fatalf("read Pulumi.yaml: %v", err)
+	}
+	workflow, err := os.ReadFile("../.github/workflows/infrastructure.yml")
+	if err != nil {
+		t.Fatalf("read infrastructure workflow: %v", err)
+	}
+
+	projectBackend := requiredMatch(t, project, `(?m)^  url: (s3://\S+)$`)
+	workflowBackend := requiredMatch(t, workflow, `(?m)^\s+cloud-url: (s3://\S+)$`)
+	if projectBackend != workflowBackend {
+		t.Fatalf("Pulumi backend URLs differ: Pulumi.yaml=%s workflow=%s",
+			projectBackend, workflowBackend)
+	}
+
+	if regexp.MustCompile(`[?&]awssdk=v2(?:&|$)`).MatchString(projectBackend) {
+		t.Fatal("Backblaze B2 backend must use Pulumi's legacy AWS SDK v1 path")
+	}
+}
+
 func requiredMatch(t *testing.T, contents []byte, pattern string) string {
 	t.Helper()
 

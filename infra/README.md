@@ -33,12 +33,13 @@ Pulumi state is stored in the private
 `Pulumi.yaml`. Local operators and GitHub Actions use the same backend. Its
 dedicated bucket-scoped Application Key is a bootstrap credential supplied as
 AWS-compatible environment variables; it is not stored inside Pulumi config.
-AWS SDK v2 request and response checksum behavior is fixed to `when_required`
-for compatibility with the B2 S3 endpoint; local operators and CI must retain
-those environment settings. Pulumi CLI is temporarily pinned to `3.257.0`.
-Pulumi `3.258.0` updates the `gocloud.dev`/AWS S3 upload stack and can read the
-backend during `preview`, but B2 rejects its update-lock `PutObject` before an
-`up` can start. Keep the CLI pin separate from the Go SDK dependency version.
+Pulumi CLI is temporarily pinned to `3.244.0`, the last release before this DIY
+backend moved to the AWS SDK v2 upload path. B2 rejects the update-lock
+`PutObject` from CLI `3.257.0` because of its checksum-algorithm header and from
+CLI `3.258.0` because of its `STANDARD` storage-class header. The backend URL
+therefore deliberately omits `awssdk=v2`; local operators and CI both use the
+legacy AWS SDK v1 implementation. Keep the CLI pin separate from the Go SDK
+dependency version.
 Upgrade the CLI only after a newer release succeeds at both `preview` and a
 no-op `up` against this bucket; changing the pin does not migrate state.
 
