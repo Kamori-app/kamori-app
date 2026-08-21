@@ -229,9 +229,12 @@ stack configuration.
 pulumi config set kamori:sshKeys operator-key
 ```
 
-The stock image may briefly start `sshd` on `22`, but the Hetzner firewall
-never exposes that port. Local cloud-init validates the configuration with
-`sshd -t` and reloads it on `2022`. If this fails, inspect
+The stock image may briefly activate SSH through `ssh.socket` on `22`, but the
+Hetzner firewall never exposes that port. Before package installation,
+cloud-init validates the hardened configuration with `sshd -t`, disables
+socket activation, enables `ssh.service`, and starts it on `2022`. This order
+also keeps SSH administration available if a later package mirror is slow or
+unavailable. If the transition fails, inspect
 `/var/log/cloud-init-output.log` through the authenticated Hetzner Console; do
 not expose `22` as a workaround.
 
