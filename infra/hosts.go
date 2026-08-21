@@ -148,6 +148,7 @@ func provisionAutomatedHosts(
 		case "app":
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
+				hostIdentity.publicKey,
 				hostIdentity.certificate,
 				sshIdentity.deployPublicKey,
 				appRuntimeEnv,
@@ -158,14 +159,15 @@ func provisionAutomatedHosts(
 				postgresIdentity.appClientPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
 				return renderAppCloudInit(appCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostCertificate: values[1].(string)},
-					deployPublicKey:    values[2].(string), cloudEnvironment: values[3].(string), opaqueServerSetup: values[4].(string), refreshRotationKey: values[5].(string),
-					postgresCACertificate: values[6].(string), postgresClientCertificate: values[7].(string), postgresClientPrivateKey: values[8].(string),
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
+					deployPublicKey:    values[3].(string), cloudEnvironment: values[4].(string), opaqueServerSetup: values[5].(string), refreshRotationKey: values[6].(string),
+					postgresCACertificate: values[7].(string), postgresClientCertificate: values[8].(string), postgresClientPrivateKey: values[9].(string),
 				})
 			}).(pulumi.StringOutput)
 		case "ops":
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
+				hostIdentity.publicKey,
 				hostIdentity.certificate,
 				sshIdentity.deployPublicKey,
 				cfg.RequireSecret("valkeyPassword"),
@@ -177,14 +179,15 @@ func provisionAutomatedHosts(
 				postgresIdentity.jobsClientPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
 				return renderOpsCloudInit(opsCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostCertificate: values[1].(string)},
-					deployPublicKey:    values[2].(string), valkeyPassword: values[3].(string), grafanaAdminPassword: values[4].(string), metricsBearerToken: values[5].(string), backupEnvironment: values[6].(string),
-					postgresCACertificate: values[7].(string), postgresJobsCertificate: values[8].(string), postgresJobsPrivateKey: values[9].(string),
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
+					deployPublicKey:    values[3].(string), valkeyPassword: values[4].(string), grafanaAdminPassword: values[5].(string), metricsBearerToken: values[6].(string), backupEnvironment: values[7].(string),
+					postgresCACertificate: values[8].(string), postgresJobsCertificate: values[9].(string), postgresJobsPrivateKey: values[10].(string),
 				})
 			}).(pulumi.StringOutput)
 		case "db-primary":
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
+				hostIdentity.publicKey,
 				hostIdentity.certificate,
 				dataVolume.ID(),
 				postgresEnvironment,
@@ -193,8 +196,8 @@ func provisionAutomatedHosts(
 				postgresIdentity.serverPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
 				return renderDatabaseCloudInit(databaseCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostCertificate: values[1].(string)},
-					volumeID:           string(values[2].(pulumi.ID)), postgresEnvironment: values[3].(string), postgresCACertificate: values[4].(string), postgresServerCertificate: values[5].(string), postgresServerPrivateKey: values[6].(string),
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
+					volumeID:           string(values[3].(pulumi.ID)), postgresEnvironment: values[4].(string), postgresCACertificate: values[5].(string), postgresServerCertificate: values[6].(string), postgresServerPrivateKey: values[7].(string),
 				})
 			}).(pulumi.StringOutput)
 		}

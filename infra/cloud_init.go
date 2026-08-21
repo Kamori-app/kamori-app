@@ -24,6 +24,7 @@ type cloudInitFile struct {
 type commonHostMaterial struct {
 	hostName        string
 	hostPrivateKey  string
+	hostPublicKey   string
 	hostCertificate string
 }
 
@@ -110,6 +111,7 @@ func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFi
 	commonFiles := []cloudInitFile{
 		{path: "/etc/kamori/node-role", owner: "root:root", permissions: "0644", content: role + "\n"},
 		{path: "/etc/ssh/ssh_host_ed25519_key", owner: "root:root", permissions: "0600", content: common.hostPrivateKey},
+		{path: "/etc/ssh/ssh_host_ed25519_key.pub", owner: "root:root", permissions: "0644", content: common.hostPublicKey},
 		{path: "/etc/ssh/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: common.hostCertificate},
 		{path: "/etc/ssh/sshd_config.d/60-kamori-hardening.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`Port %s
 PasswordAuthentication no

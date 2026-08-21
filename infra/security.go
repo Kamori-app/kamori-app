@@ -40,6 +40,7 @@ type postgresPKI struct {
 
 type sshHostIdentity struct {
 	privateKey  pulumi.StringOutput
+	publicKey   pulumi.StringOutput
 	certificate pulumi.StringOutput
 }
 
@@ -208,6 +209,7 @@ func provisionSSHPKI(ctx *pulumi.Context, hostNames []string) (*sshPKI, error) {
 		}).(pulumi.StringOutput)
 		hosts[hostName] = sshHostIdentity{
 			privateKey:  hostKey.PrivateKeyOpenssh,
+			publicKey:   hostKey.PublicKeyOpenssh,
 			certificate: certificate,
 		}
 	}

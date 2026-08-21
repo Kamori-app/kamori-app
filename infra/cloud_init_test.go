@@ -15,6 +15,7 @@ func TestAutomatedCloudInitIsDeterministicAndBelowProviderLimit(t *testing.T) {
 	common := commonHostMaterial{
 		hostName:        "kamori-beta-app-1",
 		hostPrivateKey:  "HOST PRIVATE KEY",
+		hostPublicKey:   "ssh-ed25519 HOST PUBLIC KEY",
 		hostCertificate: "HOST CERTIFICATE",
 	}
 	material := appCloudInitMaterial{
@@ -53,7 +54,7 @@ func TestAutomatedCloudInitIsDeterministicAndBelowProviderLimit(t *testing.T) {
 }
 
 func TestEveryRoleCloudInitIsValidAndBelowProviderLimit(t *testing.T) {
-	common := commonHostMaterial{hostName: "kamori-beta-test", hostPrivateKey: "HOST KEY", hostCertificate: "HOST CERT"}
+	common := commonHostMaterial{hostName: "kamori-beta-test", hostPrivateKey: "HOST KEY", hostPublicKey: "ssh-ed25519 HOST PUBLIC KEY", hostCertificate: "HOST CERT"}
 	documents := map[string]struct {
 		value string
 		err   error
@@ -144,6 +145,7 @@ func TestRenderedCloudInitReplacesDefaultSSHSocketListener(t *testing.T) {
 	document, err := renderCloudInit("test", commonHostMaterial{
 		hostName:        "kamori-beta-test",
 		hostPrivateKey:  "HOST KEY",
+		hostPublicKey:   "ssh-ed25519 HOST PUBLIC KEY",
 		hostCertificate: "HOST CERT",
 	}, nil, commonFirstBoot("curl", false))
 	if err != nil {
@@ -190,6 +192,78 @@ func TestRenderedCloudInitReplacesDefaultSSHSocketListener(t *testing.T) {
 		return
 	}
 	t.Fatalf("cloud-init is missing %s", socketDropIn)
+}
+
+func TestRenderedCloudInitInstallsCompleteSSHHostIdentity(t *testing.T) {
+	t.Parallel()
+
+	document, err := renderCloudInit("test", commonHostMaterial{
+		hostName:        "kamori-beta-test",
+		hostPrivateKey:  "HOST PRIVATE KEY",
+		hostPublicKey:   "ssh-ed25519 HOST PUBLIC KEY",
+		hostCertificate: "HOST CERTIFICATE",
+	}, nil, commonFirstBoot("curl", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parsed struct {
+		WriteFiles []struct {
+			Path        string `yaml:"path"`
+			Permissions string `yaml:"permissions"`
+			Encoding    string `yaml:"encoding"`
+			Content     string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("cloud-init is not valid YAML: %v", err)
+	}
+
+	expected := map[string]struct {
+		permissions string
+		content     string
+	}{
+		"/etc/ssh/ssh_host_ed25519_key":          {permissions: "0600", content: "HOST PRIVATE KEY"},
+		"/etc/ssh/ssh_host_ed25519_key.pub":      {permissions: "0644", content: "ssh-ed25519 HOST PUBLIC KEY"},
+		"/etc/ssh/ssh_host_ed25519_key-cert.pub": {permissions: "0644", content: "HOST CERTIFICATE"},
+	}
+
+	for _, file := range parsed.WriteFiles {
+		want, ok := expected[file.Path]
+		if !ok {
+			continue
+		}
+		if file.Permissions != want.permissions {
+			t.Fatalf("%s permissions = %q, want %q", file.Path, file.Permissions, want.permissions)
+		}
+		if file.Encoding != "gzip+base64" {
+			t.Fatalf("%s uses unexpected encoding %q", file.Path, file.Encoding)
+		}
+		compressed, err := base64.StdEncoding.DecodeString(file.Content)
+		if err != nil {
+			t.Fatalf("decode %s: %v", file.Path, err)
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			t.Fatalf("decompress %s: %v", file.Path, err)
+		}
+		contents, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read %s: %v", file.Path, err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatalf("close %s reader: %v", file.Path, err)
+		}
+		if got := string(contents); got != want.content {
+			t.Fatalf("%s content = %q, want %q", file.Path, got, want.content)
+		}
+		delete(expected, file.Path)
+	}
+	if len(expected) != 0 {
+		for path := range expected {
+			t.Errorf("cloud-init is missing %s", path)
+		}
+	}
 }
 
 func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
