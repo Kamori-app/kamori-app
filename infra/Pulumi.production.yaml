@@ -1,6 +1,6 @@
 encryptionsalt: v1:b2/LH1+YaqU=:v1:3NvGjk46y0U1qIWc:ZZWxBnh68U9rOKthDHruODIio9wbqg==
 config:
-  kamori:hostProvisioningPhase: retire
+  kamori:hostProvisioningPhase: replace
   kamori:opaqueServerSetup:
     secure: v1:GfSbHGbH+WthS4uW:X/f1BA8gLNVEc1DpMidNRyA0m0RfzNZlwpL6qMmW7QqjKMveHQUs/nmrS0/g3UpBivRfBqX9S8dukZhCUG5SVRxfbZWfLNOPaTYHgVDFvQ2QpqeFR/7So7NfNt6Ofsdl+QO8hx/P+T7JSIczGva98m1Ou5erXZQrmb2JFNqAib1swVRvET6EEsTrav27IX88TG2bAlQR+S1oUJSXLJ/XVZTCaWUUtRqlWlF4PyQvK+U1D0qlw10QGYe/hvc=
   kamori:refreshRotationKey:
@@ -65,3 +65,11 @@ config:
     secure: v1:Ls3uVJeJkNCTH/nN:f7tvtNiC2d8oxwi83n4UC/okn4AylzaI3mJYzGt3+ZcjFkc7aM2Rfitb8ePBgjXNKdTeemSmRWmd2Q0S
   kamori:metricsBearerToken:
     secure: v1:2tp+h1X7AArBghWH:YHSInR25OOhsv4IplsHyCzHIrs4UhIOXTx19QEtuNIwaLerzhzoEAUmZ9xYoQnkewB8rTWwNQcLAW74c
+  kamori:postgresBackupKeyId:
+    secure: v1:VlZSqfnKFcsYO6Mo:ojfoTuHkl5ACLlKL3TyvMZ+Dag/UCHF0Du1W/AKiEuB94DLMYhWohS4=
+  kamori:postgresBackupApplicationKey:
+    secure: v1:VkZznkZFoEhyt+kF:t+UWMYMIbE0n9YrO5V4w6wUxvioVja3wv7CiKa5Pkyo4u+ubBauUqFY3B0fPhbg=
+  kamori:b2ReplicationKeyId:
+    secure: v1:HcPTnU0YkC4HgOY2:s9UV1OzPSZVMYZ6Q6HgyuqQFbwxMzpZIsv6Un8SuEHxu/tN5W+4dixI=
+  kamori:b2ReplicationApplicationKey:
+    secure: v1:rXqBgM834RS7QpMS:/M6bqUonqT/l2t8n+kHJZS3TlKm6dcwkoR/9HeytvyEFuoziWHZYOBfH+1hXIkQ=
