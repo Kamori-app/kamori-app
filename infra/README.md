@@ -91,8 +91,9 @@ or a `PULUMI_ACCESS_TOKEN`.
 VM creation itself uses the Hetzner API, not SSH. Pulumi generates a persistent
 SSH host CA, a certified host identity per node, and a dedicated deployment
 identity. Cloud-init installs the identities, validates the hardened OpenSSH
-configuration, and moves the daemon from the image default to `2022`. There is
-no `ssh-keyscan` trust-on-first-use step. The operator key configured in Hetzner
+configuration, disables Ubuntu's port-22 `ssh.socket` activation, and enables
+`ssh.service` on `2022` before installing additional packages. There is no
+`ssh-keyscan` trust-on-first-use step. The operator key configured in Hetzner
 remains the break-glass identity. Do not temporarily expose `22`; use the
 Hetzner Console for failed first-boot recovery.
 

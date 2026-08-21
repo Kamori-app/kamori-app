@@ -196,6 +196,11 @@ cat >/etc/apt/apt.conf.d/99kamori-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 Acquire::Retries "10";
 EOF
+sshd -t
+systemctl disable --now ssh.socket
+systemctl daemon-reload
+systemctl enable ssh.service
+systemctl restart ssh.service
 for attempt in $(seq 1 120); do
   if apt-get update && apt-get install -y --no-install-recommends %s; then
     break
@@ -208,8 +213,6 @@ for attempt in $(seq 1 120); do
 done
 rm -f /etc/ssh/ssh_host_rsa_key* /etc/ssh/ssh_host_ecdsa_key*
 sysctl --system
-sshd -t
-systemctl restart ssh.service
 systemctl enable --now fail2ban.service chrony.service prometheus-node-exporter.service
 `, routeSetup, packages)
 }

@@ -94,6 +94,38 @@ func TestEveryRoleCloudInitIsValidAndBelowProviderLimit(t *testing.T) {
 	}
 }
 
+func TestFirstBootPinsSSHServiceBeforePackageInstallation(t *testing.T) {
+	t.Parallel()
+
+	script := commonFirstBoot("curl", false)
+	commands := []string{
+		"sshd -t",
+		"systemctl disable --now ssh.socket",
+		"systemctl daemon-reload",
+		"systemctl enable ssh.service",
+		"systemctl restart ssh.service",
+	}
+	previous := -1
+	for _, command := range commands {
+		position := strings.Index(script, command)
+		if position < 0 {
+			t.Fatalf("first-boot script is missing %q", command)
+		}
+		if position <= previous {
+			t.Fatalf("first-boot SSH transition is out of order at %q", command)
+		}
+		previous = position
+	}
+
+	packageInstall := strings.Index(script, "for attempt in $(seq 1 120); do")
+	if packageInstall < 0 {
+		t.Fatal("first-boot script is missing the package installation loop")
+	}
+	if previous >= packageInstall {
+		t.Fatal("SSH must move to its configured port before package installation")
+	}
+}
+
 func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
 	postgres := renderPostgresEnvironment("app", "jobs", "postgres-key", "postgres-secret", "cipher")
 	for _, expected := range []string{
