@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"io"
 	"strings"
 	"testing"
 
@@ -94,16 +98,15 @@ func TestEveryRoleCloudInitIsValidAndBelowProviderLimit(t *testing.T) {
 	}
 }
 
-func TestFirstBootPinsSSHServiceBeforePackageInstallation(t *testing.T) {
+func TestFirstBootPinsSSHSocketBeforePackageInstallation(t *testing.T) {
 	t.Parallel()
 
 	script := commonFirstBoot("curl", false)
 	commands := []string{
 		"sshd -t",
-		"systemctl disable --now ssh.socket",
 		"systemctl daemon-reload",
-		"systemctl enable ssh.service",
-		"systemctl restart ssh.service",
+		"systemctl enable ssh.socket",
+		"systemctl restart ssh.socket",
 	}
 	previous := -1
 	for _, command := range commands {
@@ -124,6 +127,69 @@ func TestFirstBootPinsSSHServiceBeforePackageInstallation(t *testing.T) {
 	if previous >= packageInstall {
 		t.Fatal("SSH must move to its configured port before package installation")
 	}
+	for _, forbidden := range []string{
+		"systemctl disable --now ssh.socket",
+		"systemctl enable ssh.service",
+		"systemctl restart ssh.service",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("first-boot script must not switch away from socket activation: found %q", forbidden)
+		}
+	}
+}
+
+func TestRenderedCloudInitReplacesDefaultSSHSocketListener(t *testing.T) {
+	t.Parallel()
+
+	document, err := renderCloudInit("test", commonHostMaterial{
+		hostName:        "kamori-beta-test",
+		hostPrivateKey:  "HOST KEY",
+		hostCertificate: "HOST CERT",
+	}, nil, commonFirstBoot("curl", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parsed struct {
+		WriteFiles []struct {
+			Path     string `yaml:"path"`
+			Encoding string `yaml:"encoding"`
+			Content  string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("cloud-init is not valid YAML: %v", err)
+	}
+
+	const socketDropIn = "/etc/systemd/system/ssh.socket.d/60-kamori-listen.conf"
+	for _, file := range parsed.WriteFiles {
+		if file.Path != socketDropIn {
+			continue
+		}
+		if file.Encoding != "gzip+base64" {
+			t.Fatalf("SSH socket drop-in uses unexpected encoding %q", file.Encoding)
+		}
+		compressed, err := base64.StdEncoding.DecodeString(file.Content)
+		if err != nil {
+			t.Fatalf("decode SSH socket drop-in: %v", err)
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			t.Fatalf("decompress SSH socket drop-in: %v", err)
+		}
+		contents, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatalf("read SSH socket drop-in: %v", err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatalf("close SSH socket drop-in reader: %v", err)
+		}
+		if got, want := string(contents), "[Socket]\nListenStream=\nListenStream=2022\n"; got != want {
+			t.Fatalf("SSH socket drop-in = %q, want %q", got, want)
+		}
+		return
+	}
+	t.Fatalf("cloud-init is missing %s", socketDropIn)
 }
 
 func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
