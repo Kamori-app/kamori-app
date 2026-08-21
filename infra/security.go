@@ -15,6 +15,11 @@ const (
 	postgresCAValidityHours   = 10 * 365 * 24
 	postgresLeafValidityHours = 397 * 24
 	postgresLeafRenewalHours  = 30 * 24
+	tlsUseCertSigning         = "cert_signing"
+	tlsUseCRLSigning          = "crl_signing"
+	tlsUseDigitalSignature    = "digital_signature"
+	tlsUseServerAuth          = "server_auth"
+	tlsUseClientAuth          = "client_auth"
 )
 
 type generatedPasswords struct {
@@ -92,8 +97,8 @@ func provisionPostgresPKI(ctx *pulumi.Context) (*postgresPKI, error) {
 		SetSubjectKeyId:     pulumi.Bool(true),
 		ValidityPeriodHours: pulumi.Int(postgresCAValidityHours),
 		AllowedUses: pulumi.StringArray{
-			pulumi.String("certSigning"),
-			pulumi.String("crlSigning"),
+			pulumi.String(tlsUseCertSigning),
+			pulumi.String(tlsUseCRLSigning),
 		},
 		Subject: &tls.SelfSignedCertSubjectArgs{
 			CommonName:   pulumi.String("Kamori PostgreSQL Root CA"),
@@ -136,7 +141,7 @@ func provisionPostgresPKI(ctx *pulumi.Context) (*postgresPKI, error) {
 			EarlyRenewalHours:   pulumi.Int(postgresLeafRenewalHours),
 			SetSubjectKeyId:     pulumi.Bool(true),
 			AllowedUses: pulumi.StringArray{
-				pulumi.String("digitalSignature"),
+				pulumi.String(tlsUseDigitalSignature),
 				pulumi.String(allowedUse),
 			},
 		})
@@ -146,19 +151,19 @@ func provisionPostgresPKI(ctx *pulumi.Context) (*postgresPKI, error) {
 		return &leaf{certificate: certificate.CertPem, privateKey: key.PrivateKeyPem}, nil
 	}
 
-	server, err := issueLeaf("postgres-server", "kamori-db-primary", "serverAuth", pulumi.StringArray{
+	server, err := issueLeaf("postgres-server", "kamori-db-primary", tlsUseServerAuth, pulumi.StringArray{
 		pulumi.String(databasePrimaryPrivateIP),
 	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create PostgreSQL server identity: %w", err)
 	}
-	app, err := issueLeaf("postgres-app-client", databaseApplicationRole, "clientAuth", nil, pulumi.StringArray{
+	app, err := issueLeaf("postgres-app-client", databaseApplicationRole, tlsUseClientAuth, nil, pulumi.StringArray{
 		pulumi.String("spiffe://kamori.app/postgres/app"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create PostgreSQL app identity: %w", err)
 	}
-	jobs, err := issueLeaf("postgres-jobs-client", "kamori_jobs", "clientAuth", nil, pulumi.StringArray{
+	jobs, err := issueLeaf("postgres-jobs-client", "kamori_jobs", tlsUseClientAuth, nil, pulumi.StringArray{
 		pulumi.String("spiffe://kamori.app/postgres/jobs"),
 	})
 	if err != nil {
