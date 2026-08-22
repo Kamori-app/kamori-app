@@ -1,8 +1,11 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { replaceState } from "$app/navigation";
     import BrandMark from "$lib/components/BrandMark.svelte";
     import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
-    import { locale } from "$lib/i18n";
+    import { locale, setLocale, type AppLocale } from "$lib/i18n";
+
+    export let data: { requestedLocale: AppLocale | null };
 
     const repository = "https://github.com/Kamori-app/kamori-app";
     const links = {
@@ -28,8 +31,8 @@
             alpha: "Public alpha",
             nav: [
                 ["product", "Product"],
-                ["approach", "How it works"],
-                ["downloads", "Apps"],
+                ["how-it-works", "How it works"],
+                ["apps", "Apps"],
                 ["security", "Security"],
                 ["questions", "Questions"],
             ],
@@ -53,7 +56,7 @@
                 ["Optional system access", "Android and iOS can project selected collections into system calendars or contacts only after explicit consent."],
                 ["DAV when useful", "The desktop app can provide a localhost-only CalDAV/CardDAV endpoint for established desktop clients."],
             ],
-            approachLabel: "02 / Data path",
+            approachLabel: "02 / How it works",
             approachTitle: "Plaintext stops at the device boundary.",
             paths: [
                 ["First-party apps", "Edit offline on web, desktop or mobile"],
@@ -108,8 +111,8 @@
             alpha: "Публичная альфа",
             nav: [
                 ["product", "Продукт"],
-                ["approach", "Как это работает"],
-                ["downloads", "Приложения"],
+                ["how-it-works", "Как это работает"],
+                ["apps", "Приложения"],
                 ["security", "Безопасность"],
                 ["questions", "Вопросы"],
             ],
@@ -133,7 +136,7 @@
                 ["Системный доступ по желанию", "Android и iOS проецируют выбранные коллекции в системный календарь или контакты только после явного согласия."],
                 ["DAV, когда он полезен", "Desktop-приложение может открыть localhost-only CalDAV/CardDAV endpoint для привычных программ."],
             ],
-            approachLabel: "02 / Путь данных",
+            approachLabel: "02 / Как это работает",
             approachTitle: "Открытые данные не покидают устройство.",
             paths: [
                 ["Официальные приложения", "Редактирование офлайн в вебе, desktop или mobile"],
@@ -185,17 +188,36 @@
         },
     } as const;
 
-    $: c = copies[$locale];
-    $: desktopPaper = $locale === "ru" ? links.desktopGuideRu : links.desktopGuide;
-    $: mobilePaper = $locale === "ru" ? links.mobileGuideRu : links.mobileGuide;
-    $: privacyPaper = $locale === "ru" ? links.privacyRu : links.privacy;
+    let currentLocale: AppLocale = data.requestedLocale ?? "en";
+
+    $: c = copies[currentLocale];
+    $: desktopPaper = currentLocale === "ru" ? links.desktopGuideRu : links.desktopGuide;
+    $: mobilePaper = currentLocale === "ru" ? links.mobileGuideRu : links.mobileGuide;
+    $: privacyPaper = currentLocale === "ru" ? links.privacyRu : links.privacy;
 
     let osHint: "desktop" | "mobile" | "other" = "other";
     let latestRelease = "";
     let latestReleaseDate = "";
     let latestReleaseUrl = links.releases;
 
+    const selectLocale = (next: AppLocale) => {
+        currentLocale = next;
+        setLocale(next);
+        const url = new URL(window.location.href);
+        url.searchParams.set("lang", next);
+        replaceState(
+            `${url.pathname}${url.search}${url.hash}`,
+            {},
+        );
+    };
+
     onMount(() => {
+        if (data.requestedLocale) {
+            setLocale(data.requestedLocale);
+        } else {
+            currentLocale = $locale;
+        }
+
         const ua = navigator.userAgent.toLowerCase();
         osHint = /(android|iphone|ipad|ipod)/.test(ua)
             ? "mobile"
@@ -236,7 +258,7 @@
         {/each}
     </nav>
     <div class="header-actions">
-        <LocaleSwitch />
+        <LocaleSwitch value={currentLocale} onSelect={selectLocale} />
         <a class="text-link" href="/app">{c.openApp} →</a>
     </div>
 </header>
@@ -249,7 +271,7 @@
             <p class="lede">{c.intro}</p>
             <div class="hero-actions">
                 <a class="button primary" href="/app?start=signup">{c.start}</a>
-                <a class="button secondary" href="#downloads">{c.seeApps}</a>
+                <a class="button secondary" href="#apps">{c.seeApps}</a>
             </div>
             <p class="availability">{c.available}</p>
         </div>
@@ -289,7 +311,7 @@
         </div>
     </section>
 
-    <section class="numbered-section path-section" id="approach">
+    <section class="numbered-section path-section" id="how-it-works">
         <div class="section-index">{c.approachLabel}</div>
         <div class="section-copy"><h2>{c.approachTitle}</h2></div>
         <ol class="data-path">
@@ -309,7 +331,7 @@
         </a>
     </section>
 
-    <section class="numbered-section" id="downloads">
+    <section class="numbered-section" id="apps">
         <div class="section-index">{c.downloadsLabel}</div>
         <div class="section-copy">
             <h2>{c.downloadsTitle}</h2>

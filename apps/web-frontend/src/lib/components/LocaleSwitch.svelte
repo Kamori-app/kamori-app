@@ -1,20 +1,48 @@
 <script lang="ts">
-    import { locale, setLocale } from "$lib/i18n";
+    import { page } from "$app/stores";
+    import { replaceState } from "$app/navigation";
+    import { locale, setLocale, type AppLocale } from "$lib/i18n";
+
+    export let value: AppLocale | undefined = undefined;
+    export let onSelect: ((value: AppLocale) => void) | undefined = undefined;
+
+    $: selected = value ?? $locale;
+
+    const hrefFor = (next: AppLocale): string => {
+        const url = new URL($page.url);
+        url.searchParams.set("lang", next);
+        return `${url.pathname}${url.search}${url.hash}`;
+    };
+
+    const select = (event: MouseEvent, next: AppLocale) => {
+        event.preventDefault();
+        if (onSelect) {
+            onSelect(next);
+        } else {
+            setLocale(next);
+            const url = new URL(window.location.href);
+            url.searchParams.set("lang", next);
+            replaceState(
+                `${url.pathname}${url.search}${url.hash}`,
+                {},
+            );
+        }
+    };
 </script>
 
 <div class="locale-switch" role="group" aria-label="Language / Язык">
-    <button
-        type="button"
-        class:active={$locale === "en"}
-        aria-pressed={$locale === "en"}
-        on:click={() => setLocale("en")}>EN</button
+    <a
+        href={hrefFor("en")}
+        class:active={selected === "en"}
+        aria-current={selected === "en" ? "true" : undefined}
+        on:click={(event) => select(event, "en")}>EN</a
     >
     <span aria-hidden="true">/</span>
-    <button
-        type="button"
-        class:active={$locale === "ru"}
-        aria-pressed={$locale === "ru"}
-        on:click={() => setLocale("ru")}>RU</button
+    <a
+        href={hrefFor("ru")}
+        class:active={selected === "ru"}
+        aria-current={selected === "ru" ? "true" : undefined}
+        on:click={(event) => select(event, "ru")}>RU</a
     >
 </div>
 
@@ -30,20 +58,19 @@
         letter-spacing: 0.08em;
     }
 
-    button {
-        border: 0;
+    a {
         padding: 0.3rem 0.1rem;
-        background: transparent;
         color: inherit;
         cursor: pointer;
+        text-decoration: none;
     }
 
-    button:hover,
-    button.active {
+    a:hover,
+    a.active {
         color: var(--ink);
     }
 
-    button.active {
+    a.active {
         text-decoration: underline;
         text-decoration-color: var(--coral);
         text-decoration-thickness: 2px;
