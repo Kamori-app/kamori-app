@@ -40,6 +40,11 @@ stable ops public IPv4, role-specific firewalls, and the private-network egress
 route. App and database nodes receive no public IP addresses. `ops` provides
 NAT and is the only SSH bastion.
 
+The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
+running `sshd -t`. Ubuntu normally creates that directory through the
+`RuntimeDirectory=sshd` service setting, but the explicit validation runs
+before the socket-activated service has started for the first time.
+
 No operator copies files, edits `/etc/kamori`, runs bootstrap scripts, installs
 a self-hosted runner, learns host keys from the network, or supplies a local PKI
 path. If first boot fails, use the authenticated Hetzner Console and inspect
