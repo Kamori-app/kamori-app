@@ -242,7 +242,9 @@ func disableCloudInitNetworkHotplug() string {
 # hotplug events, repeatedly queries metadata, and leaves a failed unit.
 systemctl disable --now cloud-init-hotplugd.socket
 systemctl mask cloud-init-hotplugd.socket cloud-init-hotplugd.service
-systemctl reset-failed cloud-init-hotplugd.service
+# A fresh host has no failed state to reset. systemctl exits non-zero when the
+# unit is not loaded, which must not fail the entire cloud-init runcmd.
+systemctl reset-failed cloud-init-hotplugd.service || true
 `
 }
 

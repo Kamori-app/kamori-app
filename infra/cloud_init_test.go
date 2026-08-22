@@ -165,10 +165,14 @@ func TestContainerHostsDisableCloudInitNetworkHotplug(t *testing.T) {
 	}
 
 	const maskCommand = "systemctl mask cloud-init-hotplugd.socket cloud-init-hotplugd.service"
+	const idempotentReset = "systemctl reset-failed cloud-init-hotplugd.service || true"
 	for role, document := range map[string]string{"app": app, "ops": ops} {
 		firstBoot := decodeCloudInitFiles(t, document)["/usr/local/sbin/kamori-first-boot"]
 		if !strings.Contains(firstBoot, maskCommand) {
 			t.Fatalf("%s container host does not disable cloud-init network hotplug", role)
+		}
+		if !strings.Contains(firstBoot, idempotentReset) {
+			t.Fatalf("%s container host does not reset a missing hotplug failure idempotently", role)
 		}
 	}
 	databaseFirstBoot := decodeCloudInitFiles(t, database)["/usr/local/sbin/kamori-first-boot"]
