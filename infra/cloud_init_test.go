@@ -139,6 +139,32 @@ func TestPrivateHostEgressConfiguresProviderDNSBeforePackageInstallation(t *test
 	}
 }
 
+func TestMigrationUsesTheServiceComposeEnvironment(t *testing.T) {
+	t.Parallel()
+
+	script, err := deploymentAsset("cloud-server/deploy-cloud-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(script, "/usr/bin/docker run --rm") {
+		t.Fatal("migration must not use docker run because its env-file parser differs from Compose")
+	}
+	for _, required := range []string{
+		"--file /opt/kamori/release/compose.yaml",
+		`--env-file "$temporary_release"`,
+		"run --rm --no-deps cloud migrate",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("migration command is missing %q", required)
+		}
+	}
+	release := strings.Index(script, "temporary_release=$(mktemp")
+	migration := strings.Index(script, "run --rm --no-deps cloud migrate")
+	if release < 0 || migration < 0 || release >= migration {
+		t.Fatal("immutable release environment must be rendered before the migration starts")
+	}
+}
+
 func decodeCloudInitFiles(t *testing.T, document string) map[string]string {
 	t.Helper()
 
