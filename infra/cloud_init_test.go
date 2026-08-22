@@ -455,3 +455,18 @@ func TestOpsComposeRunsValkeyAsItsImageUser(t *testing.T) {
 		t.Fatalf("Valkey tmpfs = %v, want a writable ephemeral /data mount", valkey.Tmpfs)
 	}
 }
+
+func TestEdgeImageDropsTheUnneededPrivilegedPortCapability(t *testing.T) {
+	t.Parallel()
+
+	dockerfile, err := deploymentAsset("edge/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dockerfile, "setcap -r /usr/bin/caddy") {
+		t.Fatal("edge image must remove Caddy's privileged-port file capability")
+	}
+	if !strings.Contains(dockerfile, `test -z "$(getcap /usr/bin/caddy)"`) {
+		t.Fatal("edge image build must verify that Caddy has no remaining file capabilities")
+	}
+}
