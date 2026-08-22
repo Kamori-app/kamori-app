@@ -393,3 +393,39 @@ func TestOpsComposeUsesPublishedGrafanaRepository(t *testing.T) {
 		t.Fatal("ops compose is missing the tested Grafana image pin")
 	}
 }
+
+func TestOpsComposeRunsValkeyAsItsImageUser(t *testing.T) {
+	t.Parallel()
+
+	compose, err := deploymentAsset("ops/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Services map[string]struct {
+			Image    string   `yaml:"image"`
+			User     string   `yaml:"user"`
+			ReadOnly bool     `yaml:"read_only"`
+			Tmpfs    []string `yaml:"tmpfs"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(compose), &parsed); err != nil {
+		t.Fatalf("ops compose is not valid YAML: %v", err)
+	}
+	valkey, ok := parsed.Services["valkey"]
+	if !ok {
+		t.Fatal("ops compose is missing the Valkey service")
+	}
+	if valkey.Image != "valkey/valkey:9.0.3-alpine" {
+		t.Fatalf("Valkey image = %q, want the tested 9.0.3 Alpine image", valkey.Image)
+	}
+	if valkey.User != "999:1000" {
+		t.Fatalf("Valkey user = %q, want the pinned image's valkey UID/GID", valkey.User)
+	}
+	if !valkey.ReadOnly {
+		t.Fatal("Valkey root filesystem must remain read-only")
+	}
+	if len(valkey.Tmpfs) != 1 || !strings.HasPrefix(valkey.Tmpfs[0], "/data:") {
+		t.Fatalf("Valkey tmpfs = %v, want a writable ephemeral /data mount", valkey.Tmpfs)
+	}
+}

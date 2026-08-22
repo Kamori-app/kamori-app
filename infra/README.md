@@ -131,6 +131,8 @@ path and performs no deployment or uptime probes. Host scripts and the
 environment template live in
 [`deploy/cloud-server`](../deploy/cloud-server); the Prometheus, Alertmanager,
 Grafana, and ephemeral Valkey stack lives in [`deploy/ops`](../deploy/ops).
+Valkey runs directly as the pinned image's non-root UID/GID; its root filesystem
+stays read-only and only its non-persistent `/data` tmpfs is writable.
 Database bootstrap/PITR assets are in [`deploy/postgres`](../deploy/postgres),
 and cross-provider ciphertext replication is in
 [`deploy/backup`](../deploy/backup).
