@@ -92,8 +92,13 @@ VM creation itself uses the Hetzner API, not SSH. Pulumi generates a persistent
 SSH host CA, a certified host identity per node, and a dedicated deployment
 identity. Cloud-init installs each generated private key, its matching raw
 public key, and its host certificate as one identity before validating the
-hardened OpenSSH configuration. Installing the complete keypair prevents a
-cloud image's stale generated `.pub` file from invalidating `sshd -t`.
+hardened OpenSSH configuration. The files are first staged under root-only
+`/var/lib/kamori/bootstrap` and installed into `/etc/ssh` from `runcmd`, after
+Ubuntu's `cc_ssh` module has finished deleting and generating image host keys.
+This ordering prevents cloud-init from silently separating the certificate
+from its Pulumi-managed private key. Any image-started SSH daemon is stopped
+after validation so the socket-activated process cannot retain an older key in
+memory.
 Before that validation, cloud-init creates `/run/sshd` with the same ownership
 and permissions declared by Ubuntu's `ssh.service`; the runtime directory does
 not otherwise exist before the socket-activated service first starts.

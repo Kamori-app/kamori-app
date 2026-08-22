@@ -231,10 +231,13 @@ pulumi config set kamori:sshKeys operator-key
 
 The stock image may briefly activate SSH through `ssh.socket` on `22`, but the
 Hetzner firewall never exposes that port. Before package installation,
-cloud-init validates the hardened configuration with `sshd -t`, reloads
-systemd, and restarts Ubuntu's native `ssh.socket`. Its drop-in first clears
-the image's default listener and then binds only `2022`; it does not switch to
-the standalone `ssh.service`. This order also keeps SSH administration
+cloud-init's `runcmd` installs the staged Pulumi host keypair and certificate
+after Ubuntu's `cc_ssh` module has finished regenerating image keys. It then
+validates the hardened configuration with `sshd -t`, stops any image-started
+SSH daemon, reloads systemd, and restarts Ubuntu's native `ssh.socket`. Its
+drop-in first clears the image's default listener and then binds only `2022`;
+it does not switch to the standalone `ssh.service`. This order also keeps SSH
+administration
 available if a later package mirror is slow or unavailable. If the transition
 fails, inspect `/var/log/cloud-init-output.log` through the authenticated
 Hetzner Console; do not expose `22` as a workaround.

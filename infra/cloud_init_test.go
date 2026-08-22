@@ -104,8 +104,13 @@ func TestFirstBootPinsSSHSocketBeforePackageInstallation(t *testing.T) {
 
 	script := commonFirstBoot("curl", false)
 	commands := []string{
+		"install -d -o root -g root -m 0700 /var/lib/kamori/bootstrap",
+		"install -o root -g root -m 0600 /var/lib/kamori/bootstrap/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key",
+		"install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub",
+		"install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub /etc/ssh/ssh_host_ed25519_key-cert.pub",
 		"install -d -o root -g root -m 0755 /run/sshd",
 		"sshd -t",
+		"systemctl stop ssh.service",
 		"systemctl daemon-reload",
 		"systemctl enable ssh.socket",
 		"systemctl restart ssh.socket",
@@ -195,7 +200,7 @@ func TestRenderedCloudInitReplacesDefaultSSHSocketListener(t *testing.T) {
 	t.Fatalf("cloud-init is missing %s", socketDropIn)
 }
 
-func TestRenderedCloudInitInstallsCompleteSSHHostIdentity(t *testing.T) {
+func TestRenderedCloudInitStagesCompleteSSHHostIdentityOutsideEtcSSH(t *testing.T) {
 	t.Parallel()
 
 	document, err := renderCloudInit("test", commonHostMaterial{
@@ -224,12 +229,15 @@ func TestRenderedCloudInitInstallsCompleteSSHHostIdentity(t *testing.T) {
 		permissions string
 		content     string
 	}{
-		"/etc/ssh/ssh_host_ed25519_key":          {permissions: "0600", content: "HOST PRIVATE KEY"},
-		"/etc/ssh/ssh_host_ed25519_key.pub":      {permissions: "0644", content: "ssh-ed25519 HOST PUBLIC KEY"},
-		"/etc/ssh/ssh_host_ed25519_key-cert.pub": {permissions: "0644", content: "HOST CERTIFICATE"},
+		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key":          {permissions: "0600", content: "HOST PRIVATE KEY"},
+		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub":      {permissions: "0644", content: "ssh-ed25519 HOST PUBLIC KEY"},
+		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub": {permissions: "0644", content: "HOST CERTIFICATE"},
 	}
 
 	for _, file := range parsed.WriteFiles {
+		if strings.HasPrefix(file.Path, "/etc/ssh/ssh_host_") {
+			t.Fatalf("host identity must not be written before cloud-init cc_ssh: %s", file.Path)
+		}
 		want, ok := expected[file.Path]
 		if !ok {
 			continue
