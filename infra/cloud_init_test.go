@@ -139,6 +139,44 @@ func TestPrivateHostEgressConfiguresProviderDNSBeforePackageInstallation(t *test
 	}
 }
 
+func TestContainerHostsDisableCloudInitNetworkHotplug(t *testing.T) {
+	t.Parallel()
+
+	common := commonHostMaterial{hostName: "kamori-beta-test", hostPrivateKey: "HOST KEY", hostPublicKey: "ssh-ed25519 HOST PUBLIC KEY", hostCertificate: "HOST CERT"}
+	app, err := renderAppCloudInit(appCloudInitMaterial{
+		commonHostMaterial: common, deployPublicKey: "ssh-ed25519 DEPLOY", cloudEnvironment: "KAMORI_JWT_SECRET=secret\n", opaqueServerSetup: "opaque", refreshRotationKey: "rotation",
+		postgresCACertificate: "CA", postgresClientCertificate: "CLIENT CERT", postgresClientPrivateKey: "CLIENT KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := renderOpsCloudInit(opsCloudInitMaterial{
+		commonHostMaterial: common, deployPublicKey: "ssh-ed25519 DEPLOY", valkeyPassword: "valkey", grafanaAdminPassword: "grafana", metricsBearerToken: "metrics",
+		backupEnvironment: "PRIMARY_S3_KEY_ID=read\n", postgresCACertificate: "CA", postgresJobsCertificate: "JOBS CERT", postgresJobsPrivateKey: "JOBS KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := renderDatabaseCloudInit(databaseCloudInitMaterial{
+		commonHostMaterial: common, volumeID: "123", postgresEnvironment: "POSTGRES_VERSION=16\n", postgresCACertificate: "CA", postgresServerCertificate: "SERVER CERT", postgresServerPrivateKey: "SERVER KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const maskCommand = "systemctl mask cloud-init-hotplugd.socket cloud-init-hotplugd.service"
+	for role, document := range map[string]string{"app": app, "ops": ops} {
+		firstBoot := decodeCloudInitFiles(t, document)["/usr/local/sbin/kamori-first-boot"]
+		if !strings.Contains(firstBoot, maskCommand) {
+			t.Fatalf("%s container host does not disable cloud-init network hotplug", role)
+		}
+	}
+	databaseFirstBoot := decodeCloudInitFiles(t, database)["/usr/local/sbin/kamori-first-boot"]
+	if strings.Contains(databaseFirstBoot, maskCommand) {
+		t.Fatal("database host must retain cloud-init network hotplug support")
+	}
+}
+
 func TestMigrationUsesTheServiceComposeEnvironment(t *testing.T) {
 	t.Parallel()
 
