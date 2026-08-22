@@ -110,9 +110,12 @@ func compressedBase64(value string) (string, error) {
 func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFile, firstBootScript string) (string, error) {
 	commonFiles := []cloudInitFile{
 		{path: "/etc/kamori/node-role", owner: "root:root", permissions: "0644", content: role + "\n"},
-		{path: "/etc/ssh/ssh_host_ed25519_key", owner: "root:root", permissions: "0600", content: common.hostPrivateKey},
-		{path: "/etc/ssh/ssh_host_ed25519_key.pub", owner: "root:root", permissions: "0644", content: common.hostPublicKey},
-		{path: "/etc/ssh/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: common.hostCertificate},
+		// Cloud-init runs its cc_ssh module after write_files and may replace files
+		// under /etc/ssh. Stage the Pulumi-managed identity outside that directory;
+		// runcmd installs it after every config module has completed.
+		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key", owner: "root:root", permissions: "0600", content: common.hostPrivateKey},
+		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub", owner: "root:root", permissions: "0644", content: common.hostPublicKey},
+		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: common.hostCertificate},
 		{path: "/etc/ssh/sshd_config.d/60-kamori-hardening.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`Port %s
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -202,11 +205,18 @@ cat >/etc/apt/apt.conf.d/99kamori-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 Acquire::Retries "10";
 EOF
+install -d -o root -g root -m 0700 /var/lib/kamori/bootstrap
+install -o root -g root -m 0600 /var/lib/kamori/bootstrap/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub
+install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub /etc/ssh/ssh_host_ed25519_key-cert.pub
+rm -f /etc/ssh/ssh_host_rsa_key* /etc/ssh/ssh_host_ecdsa_key*
 install -d -o root -g root -m 0755 /run/sshd
 sshd -t
+systemctl stop ssh.service
 systemctl daemon-reload
 systemctl enable ssh.socket
 systemctl restart ssh.socket
+rm -f /var/lib/kamori/bootstrap/ssh_host_ed25519_key /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub
 for attempt in $(seq 1 120); do
   if apt-get update && apt-get install -y --no-install-recommends %s; then
     break
@@ -217,7 +227,6 @@ for attempt in $(seq 1 120); do
   fi
   sleep 5
 done
-rm -f /etc/ssh/ssh_host_rsa_key* /etc/ssh/ssh_host_ecdsa_key*
 sysctl --system
 systemctl enable --now fail2ban.service chrony.service prometheus-node-exporter.service
 `, routeSetup, packages)

@@ -43,7 +43,12 @@ NAT and is the only SSH bastion.
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the
 `RuntimeDirectory=sshd` service setting, but the explicit validation runs
-before the socket-activated service has started for the first time.
+before the socket-activated service has started for the first time. Host key
+material is staged outside `/etc/ssh` and installed by `runcmd`, after
+cloud-init's standard `cc_ssh` module, so image key regeneration cannot replace
+the private key underneath the Pulumi-signed host certificate. The bootstrap
+then stops any image-started SSH daemon before restarting the configured socket,
+which prevents a process from retaining the replaced key in memory.
 
 No operator copies files, edits `/etc/kamori`, runs bootstrap scripts, installs
 a self-hosted runner, learns host keys from the network, or supplies a local PKI
