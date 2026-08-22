@@ -235,6 +235,17 @@ systemctl enable --now fail2ban.service chrony.service prometheus-node-exporter.
 `, routeSetup, packages)
 }
 
+func disableCloudInitNetworkHotplug() string {
+	return `
+# The private network is attached declaratively when Pulumi creates the VM.
+# cloud-init 26.1 otherwise treats Docker veth devices as provider network
+# hotplug events, repeatedly queries metadata, and leaves a failed unit.
+systemctl disable --now cloud-init-hotplugd.socket
+systemctl mask cloud-init-hotplugd.socket cloud-init-hotplugd.service
+systemctl reset-failed cloud-init-hotplugd.service
+`
+}
+
 func renderAppCloudInit(material appCloudInitMaterial) (string, error) {
 	files, err := deploymentFiles(map[string]string{
 		"/opt/kamori/release/compose.yaml":          "cloud-server/compose.yaml",
@@ -260,7 +271,7 @@ deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-deploy-migrate *
 deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-registry-login *
 `},
 	)
-	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo docker.io docker-compose-v2", true) + `
+	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo docker.io docker-compose-v2", true) + disableCloudInitNetworkHotplug() + `
 if ! id deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy
 fi
@@ -335,7 +346,7 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 `},
 	)
-	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo iptables docker.io docker-compose-v2 postgresql-client rclone", false) + `
+	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo iptables docker.io docker-compose-v2 postgresql-client rclone", false) + disableCloudInitNetworkHotplug() + `
 if ! id deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy
 fi
