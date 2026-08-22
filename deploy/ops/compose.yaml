@@ -1,6 +1,7 @@
 services:
   valkey:
     image: valkey/valkey:9.0.3-alpine
+    user: "999:1000"
     command:
       - valkey-server
       - --bind

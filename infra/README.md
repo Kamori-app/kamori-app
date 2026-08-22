@@ -81,8 +81,10 @@ delivers each credential only to the role that needs it. SSH listens on TCP
 port `2022` on every node. Only the ops/bastion node has a public address and
 exposes that port, protected by key-only authentication and Fail2ban. App and
 database nodes have private addresses only and route required outbound traffic
-through the ops NAT gateway. No administrator source-IP configuration is
-required.
+through the ops NAT gateway. Their boot-time egress service also assigns
+Hetzner's two recursive DNS resolvers to the private interface before package
+installation; private-network DHCP does not provide resolver addresses. No
+administrator source-IP configuration is required.
 Application and provider secrets stay in encrypted Pulumi config. GitHub stores
 the passphrase that unlocks that config and the dedicated B2 credential needed
 to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud
@@ -129,6 +131,8 @@ path and performs no deployment or uptime probes. Host scripts and the
 environment template live in
 [`deploy/cloud-server`](../deploy/cloud-server); the Prometheus, Alertmanager,
 Grafana, and ephemeral Valkey stack lives in [`deploy/ops`](../deploy/ops).
+Valkey runs directly as the pinned image's non-root UID/GID; its root filesystem
+stays read-only and only its non-persistent `/data` tmpfs is writable.
 Database bootstrap/PITR assets are in [`deploy/postgres`](../deploy/postgres),
 and cross-provider ciphertext replication is in
 [`deploy/backup`](../deploy/backup).
