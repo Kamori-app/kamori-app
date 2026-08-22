@@ -17,14 +17,14 @@ test("@full recovery kit rotates credentials and restores encrypted data", async
   await expect(page.getByText("Contact encrypted and synced.")).toBeVisible();
   await logout(page);
 
-  await page.getByRole("button", { name: "Sign In", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Sign In" });
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sign in" });
   const newPassword = `Recovered-${crypto.randomUUID()}-Pass!`;
   await dialog.getByPlaceholder("Username").fill(account.username);
   await dialog.getByPlaceholder("24-word data recovery kit").fill(account.recoveryPhrase);
   await dialog.getByPlaceholder("New password", { exact: true }).fill(newPassword);
   await dialog.getByPlaceholder("Confirm new password").fill(newPassword);
-  await dialog.getByRole("button", { name: "Recover Account" }).click();
+  await dialog.getByRole("button", { name: "Recover account" }).click();
   await expect(page.getByText(/Account recovery completed:/)).toBeVisible();
 
   await signIn(page, { username: account.username, password: newPassword });
