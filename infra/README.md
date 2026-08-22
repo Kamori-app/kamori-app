@@ -94,6 +94,9 @@ identity. Cloud-init installs each generated private key, its matching raw
 public key, and its host certificate as one identity before validating the
 hardened OpenSSH configuration. Installing the complete keypair prevents a
 cloud image's stale generated `.pub` file from invalidating `sshd -t`.
+Before that validation, cloud-init creates `/run/sshd` with the same ownership
+and permissions declared by Ubuntu's `ssh.service`; the runtime directory does
+not otherwise exist before the socket-activated service first starts.
 Ubuntu's native socket activation remains enabled. A systemd drop-in
 clears the image's default listener and binds `ssh.socket` only to `2022`
 before installing additional packages. There is no

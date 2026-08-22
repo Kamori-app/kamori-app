@@ -202,6 +202,7 @@ cat >/etc/apt/apt.conf.d/99kamori-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 Acquire::Retries "10";
 EOF
+install -d -o root -g root -m 0755 /run/sshd
 sshd -t
 systemctl daemon-reload
 systemctl enable ssh.socket

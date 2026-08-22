@@ -104,6 +104,7 @@ func TestFirstBootPinsSSHSocketBeforePackageInstallation(t *testing.T) {
 
 	script := commonFirstBoot("curl", false)
 	commands := []string{
+		"install -d -o root -g root -m 0755 /run/sshd",
 		"sshd -t",
 		"systemctl daemon-reload",
 		"systemctl enable ssh.socket",
