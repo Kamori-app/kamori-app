@@ -149,6 +149,9 @@ for attempt in $(seq 1 120); do
   private_interface=$(ip -o -4 addr show | awk '$4 ~ /^10\.42\./ {print $2; exit}')
   if [[ -n "$private_interface" ]]; then
     ip route replace default via 10.42.0.1 dev "$private_interface" onlink
+    resolvectl dns "$private_interface" 185.12.64.1 185.12.64.2
+    resolvectl domain "$private_interface" '~.'
+    resolvectl default-route "$private_interface" yes
     exit 0
   fi
   sleep 1

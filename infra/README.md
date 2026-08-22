@@ -81,8 +81,10 @@ delivers each credential only to the role that needs it. SSH listens on TCP
 port `2022` on every node. Only the ops/bastion node has a public address and
 exposes that port, protected by key-only authentication and Fail2ban. App and
 database nodes have private addresses only and route required outbound traffic
-through the ops NAT gateway. No administrator source-IP configuration is
-required.
+through the ops NAT gateway. Their boot-time egress service also assigns
+Hetzner's two recursive DNS resolvers to the private interface before package
+installation; private-network DHCP does not provide resolver addresses. No
+administrator source-IP configuration is required.
 Application and provider secrets stay in encrypted Pulumi config. GitHub stores
 the passphrase that unlocks that config and the dedicated B2 credential needed
 to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud

@@ -38,7 +38,10 @@ cloud-init. Pulumi generates PostgreSQL PKI, complete matching SSH host
 keypairs and certificates, the deploy identity, jobs/backup/Grafana secrets, a
 stable ops public IPv4, role-specific firewalls, and the private-network egress
 route. App and database nodes receive no public IP addresses. `ops` provides
-NAT and is the only SSH bastion.
+NAT and is the only SSH bastion. The private-host egress service configures the
+default route and Hetzner's two recursive DNS resolvers before any package
+installation, because the private-only interface receives no resolver through
+DHCP.
 
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the
