@@ -1,7 +1,7 @@
 {
   "name": "Kamori",
   "short_name": "Kamori",
-  "description": "Zero-knowledge E2EE sync bridge",
+  "description": "Offline-first encrypted organizer for calendars, tasks, and contacts",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f4f0e8",

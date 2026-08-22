@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:dav_bridge_mobile/src/i18n/app_localizations.dart';
 import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 import 'package:dav_bridge_mobile/src/state/bridge_controller.dart';
 
@@ -34,10 +35,10 @@ class _PimScreenState extends ConsumerState<PimScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Organizer'),
+        title: Text(context.strings.text('organizer')),
         actions: [
           IconButton(
-            tooltip: 'Refresh local data',
+            tooltip: context.strings.text('refresh'),
             onPressed: state.isBusy
                 ? null
                 : ref.read(bridgeControllerProvider.notifier).syncNow,
@@ -50,22 +51,25 @@ class _PimScreenState extends ConsumerState<PimScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: SegmentedButton<PimItemKind?>(
-              segments: const [
-                ButtonSegment(value: null, label: Text('All')),
+              segments: [
+                ButtonSegment(
+                  value: null,
+                  label: Text(context.strings.text('all')),
+                ),
                 ButtonSegment(
                   value: PimItemKind.calendarEvent,
-                  icon: Icon(Icons.calendar_month_outlined),
-                  label: Text('Events'),
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: Text(context.strings.text('events')),
                 ),
                 ButtonSegment(
                   value: PimItemKind.task,
-                  icon: Icon(Icons.check_circle_outline),
-                  label: Text('Tasks'),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: Text(context.strings.text('tasks')),
                 ),
                 ButtonSegment(
                   value: PimItemKind.contact,
-                  icon: Icon(Icons.contacts_outlined),
-                  label: Text('Contacts'),
+                  icon: const Icon(Icons.contacts_outlined),
+                  label: Text(context.strings.text('contacts')),
                 ),
               ],
               selected: {_filter},
@@ -111,7 +115,7 @@ class _PimScreenState extends ConsumerState<PimScreen> {
           : FloatingActionButton.extended(
               onPressed: state.isBusy ? null : () => _openEditor(context),
               icon: const Icon(Icons.add),
-              label: const Text('New item'),
+              label: Text(context.strings.text('newItem')),
             ),
     );
   }
@@ -144,15 +148,18 @@ class _PimScreenState extends ConsumerState<PimScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(existing == null ? 'New organizer item' : 'Edit item'),
+          title: Text(existing == null
+              ? context.strings.text('newOrganizerItem')
+              : context.strings.text('editItem')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
                   initialValue: spaceId,
-                  decoration:
-                      const InputDecoration(labelText: 'Encrypted space'),
+                  decoration: InputDecoration(
+                    labelText: context.strings.text('encryptedSpace'),
+                  ),
                   items: state.collections
                       .map(
                         (space) => DropdownMenuItem(
@@ -169,16 +176,20 @@ class _PimScreenState extends ConsumerState<PimScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<PimItemKind>(
                   initialValue: kind,
-                  decoration: const InputDecoration(labelText: 'Item type'),
-                  items: const [
+                  decoration: InputDecoration(
+                    labelText: context.strings.text('itemType'),
+                  ),
+                  items: [
                     DropdownMenuItem(
                       value: PimItemKind.calendarEvent,
-                      child: Text('Calendar event'),
+                      child: Text(context.strings.text('calendarEvent')),
                     ),
                     DropdownMenuItem(
-                        value: PimItemKind.task, child: Text('Task')),
+                        value: PimItemKind.task,
+                        child: Text(context.strings.text('task'))),
                     DropdownMenuItem(
-                        value: PimItemKind.contact, child: Text('Contact')),
+                        value: PimItemKind.contact,
+                        child: Text(context.strings.text('contact'))),
                   ],
                   onChanged: existing == null
                       ? (value) => setDialogState(() => kind = value ?? kind)
@@ -190,8 +201,9 @@ class _PimScreenState extends ConsumerState<PimScreen> {
                   autofocus: true,
                   maxLength: 500,
                   decoration: InputDecoration(
-                    labelText:
-                        kind == PimItemKind.contact ? 'Full name' : 'Title',
+                    labelText: kind == PimItemKind.contact
+                        ? context.strings.text('fullName')
+                        : context.strings.text('title'),
                   ),
                 ),
                 if (kind == PimItemKind.task)
@@ -200,26 +212,33 @@ class _PimScreenState extends ConsumerState<PimScreen> {
                     value: completed,
                     onChanged: (value) =>
                         setDialogState(() => completed = value ?? false),
-                    title: const Text('Completed'),
+                    title: Text(context.strings.text('completed')),
                   ),
                 if (kind == PimItemKind.contact) ...[
                   TextField(
                     controller: email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email'),
+                    decoration: InputDecoration(
+                      labelText: context.strings.text('email'),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: phone,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(labelText: 'Phone'),
+                    decoration: InputDecoration(
+                      labelText: context.strings.text('phone'),
+                    ),
                   ),
                 ],
                 if (kind == PimItemKind.calendarEvent) ...[
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Starts'),
-                    subtitle: Text(_displayDateTime(startsAt)),
+                    title: Text(context.strings.text('starts')),
+                    subtitle: Text(_displayDateTime(
+                      startsAt,
+                      notSet: context.strings.text('notSet'),
+                    )),
                     trailing: const Icon(Icons.edit_calendar_outlined),
                     onTap: () async {
                       final value = await _pickDateTime(context, startsAt);
@@ -228,8 +247,11 @@ class _PimScreenState extends ConsumerState<PimScreen> {
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Ends'),
-                    subtitle: Text(_displayDateTime(endsAt)),
+                    title: Text(context.strings.text('ends')),
+                    subtitle: Text(_displayDateTime(
+                      endsAt,
+                      notSet: context.strings.text('notSet'),
+                    )),
                     trailing: const Icon(Icons.edit_calendar_outlined),
                     onTap: () async {
                       final value =
@@ -244,7 +266,7 @@ class _PimScreenState extends ConsumerState<PimScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel')),
+                child: Text(context.strings.text('cancel'))),
             FilledButton(
               onPressed: () async {
                 if (title.text.trim().isEmpty) return;
@@ -263,7 +285,7 @@ class _PimScreenState extends ConsumerState<PimScreen> {
                     );
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
-              child: const Text('Save'),
+              child: Text(context.strings.text('save')),
             ),
           ],
         ),
@@ -279,11 +301,11 @@ class _EmptyOrganizer extends StatelessWidget {
   const _EmptyOrganizer();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
+          padding: const EdgeInsets.all(32),
           child: Text(
-            'Nothing here yet. Create an encrypted space, then add your first event, task, or contact.',
+            context.strings.text('emptyOrganizer'),
             textAlign: TextAlign.center,
           ),
         ),
@@ -308,9 +330,12 @@ class _PimItemTile extends StatelessWidget {
     final subtitle = switch (item.kind) {
       PimItemKind.contact =>
         [item.email, item.phone].whereType<String>().join(' · '),
-      PimItemKind.calendarEvent =>
-        _displayDateTime(_parseIcalUtc(item.startsAt)),
-      PimItemKind.task => item.completed ? 'Completed' : 'Open',
+      PimItemKind.calendarEvent => _displayDateTime(
+          _parseIcalUtc(item.startsAt),
+          notSet: context.strings.text('notSet')),
+      PimItemKind.task => item.completed
+          ? context.strings.text('completed')
+          : context.strings.text('open'),
     };
     return Card(
       child: ListTile(
@@ -325,10 +350,12 @@ class _PimItemTile extends StatelessWidget {
                 PimItemKind.contact => Icons.person_outline,
               }),
         title: Text(item.title),
-        subtitle: Text(item.conflict ? '$subtitle · Conflict copy' : subtitle),
+        subtitle: Text(item.conflict
+            ? '$subtitle · ${context.strings.text('conflictCopy')}'
+            : subtitle),
         onTap: onEdit,
         trailing: IconButton(
-          tooltip: 'Delete',
+          tooltip: context.strings.text('delete'),
           onPressed: onDelete,
           icon: const Icon(Icons.delete_outline),
         ),
@@ -378,8 +405,8 @@ DateTime? _parseIcalUtc(String? value) {
   }
 }
 
-String _displayDateTime(DateTime? value) {
-  if (value == null) return 'Not set';
+String _displayDateTime(DateTime? value, {String notSet = 'Not set'}) {
+  if (value == null) return notSet;
   final local = value.toLocal();
   String two(int number) => number.toString().padLeft(2, '0');
   return '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';

@@ -14,7 +14,7 @@
   {type}
   {disabled}
   on:click
-  class={`rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-50 ${variants[variant]}`}
+  class={`border border-transparent px-4 py-2 text-sm font-semibold transition disabled:opacity-50 ${variants[variant]}`}
 >
   <slot />
 </button>

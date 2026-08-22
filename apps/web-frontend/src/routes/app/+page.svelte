@@ -15,6 +15,46 @@
     import SettingsModal from "$lib/components/app/SettingsModal.svelte";
     import SignInModal from "$lib/components/app/SignInModal.svelte";
     import SignUpModal from "$lib/components/app/SignUpModal.svelte";
+    import BrandMark from "$lib/components/BrandMark.svelte";
+    import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
+    import { locale } from "$lib/i18n";
+
+    const shellCopy = {
+        en: {
+            settings: "Web settings",
+            webApp: "Web app",
+            home: "Home",
+            authenticated: "Authenticated",
+            signedOut: "Not signed in",
+            logout: "Log out",
+            authRequired: "Authentication required",
+            authBody: "Sign in to unlock encrypted browser data, or create a new account here on the web.",
+            signIn: "Sign in",
+            signUp: "Create account",
+            loggedOut: "Logged out.",
+            lockedSession: "Your server session is available, but sign in again to unlock encrypted browser data.",
+            restored: "Session restored.",
+            onboarding: "Create your account, save the recovery kit, then sign in on your other devices.",
+        },
+        ru: {
+            settings: "Настройки веб-приложения",
+            webApp: "Веб-приложение",
+            home: "Главная",
+            authenticated: "Вход выполнен",
+            signedOut: "Вход не выполнен",
+            logout: "Выйти",
+            authRequired: "Нужно войти",
+            authBody: "Войдите, чтобы открыть зашифрованные данные в браузере, или создайте новый аккаунт в вебе.",
+            signIn: "Войти",
+            signUp: "Создать аккаунт",
+            loggedOut: "Вы вышли из аккаунта.",
+            lockedSession: "Серверная сессия доступна, но для расшифровки данных браузера нужно войти ещё раз.",
+            restored: "Сессия восстановлена.",
+            onboarding: "Создайте аккаунт, сохраните recovery kit, затем войдите на других устройствах.",
+        },
+    } as const;
+
+    $: copy = shellCopy[$locale];
 
     /**
      * Web app shell:
@@ -59,7 +99,7 @@
             currentUsername: "",
             accessToken: null,
             preauthToken: null,
-            notice: "Logged out.",
+            notice: copy.loggedOut,
         }));
     };
 
@@ -79,8 +119,7 @@
                         appState.update((state) => ({
                             ...state,
                             accessToken: null,
-                            notice:
-                                "Your server session is available, but sign in again to unlock encrypted browser data.",
+                            notice: copy.lockedSession,
                         }));
                         return;
                     }
@@ -88,7 +127,7 @@
                     appState.update((state) => ({
                         ...state,
                         accessToken: rotated.access_token,
-                        notice: state.notice || "Session restored.",
+                        notice: state.notice || copy.restored,
                     }));
                 } catch {
                     // no active cookie-backed session
@@ -103,7 +142,7 @@
                 signUpOpen = true;
                 appState.update((state) => ({
                     ...state,
-                    notice: "Get started: 1) Create account, 2) Install bridge app on your device, 3) Connect your DAV client to the local endpoint.",
+                    notice: copy.onboarding,
                 }));
             }
             // Treat onboarding deep links as one-shot commands. Keeping the
@@ -120,10 +159,10 @@
 
 <main class="min-h-screen px-4 py-6 md:px-8">
     <button
-        class="fixed right-4 top-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/70 bg-white/85 text-slate shadow-panel transition hover:bg-white"
+        class="fixed right-4 top-4 z-40 inline-flex h-11 w-11 items-center justify-center border border-slate/25 bg-paper text-slate transition hover:bg-sand/50"
         on:click={openSettings}
-        aria-label="Open web settings"
-        title="Web settings"
+        aria-label={copy.settings}
+        title={copy.settings}
     >
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -145,24 +184,28 @@
 
     <div class="mx-auto max-w-6xl animate-fade-slide">
         <nav
-            class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 p-3 shadow-panel"
+            class="mb-6 flex flex-wrap items-center justify-between gap-3 border-y border-slate/20 bg-paper/90 px-1 py-3"
         >
             <div class="flex items-center gap-2">
+                <a href="/" class="mr-1 inline-flex items-center" aria-label="Kamori">
+                    <BrandMark size={30} />
+                </a>
                 <a
-                    class="rounded-lg bg-slate px-3 py-2 text-sm text-white"
-                    href="/app">Web App</a
+                    class="bg-slate px-3 py-2 text-sm text-white"
+                    href="/app">{copy.webApp}</a
                 >
-                <a class="rounded-lg px-3 py-2 text-sm text-slate" href="/"
-                    >Landing</a
+                <a class="px-3 py-2 text-sm text-slate" href="/"
+                    >{copy.home}</a
                 >
             </div>
 
             <div class="flex items-center gap-2">
+                <LocaleSwitch />
                 <Badge active={Boolean($appState.accessToken)}>
-                    {$appState.accessToken ? "Authenticated" : "Not Signed In"}
+                    {$appState.accessToken ? copy.authenticated : copy.signedOut}
                 </Badge>
                 {#if $appState.accessToken}
-                    <Button variant="ghost" on:click={logout}>Log Out</Button>
+                    <Button variant="ghost" on:click={logout}>{copy.logout}</Button>
                 {/if}
             </div>
         </nav>
@@ -173,18 +216,17 @@
                     <h2
                         class="text-center font-heading text-xl font-semibold text-slate"
                     >
-                        Authentication Required
+                        {copy.authRequired}
                     </h2>
                     <p class="mt-2 text-center text-sm text-slate/80">
-                        Open one of the dialogs to sign in or create a new
-                        account.
+                        {copy.authBody}
                     </p>
                     <div class="mt-4 flex flex-wrap justify-center gap-2">
                         <Button variant="secondary" on:click={openSignIn}
-                            >Sign In</Button
+                            >{copy.signIn}</Button
                         >
                         <Button variant="ghost" on:click={openSignUp}
-                            >Sign Up</Button
+                            >{copy.signUp}</Button
                         >
                     </div>
                 </Card>

@@ -16,6 +16,58 @@
         unlockOrCreateWebVault,
     } from "$lib/cryptoVault";
     import { wrapAccountMasterKey } from "$lib/opaqueClient";
+    import { locale } from "$lib/i18n";
+
+    const signupCopy = {
+        en: {
+            title: "Create account",
+            required: "Username, password, and confirmation are required.",
+            mismatch: "Password confirmation does not match.",
+            saveKit: "Save the 24-word data recovery kit, then confirm its final word.",
+            failed: "Account creation failed",
+            finalMismatch: "The final recovery word does not match.",
+            created: "Account created. Sign in to continue.",
+            copied: "Data recovery kit copied. Store it offline.",
+            copyFailed: "Copy failed. Select the words and copy them manually.",
+            finishFirst: "Finish saving the recovery kit before closing account setup.",
+            kitBody: "This is the only offline recovery secret for your encrypted data. Kamori support cannot recreate it. Write it down or print it, keep it away from your password, and never send it to anyone.",
+            copyWords: "Copy 24 words",
+            confirmWord: "Type word 24 to confirm",
+            creating: "Creating…",
+            saved: "I saved the kit — create account",
+            username: "Username",
+            password: "Password",
+            confirmPassword: "Confirm password",
+            create: "Create account",
+            existing: "Already have an account?",
+            signIn: "Sign in",
+        },
+        ru: {
+            title: "Создать аккаунт",
+            required: "Нужны имя пользователя, пароль и подтверждение пароля.",
+            mismatch: "Пароли не совпадают.",
+            saveKit: "Сохраните recovery kit из 24 слов и подтвердите последнее слово.",
+            failed: "Не удалось создать аккаунт",
+            finalMismatch: "Последнее слово recovery kit не совпадает.",
+            created: "Аккаунт создан. Теперь войдите.",
+            copied: "Recovery kit скопирован. Храните его офлайн.",
+            copyFailed: "Не удалось скопировать. Выделите и скопируйте слова вручную.",
+            finishFirst: "Сначала завершите сохранение recovery kit.",
+            kitBody: "Это единственный офлайн-секрет для восстановления зашифрованных данных. Поддержка Kamori не сможет его воссоздать. Запишите или распечатайте слова, храните отдельно от пароля и никому не отправляйте.",
+            copyWords: "Скопировать 24 слова",
+            confirmWord: "Введите 24-е слово",
+            creating: "Создаём…",
+            saved: "Kit сохранён — создать аккаунт",
+            username: "Имя пользователя",
+            password: "Пароль",
+            confirmPassword: "Повторите пароль",
+            create: "Создать аккаунт",
+            existing: "Уже есть аккаунт?",
+            signIn: "Войти",
+        },
+    } as const;
+
+    $: copy = signupCopy[$locale];
 
     /**
      * Sign-up modal for web-only registration via OPAQUE flow.
@@ -67,11 +119,11 @@
     const prepareSignup = async () => {
         const username = signupUsername.trim();
         if (!username || !signupPassword || !signupPasswordConfirm) {
-            setNotice("Username, password, and confirmation are required.");
+            setNotice(copy.required);
             return;
         }
         if (signupPassword !== signupPasswordConfirm) {
-            setNotice("Password confirmation does not match.");
+            setNotice(copy.mismatch);
             return;
         }
 
@@ -117,12 +169,12 @@
             signupPassword = "";
             signupPasswordConfirm = "";
             setNotice(
-                "Save the 24-word data recovery kit, then confirm its final word.",
+                copy.saveKit,
             );
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Sign-up failed: ${message}`);
+            setNotice(`${copy.failed}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -134,7 +186,7 @@
         }
         const expected = recoveryWords.at(-1) ?? "";
         if (recoveryConfirmation.trim().toLowerCase() !== expected) {
-            setNotice("The final recovery word does not match.");
+            setNotice(copy.finalMismatch);
             return;
         }
         setLoading("signup-finish");
@@ -151,11 +203,11 @@
             pendingSignup = undefined;
             lockWebVault();
             onOpenSignIn();
-            setNotice("Account created. Sign in to continue.");
+            setNotice(copy.created);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Sign-up failed: ${message}`);
+            setNotice(`${copy.failed}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -167,16 +219,16 @@
         }
         try {
             await navigator.clipboard.writeText(pendingSignup.phrase);
-            setNotice("Data recovery kit copied. Store it offline.");
+            setNotice(copy.copied);
         } catch {
-            setNotice("Copy failed. Select the words and copy them manually.");
+            setNotice(copy.copyFailed);
         }
     };
 
     const requestClose = () => {
         if (pendingSignup) {
             setNotice(
-                "Finish saving the recovery kit before closing account setup.",
+                copy.finishFirst,
             );
             return;
         }
@@ -184,14 +236,11 @@
     };
 </script>
 
-<Modal {open} title="Sign Up" onClose={requestClose}>
+<Modal {open} title={copy.title} onClose={requestClose}>
     {#if pendingSignup}
         <div class="space-y-3">
             <p class="text-sm text-slate">
-                This is the only offline recovery secret for your encrypted
-                data. Kamori support cannot recreate it. Write it down or print
-                it, keep it away from your password, and never send it to
-                anyone.
+                {copy.kitBody}
             </p>
             <ol
                 class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl border border-slate/15 bg-white/70 p-3 font-mono text-sm text-slate sm:grid-cols-3"
@@ -201,50 +250,50 @@
                 {/each}
             </ol>
             <Button variant="secondary" on:click={copyRecoveryKit}>
-                Copy 24 words
+                {copy.copyWords}
             </Button>
             <Input
                 bind:value={recoveryConfirmation}
                 autocomplete="off"
-                placeholder="Type word 24 to confirm"
+                placeholder={copy.confirmWord}
             />
             <Button
                 on:click={finalizeSignup}
                 disabled={loadingAction === "signup-finish"}
             >
                 {loadingAction === "signup-finish"
-                    ? "Creating..."
-                    : "I saved the kit — create account"}
+                    ? copy.creating
+                    : copy.saved}
             </Button>
         </div>
     {:else}
         <div class="space-y-3">
-            <Input bind:value={signupUsername} placeholder="Username" />
+            <Input bind:value={signupUsername} placeholder={copy.username} />
             <Input
                 bind:value={signupPassword}
                 type="password"
-                placeholder="Password"
+                placeholder={copy.password}
             />
             <Input
                 bind:value={signupPasswordConfirm}
                 type="password"
-                placeholder="Confirm password"
+                placeholder={copy.confirmPassword}
             />
             <Button
                 on:click={prepareSignup}
                 disabled={loadingAction === "signup-opaque"}
             >
                 {loadingAction === "signup-opaque"
-                    ? "Creating..."
-                    : "Create Account"}
+                    ? copy.creating
+                    : copy.create}
             </Button>
             <p class="text-xs text-slate/70">
-                Already signed up?
+                {copy.existing}
                 <button
                     class="underline underline-offset-2 hover:text-slate"
                     on:click={onOpenSignIn}
                 >
-                    Click here to Sign In
+                    {copy.signIn}
                 </button>
             </p>
         </div>

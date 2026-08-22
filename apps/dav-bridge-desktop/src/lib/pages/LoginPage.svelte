@@ -5,6 +5,33 @@
     import Card from "../components/ui/Card.svelte";
     import Button from "../components/ui/Button.svelte";
     import Input from "../components/ui/Input.svelte";
+    import BrandMark from "../components/BrandMark.svelte";
+    import LocaleSwitch from "../components/LocaleSwitch.svelte";
+    import { locale } from "../i18n";
+
+    const copies = {
+        en: {
+            title: "Kamori desktop",
+            intro: "Your encrypted control center and optional CalDAV/CardDAV bridge. Registration stays in the web app.",
+            signIn: "Sign in", username: "Username", password: "Password", totp: "TOTP (optional)",
+            loggingIn: "Signing in…", login: "Sign in", browserBusy: "Opening browser…", browser: "Continue in browser",
+            passkey: "The trusted Kamori web origin handles passkeys. A new device needs your password once before browser-only sign-in can restore its keys.",
+            usernameRequired: "Enter your username to continue.", passwordRequired: "Enter your password to continue.",
+            signedPassword: "Signed in with password.", approve: (code: string) => `Approve code ${code} in the browser. Keep this window open.`,
+            signedBrowser: "Signed in through your browser.", expired: "Browser authorization expired. Start again.", failed: "Sign-in failed",
+        },
+        ru: {
+            title: "Kamori для компьютера",
+            intro: "Центр управления зашифрованными данными и необязательный мост CalDAV/CardDAV. Регистрация доступна в веб-приложении.",
+            signIn: "Вход", username: "Имя пользователя", password: "Пароль", totp: "TOTP (необязательно)",
+            loggingIn: "Входим…", login: "Войти", browserBusy: "Открываем браузер…", browser: "Продолжить в браузере",
+            passkey: "Passkey обрабатывается на доверенном веб-домене Kamori. На новом устройстве пароль нужен один раз, чтобы затем восстанавливать ключи через браузер.",
+            usernameRequired: "Введите имя пользователя.", passwordRequired: "Введите пароль.",
+            signedPassword: "Вход по паролю выполнен.", approve: (code: string) => `Подтвердите код ${code} в браузере и не закрывайте это окно.`,
+            signedBrowser: "Вход через браузер выполнен.", expired: "Время подтверждения истекло. Начните заново.", failed: "Не удалось войти",
+        },
+    } as const;
+    $: copy = copies[$locale];
 
     let username = "";
     let password = "";
@@ -33,11 +60,11 @@
         const user = username.trim();
 
         if (!user) {
-            loginNotice.set("Enter your username to continue.");
+            loginNotice.set(copy.usernameRequired);
             return;
         }
         if (!password) {
-            loginNotice.set("Enter your password to continue.");
+            loginNotice.set(copy.passwordRequired);
             return;
         }
 
@@ -51,11 +78,11 @@
                 password,
                 totpCode.trim() || undefined,
             );
-            await completeLogin("Signed in with password.");
+            await completeLogin(copy.signedPassword);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            loginNotice.set(`Sign-in failed: ${message}`);
+            loginNotice.set(`${copy.failed}: ${message}`);
         } finally {
             loading = false;
             loadingMode = null;
@@ -71,7 +98,7 @@
 
             const start = await api.browserLoginStart();
             loginNotice.set(
-                `Approve code ${start.user_code} in the browser. Keep this window open.`,
+                copy.approve(start.user_code),
             );
             const deadline = Date.now() + start.expires_in_seconds * 1000;
             while (Date.now() < deadline) {
@@ -86,15 +113,15 @@
                     start.device_secret,
                 );
                 if (result.status === "approved") {
-                    await completeLogin("Signed in through your browser.");
+                    await completeLogin(copy.signedBrowser);
                     return;
                 }
             }
-            throw new Error("Browser authorization expired. Start again.");
+            throw new Error(copy.expired);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            loginNotice.set(`Sign-in failed: ${message}`);
+            loginNotice.set(`${copy.failed}: ${message}`);
         } finally {
             loading = false;
             loadingMode = null;
@@ -103,25 +130,28 @@
 </script>
 
 <section class="mx-auto max-w-3xl px-4 py-12 animate-fade-slide">
-    <div class="mb-8 text-center">
+    <div class="mb-8">
+        <div class="mb-8 flex items-center justify-between border-b border-slate/20 pb-4">
+            <div class="flex items-center gap-3"><BrandMark size={42} /><span class="text-xs font-semibold tracking-[0.18em]">KAMORI</span></div>
+            <LocaleSwitch />
+        </div>
         <h1 class="font-heading text-4xl font-bold text-slate">
-            Kamori Desktop Bridge
+            {copy.title}
         </h1>
         <p class="mx-auto mt-3 max-w-2xl text-sm text-slate/70">
-            Sign in to start the local DAV bridge. Account registration is
-            handled in the web portal.
+            {copy.intro}
         </p>
     </div>
 
     <Card>
-        <h2 class="mb-4 font-heading text-xl font-semibold">Sign In</h2>
+        <h2 class="mb-4 font-heading text-xl font-semibold">{copy.signIn}</h2>
 
         <form class="space-y-3" on:submit|preventDefault={signInPassword}>
             <div class="space-y-1">
                 <p
                     class="block text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    Username
+                    {copy.username}
                 </p>
                 <Input bind:value={username} required />
             </div>
@@ -130,7 +160,7 @@
                 <p
                     class="block text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    Password
+                    {copy.password}
                 </p>
                 <Input
                     bind:value={password}
@@ -144,7 +174,7 @@
                 <p
                     class="block text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    TOTP (optional)
+                    {copy.totp}
                 </p>
                 <Input bind:value={totpCode} placeholder="123456" />
             </div>
@@ -152,7 +182,7 @@
             <div class="pt-2">
                 <div class="flex flex-wrap items-center gap-3">
                     <Button type="submit" disabled={loading}>
-                        {loadingMode === "password" ? "Logging In..." : "Login"}
+                        {loadingMode === "password" ? copy.loggingIn : copy.login}
                     </Button>
                     <Button
                         type="button"
@@ -161,14 +191,12 @@
                         on:click={signInBrowser}
                     >
                         {loadingMode === "passkey"
-                            ? "Signing In..."
-                            : "Continue In Browser"}
+                            ? copy.browserBusy
+                            : copy.browser}
                     </Button>
                 </div>
                 <p class="mt-2 text-xs text-slate/70">
-                    The system browser handles passkeys on the trusted Kamori
-                    web origin. First-time devices must be unlocked once with
-                    the password before browser-only sign-in can restore keys.
+                    {copy.passkey}
                 </p>
             </div>
         </form>

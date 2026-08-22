@@ -5,6 +5,13 @@
   import Input from '../components/ui/Input.svelte';
   import { api, type CollectionSummary } from '../tauri';
   import { session } from '../stores/app';
+  import { locale } from '../i18n';
+
+  const copies = {
+    en: { title: 'Spaces', intro: 'Create encrypted spaces for calendars, tasks, and contacts. DAV can project compatible data locally.', name: 'Space name', placeholder: 'Personal', create: 'Create space', synced: 'Synced items' },
+    ru: { title: 'Пространства', intro: 'Создавайте зашифрованные пространства для календарей, задач и контактов. Совместимые данные можно локально проецировать через DAV.', name: 'Название пространства', placeholder: 'Личное', create: 'Создать пространство', synced: 'Синхронизировано' },
+  } as const;
+  $: copy = copies[$locale];
 
   let collectionName = '';
   let collections: CollectionSummary[] = [];
@@ -34,18 +41,18 @@
 <section class="animate-fade-slide">
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h1 class="font-heading text-3xl font-bold text-slate">Collections</h1>
-      <p class="mt-1 text-sm text-slate/70">Create address books/calendars managed by the local bridge.</p>
+      <h1 class="font-heading text-3xl font-bold text-slate">{copy.title}</h1>
+      <p class="mt-1 text-sm text-slate/70">{copy.intro}</p>
     </div>
   </div>
 
   <Card>
     <div class="flex flex-wrap items-end gap-3">
       <div class="min-w-[220px] flex-1">
-        <p class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate/70">Collection name</p>
-        <Input bind:value={collectionName} placeholder="Personal Contacts" />
+        <p class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate/70">{copy.name}</p>
+        <Input bind:value={collectionName} placeholder={copy.placeholder} />
       </div>
-      <Button on:click={createCollection}>Create Collection</Button>
+      <Button on:click={createCollection}>{copy.create}</Button>
     </div>
   </Card>
 
@@ -54,7 +61,7 @@
       <Card>
         <p class="font-heading text-lg font-semibold text-slate">{collection.name}</p>
         <p class="mt-1 text-xs text-slate/70">id: {collection.id}</p>
-        <p class="mt-1 text-sm text-slate/80">Synced items: {collection.synced_items}</p>
+        <p class="mt-1 text-sm text-slate/80">{copy.synced}: {collection.synced_items}</p>
       </Card>
     {/each}
   </div>

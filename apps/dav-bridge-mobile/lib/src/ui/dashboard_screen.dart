@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:dav_bridge_mobile/src/i18n/app_localizations.dart';
 import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 import 'package:dav_bridge_mobile/src/state/bridge_controller.dart';
+import 'package:dav_bridge_mobile/src/state/locale_controller.dart';
+import 'package:dav_bridge_mobile/src/ui/brand_mark.dart';
 import 'package:dav_bridge_mobile/src/ui/share_screen.dart';
 import 'package:dav_bridge_mobile/src/ui/pim_screen.dart';
 
@@ -35,25 +38,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(bridgeControllerProvider);
     final controller = ref.read(bridgeControllerProvider.notifier);
+    final language = ref.watch(localeControllerProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kamori'),
+        title: const KamoriAppBarTitle(),
         actions: [
           IconButton(
-            tooltip: 'Organizer',
+            tooltip: context.strings.text('organizer'),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const PimScreen()),
             ),
             icon: const Icon(Icons.view_agenda_outlined),
           ),
           IconButton(
-            tooltip: 'Invites',
+            tooltip: context.strings.text('invites'),
             onPressed: () => _openShareScreen(context),
             icon: const Icon(Icons.group_add_outlined),
           ),
           IconButton(
-            tooltip: 'Logout',
+            tooltip: context.strings.text('logout'),
             onPressed: state.isBusy ? null : controller.logout,
             icon: const Icon(Icons.logout),
           ),
@@ -100,6 +104,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             _SettingsCard(
               cloudBaseUrlController: _cloudBaseUrlController,
               sqlitePath: state.sqlitePath,
+              language: language,
+              onLanguageChanged:
+                  ref.read(localeControllerProvider.notifier).setPreference,
               onApply: () => controller.updateCloudBaseUrl(
                 _cloudBaseUrlController.text,
               ),
@@ -130,13 +137,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Future<void> _changeCalendarProjection(bool enabled) async {
     final controller = ref.read(bridgeControllerProvider.notifier);
     if (enabled) {
-      if (!await _confirmProjectionEnable('Calendar')) {
+      if (!await _confirmProjectionEnable(context.strings.text('events'))) {
         return;
       }
       await controller.setCalendarProjectionEnabled(true);
       return;
     }
-    final remove = await _chooseProjectionRemoval('calendar events');
+    final remove =
+        await _chooseProjectionRemoval(context.strings.text('events'));
     if (remove == null) {
       return;
     }
@@ -149,13 +157,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Future<void> _changeContactsProjection(bool enabled) async {
     final controller = ref.read(bridgeControllerProvider.notifier);
     if (enabled) {
-      if (!await _confirmProjectionEnable('Contacts')) {
+      if (!await _confirmProjectionEnable(context.strings.text('contacts'))) {
         return;
       }
       await controller.setContactsProjectionEnabled(true);
       return;
     }
-    final remove = await _chooseProjectionRemoval('contacts');
+    final remove =
+        await _chooseProjectionRemoval(context.strings.text('contacts'));
     if (remove == null) {
       return;
     }
@@ -169,20 +178,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: Text('Show Kamori data in $category?'),
-            content: Text(
-              'This creates decrypted copies in the phone\'s $category '
-              'database. Device backups and other permitted apps may be able '
-              'to read them. Kamori remains fully usable if you decline.',
-            ),
+            title: Text('${context.strings.text('showData')} $category?'),
+            content: Text(context.strings.text('projectionWarning')),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Not now'),
+                child: Text(context.strings.text('notNow')),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Continue'),
+                child: Text(context.strings.text('continue')),
               ),
             ],
           ),
@@ -194,23 +199,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Disable system integration?'),
-        content: Text(
-          'Future updates will stop. Do you want to keep or remove the '
-          'Kamori-created $category already stored on this phone?',
-        ),
+        title: Text(context.strings.text('disableIntegration')),
+        content: Text('${context.strings.text('disableBody')} ($category)'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+            child: Text(context.strings.text('cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Keep copies'),
+            child: Text(context.strings.text('keepCopies')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Remove copies'),
+            child: Text(context.strings.text('removeCopies')),
           ),
         ],
       ),
@@ -251,7 +253,7 @@ class _PimOverviewCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Your encrypted organizer',
+            Text(context.strings.text('encryptedOrganizer'),
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
             const SizedBox(height: 12),
             Wrap(
@@ -260,17 +262,20 @@ class _PimOverviewCard extends StatelessWidget {
               children: [
                 _PimDestination(
                   icon: Icons.calendar_month_outlined,
-                  label: 'Events (${count(PimItemKind.calendarEvent)})',
+                  label:
+                      '${context.strings.text('events')} (${count(PimItemKind.calendarEvent)})',
                   onPressed: () => onOpen(PimItemKind.calendarEvent),
                 ),
                 _PimDestination(
                   icon: Icons.check_circle_outline,
-                  label: 'Tasks (${count(PimItemKind.task)})',
+                  label:
+                      '${context.strings.text('tasks')} (${count(PimItemKind.task)})',
                   onPressed: () => onOpen(PimItemKind.task),
                 ),
                 _PimDestination(
                   icon: Icons.contacts_outlined,
-                  label: 'Contacts (${count(PimItemKind.contact)})',
+                  label:
+                      '${context.strings.text('contacts')} (${count(PimItemKind.contact)})',
                   onPressed: () => onOpen(PimItemKind.contact),
                 ),
               ],
@@ -320,31 +325,31 @@ class _SyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lastSync = lastSyncAt?.toLocal().toIso8601String() ?? 'Never';
+    final lastSync = lastSyncAt?.toLocal().toIso8601String() ??
+        context.strings.text('never');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Encrypted sync',
+            Text(context.strings.text('encryptedSync'),
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            Text('Applied items: $syncedItemsTotal'),
-            Text('Last sync: $lastSync'),
+            Text('${context.strings.text('appliedItems')}: $syncedItemsTotal'),
+            Text('${context.strings.text('lastSync')}: $lastSync'),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: onSyncNow,
               icon: const Icon(Icons.sync),
-              label: const Text('Sync now'),
+              label: Text(context.strings.text('syncNow')),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: backgroundSyncEnabled,
               onChanged: onBackgroundSyncChanged,
-              title: const Text('Background sync'),
-              subtitle: const Text(
-                  'Uses native scheduled work; no localhost server is started.'),
+              title: Text(context.strings.text('backgroundSync')),
+              subtitle: Text(context.strings.text('backgroundSyncBody')),
             ),
           ],
         ),
@@ -376,19 +381,22 @@ class _CollectionsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Spaces',
+            Text(context.strings.text('spaces'),
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             TextField(
                 controller: nameController,
-                decoration: const InputDecoration(labelText: 'New space name')),
+                decoration: InputDecoration(
+                  labelText: context.strings.text('newSpace'),
+                )),
             const SizedBox(height: 10),
             FilledButton(
-                onPressed: onCreate, child: const Text('Create space')),
+                onPressed: onCreate,
+                child: Text(context.strings.text('createSpace'))),
             if (collections.isEmpty)
-              const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: Text('No spaces yet.'))
+              Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(context.strings.text('noSpaces')))
             else
               ...collections.map(
                 (collection) => ListTile(
@@ -418,10 +426,14 @@ class _SettingsCard extends StatelessWidget {
   const _SettingsCard(
       {required this.cloudBaseUrlController,
       required this.sqlitePath,
+      required this.language,
+      required this.onLanguageChanged,
       required this.onApply});
 
   final TextEditingController cloudBaseUrlController;
   final String sqlitePath;
+  final AppLanguagePreference language;
+  final ValueChanged<AppLanguagePreference> onLanguageChanged;
   final Future<void> Function() onApply;
 
   @override
@@ -432,17 +444,45 @@ class _SettingsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Sync settings',
+            Text(context.strings.text('syncSettings'),
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             TextField(
                 controller: cloudBaseUrlController,
-                decoration:
-                    const InputDecoration(labelText: 'Kamori service URL')),
+                decoration: InputDecoration(
+                    labelText: context.strings.text('serviceUrl'))),
             const SizedBox(height: 8),
-            SelectableText('Encrypted local cache: $sqlitePath'),
+            SelectableText(
+                '${context.strings.text('encryptedCache')}: $sqlitePath'),
             const SizedBox(height: 10),
-            FilledButton(onPressed: onApply, child: const Text('Apply')),
+            DropdownButtonFormField<AppLanguagePreference>(
+              initialValue: language,
+              decoration: InputDecoration(
+                labelText: context.strings.text('language'),
+              ),
+              items: [
+                DropdownMenuItem(
+                  value: AppLanguagePreference.system,
+                  child: Text(context.strings.text('system')),
+                ),
+                DropdownMenuItem(
+                  value: AppLanguagePreference.english,
+                  child: Text(context.strings.text('english')),
+                ),
+                DropdownMenuItem(
+                  value: AppLanguagePreference.russian,
+                  child: Text(context.strings.text('russian')),
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) onLanguageChanged(value);
+              },
+            ),
+            const SizedBox(height: 10),
+            FilledButton(
+              onPressed: onApply,
+              child: Text(context.strings.text('apply')),
+            ),
           ],
         ),
       ),
@@ -471,32 +511,28 @@ class _SystemIntegrationCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'System integration',
+            Text(
+              context.strings.text('systemIntegration'),
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Optional plaintext projections for built-in phone apps. '
-              'Kamori never runs a localhost DAV server on mobile.',
-            ),
+            Text(context.strings.text('systemIntegrationBody')),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: calendarEnabled,
               onChanged: onCalendarChanged,
-              title: const Text('Show events in Calendar'),
-              subtitle: const Text('Requires full Calendar permission.'),
+              title: Text(context.strings.text('calendarProjection')),
+              subtitle: Text(context.strings.text('calendarPermission')),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: contactsEnabled,
               onChanged: onContactsChanged,
-              title: const Text('Show people in Contacts'),
-              subtitle: const Text('Requires Contacts permission.'),
+              title: Text(context.strings.text('contactsProjection')),
+              subtitle: Text(context.strings.text('contactsPermission')),
             ),
-            const Text(
-              'Tasks remain inside Kamori in this release. System copies are '
-              'one-way projections; edit the encrypted source in Kamori.',
+            Text(
+              context.strings.text('tasksStay'),
               style: TextStyle(fontSize: 12),
             ),
           ],

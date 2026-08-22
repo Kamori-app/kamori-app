@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:dav_bridge_mobile/src/i18n/app_localizations.dart';
 import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 import 'package:dav_bridge_mobile/src/state/bridge_controller.dart';
 
@@ -20,7 +21,16 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
   int _ttlMinutes = 60;
   String? _issuedCode;
 
-  static const List<int> _ttlOptions = <int>[15, 30, 60, 180, 720, 1440];
+  static const List<int> _ttlOptions = <int>[
+    15,
+    30,
+    60,
+    180,
+    720,
+    1440,
+    4320,
+    10080,
+  ];
 
   @override
   void initState() {
@@ -48,26 +58,26 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Invites')),
+      appBar: AppBar(title: Text(context.strings.text('invites'))),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Only users already registered in Kamori can accept invite codes and join your collection.',
+                  context.strings.text('inviteIntro'),
                 ),
               ),
             ),
             const SizedBox(height: 12),
             if (collections.isEmpty)
-              const Card(
+              Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
-                    'No local collections yet. You can still redeem an invite code below.',
+                    context.strings.text('noLocalSpaces'),
                   ),
                 ),
               )
@@ -78,9 +88,9 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Generate Invite Code',
-                        style: TextStyle(
+                      Text(
+                        context.strings.text('generateInvite'),
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                         ),
@@ -101,8 +111,8 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                             _selectedCollectionId = value;
                           });
                         },
-                        decoration: const InputDecoration(
-                          labelText: 'Collection',
+                        decoration: InputDecoration(
+                          labelText: context.strings.text('space'),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -112,7 +122,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                             .map(
                               (ttl) => DropdownMenuItem<int>(
                                 value: ttl,
-                                child: Text('$ttl minutes'),
+                                child: Text(_durationLabel(context, ttl)),
                               ),
                             )
                             .toList(growable: false),
@@ -124,8 +134,8 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                             _ttlMinutes = value;
                           });
                         },
-                        decoration: const InputDecoration(
-                          labelText: 'Code lifetime',
+                        decoration: InputDecoration(
+                          labelText: context.strings.text('codeLifetime'),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -138,7 +148,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                                   collectionId: selectedCollection.id,
                                 ),
                         icon: const Icon(Icons.qr_code_2_outlined),
-                        label: const Text('Generate code'),
+                        label: Text(context.strings.text('generateCode')),
                       ),
                       if (_issuedCode != null) ...[
                         const SizedBox(height: 12),
@@ -154,9 +164,10 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Share this code:',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
+                                Text(
+                                  context.strings.text('shareCode'),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600),
                                 ),
                                 const SizedBox(height: 6),
                                 SelectableText(
@@ -168,7 +179,9 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text('Valid for $_ttlMinutes minutes.'),
+                                Text(
+                                  '${context.strings.text('validFor')}: ${_durationLabel(context, _ttlMinutes)}.',
+                                ),
                                 const SizedBox(height: 8),
                                 OutlinedButton.icon(
                                   onPressed: () async {
@@ -176,11 +189,14 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                                       ClipboardData(text: _issuedCode!),
                                     );
                                     if (context.mounted) {
-                                      _showSnackBar(context, 'Code copied.');
+                                      _showSnackBar(
+                                        context,
+                                        context.strings.text('codeCopied'),
+                                      );
                                     }
                                   },
                                   icon: const Icon(Icons.copy_outlined),
-                                  label: const Text('Copy code'),
+                                  label: Text(context.strings.text('copyCode')),
                                 ),
                               ],
                             ),
@@ -198,9 +214,9 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Redeem Invite Code',
-                      style: TextStyle(
+                    Text(
+                      context.strings.text('redeemInvite'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -208,8 +224,8 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: _redeemCodeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Invite code',
+                      decoration: InputDecoration(
+                        labelText: context.strings.text('inviteCode'),
                         hintText: 'ABCD-EFGH-JKLM-NPQR',
                       ),
                     ),
@@ -222,7 +238,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
                                 controller: controller,
                               ),
                       icon: const Icon(Icons.login),
-                      label: const Text('Join collection'),
+                      label: Text(context.strings.text('joinSpace')),
                     ),
                   ],
                 ),
@@ -269,7 +285,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
       _ttlMinutes = issued.ttlMinutes;
     });
 
-    _showSnackBar(context, 'Invite code generated.');
+    _showSnackBar(context, context.strings.text('inviteGenerated'));
   }
 
   Future<void> _redeemInviteCode({
@@ -282,7 +298,7 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     if (redeemed != null && context.mounted) {
       _showSnackBar(
         context,
-        'Joined collection ${redeemed.collectionId.substring(0, 8)}.',
+        '${context.strings.text('joinedSpace')} ${redeemed.collectionId.substring(0, 8)}.',
       );
       _redeemCodeController.clear();
     }
@@ -307,5 +323,21 @@ class _ShareScreenState extends ConsumerState<ShareScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _durationLabel(BuildContext context, int minutes) {
+    if (minutes % 1440 == 0) {
+      final days = minutes ~/ 1440;
+      return context.strings.locale.languageCode == 'ru'
+          ? '$days дн.'
+          : '$days ${days == 1 ? 'day' : 'days'}';
+    }
+    if (minutes % 60 == 0) {
+      final hours = minutes ~/ 60;
+      return context.strings.locale.languageCode == 'ru'
+          ? '$hours ч.'
+          : '$hours ${hours == 1 ? 'hour' : 'hours'}';
+    }
+    return '$minutes ${context.strings.text('minutes')}';
   }
 }

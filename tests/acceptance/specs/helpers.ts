@@ -17,12 +17,12 @@ export const signup = async (
   account: AcceptanceAccount,
 ): Promise<AcceptanceAccount> => {
   await page.goto("/app?start=signup");
-  const dialog = page.getByRole("dialog", { name: "Sign Up" });
+  const dialog = page.getByRole("dialog", { name: "Create account" });
   await expect(dialog).toBeVisible();
   await dialog.getByPlaceholder("Username").fill(account.username);
   await dialog.getByPlaceholder("Password", { exact: true }).fill(account.password);
   await dialog.getByPlaceholder("Confirm password").fill(account.password);
-  await dialog.getByRole("button", { name: "Create Account" }).click();
+  await dialog.getByRole("button", { name: "Create account" }).click();
 
   const words = dialog.locator("ol li");
   await expect(words).toHaveCount(24);
@@ -36,7 +36,7 @@ export const signup = async (
   await dialog
     .getByRole("button", { name: "I saved the kit — create account" })
     .click();
-  await expect(page.getByRole("dialog", { name: "Sign In" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Sign in" })).toBeVisible();
   return { ...account, recoveryPhrase };
 };
 
@@ -44,14 +44,14 @@ export const signIn = async (
   page: Page,
   account: Pick<AcceptanceAccount, "username" | "password">,
 ): Promise<void> => {
-  let dialog = page.getByRole("dialog", { name: "Sign In" });
+  let dialog = page.getByRole("dialog", { name: "Sign in" });
   if (!(await dialog.isVisible())) {
-    await page.getByRole("button", { name: "Sign In", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Sign In" });
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    dialog = page.getByRole("dialog", { name: "Sign in" });
   }
   await dialog.getByPlaceholder("Username").fill(account.username);
   await dialog.getByPlaceholder("Password", { exact: true }).fill(account.password);
-  await dialog.getByRole("button", { name: "Sign In", exact: true }).click();
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByText("Authenticated", { exact: true })).toBeVisible();
 };
 
@@ -96,6 +96,6 @@ export const captureAccessToken = (page: Page): (() => string) => {
 };
 
 export const logout = async (page: Page): Promise<void> => {
-  await page.getByRole("button", { name: "Log Out" }).click();
-  await expect(page.getByText("Not Signed In", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page.getByText("Not signed in", { exact: true })).toBeVisible();
 };

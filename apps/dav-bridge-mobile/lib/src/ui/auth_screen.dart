@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:dav_bridge_mobile/src/i18n/app_localizations.dart';
 import 'package:dav_bridge_mobile/src/state/bridge_controller.dart';
+import 'package:dav_bridge_mobile/src/state/locale_controller.dart';
+import 'package:dav_bridge_mobile/src/ui/brand_mark.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
   const AuthScreen({super.key});
@@ -28,7 +31,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     final state = ref.watch(bridgeControllerProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Kamori')),
+      appBar: AppBar(
+        title: const KamoriAppBarTitle(),
+        actions: const [_LanguageMenu()],
+      ),
       body: SafeArea(
         child: Stack(
           children: [
@@ -98,37 +104,68 @@ class _LoginForm extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: ListView(
         children: [
-          const Text(
-            'Registration is available only in the Kamori web portal. Use your existing account to sign in here.',
-          ),
+          Text(context.strings.text('registration')),
           const SizedBox(height: 16),
           TextField(
             controller: usernameController,
-            decoration: const InputDecoration(labelText: 'Username'),
+            decoration: InputDecoration(
+              labelText: context.strings.text('username'),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: passwordController,
             obscureText: true,
-            decoration: const InputDecoration(labelText: 'Password'),
+            decoration: InputDecoration(
+              labelText: context.strings.text('password'),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: totpController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'TOTP (optional)'),
+            decoration: InputDecoration(
+              labelText: context.strings.text('totp'),
+            ),
           ),
           const SizedBox(height: 20),
           FilledButton(
             onPressed: onPasswordLogin,
-            child: const Text('Login with Password'),
+            child: Text(context.strings.text('login')),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Passkey sign-in on mobile is planned after native platform credential integration. Use OPAQUE password sign-in for this release.',
-          ),
+          Text(context.strings.text('passkeyPlan')),
         ],
       ),
+    );
+  }
+}
+
+class _LanguageMenu extends ConsumerWidget {
+  const _LanguageMenu();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preference = ref.watch(localeControllerProvider);
+    return PopupMenuButton<AppLanguagePreference>(
+      tooltip: context.strings.text('language'),
+      initialValue: preference,
+      icon: const Icon(Icons.language),
+      onSelected: ref.read(localeControllerProvider.notifier).setPreference,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: AppLanguagePreference.system,
+          child: Text(context.strings.text('system')),
+        ),
+        PopupMenuItem(
+          value: AppLanguagePreference.english,
+          child: Text(context.strings.text('english')),
+        ),
+        PopupMenuItem(
+          value: AppLanguagePreference.russian,
+          child: Text(context.strings.text('russian')),
+        ),
+      ],
     );
   }
 }

@@ -2,6 +2,7 @@
   export let open = false;
   export let title = '';
   export let onClose: () => void = () => {};
+  import { locale } from '../../i18n';
 
   const onWindowKeydown = (event: KeyboardEvent) => {
     if (!open) {
@@ -38,10 +39,10 @@
     on:click={onBackdropClick}
     on:keydown={onBackdropKeydown}
   >
-    <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-panel">
+    <div class="w-full max-w-lg border border-slate/25 bg-paper p-5 shadow-[10px_10px_0_rgba(23,53,47,0.18)]">
       <div class="mb-4 flex items-center justify-between">
         <h3 class="font-heading text-lg font-semibold text-slate">{title}</h3>
-        <button class="text-sm text-slate/60 hover:text-slate" on:click={onClose}>Close</button>
+        <button class="text-sm text-slate/60 hover:text-slate" on:click={onClose}>{$locale === 'ru' ? 'Закрыть' : 'Close'}</button>
       </div>
       <slot />
     </div>
