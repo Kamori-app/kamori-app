@@ -299,3 +299,18 @@ func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestOpsComposeUsesPublishedGrafanaRepository(t *testing.T) {
+	t.Parallel()
+
+	compose, err := deploymentAsset("ops/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(compose, "grafana/grafana-oss:") {
+		t.Fatal("ops compose uses the retired grafana-oss image repository")
+	}
+	if !strings.Contains(compose, "image: grafana/grafana:13.1.3") {
+		t.Fatal("ops compose is missing the tested Grafana image pin")
+	}
+}
