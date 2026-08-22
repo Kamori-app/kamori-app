@@ -512,3 +512,15 @@ func TestEdgeImageDropsTheUnneededPrivilegedPortCapability(t *testing.T) {
 		t.Fatal("edge image build must verify that Caddy has no remaining file capabilities")
 	}
 }
+
+func TestEdgePreservesApplicationGeneratedCSP(t *testing.T) {
+	t.Parallel()
+
+	caddyfile, err := deploymentAsset("edge/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(caddyfile), "content-security-policy") {
+		t.Fatal("edge must preserve SvelteKit's nonce-bearing CSP instead of replacing it")
+	}
+}

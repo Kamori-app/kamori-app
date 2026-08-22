@@ -9,8 +9,14 @@ export function normalizeLocale(value: string | null | undefined): AppLocale {
     return value?.toLowerCase() === "ru" ? "ru" : "en";
 }
 
+const requestedLocale = browser
+    ? new URLSearchParams(window.location.search).get("lang")
+    : null;
+
 const initialLocale = browser
-    ? normalizeLocale(window.localStorage.getItem(STORAGE_KEY))
+    ? requestedLocale === "en" || requestedLocale === "ru"
+        ? requestedLocale
+        : normalizeLocale(window.localStorage.getItem(STORAGE_KEY))
     : "en";
 
 export const locale = writable<AppLocale>(initialLocale);
