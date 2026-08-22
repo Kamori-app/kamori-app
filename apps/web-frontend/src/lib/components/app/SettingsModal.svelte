@@ -35,6 +35,24 @@
     import Button from "$lib/components/ui/Button.svelte";
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
+    import { locale } from "$lib/i18n";
+
+    const ruCopy: Record<string, string> = {
+        "Web Settings": "Настройки веб-приложения", "Cloud Base URL": "Адрес сервиса Kamori", "Save Settings": "Сохранить настройки",
+        "Ownership transfers": "Передача владения", "Refresh": "Обновить", "Accept ownership": "Принять владение", "Decline": "Отклонить",
+        "Pending offers": "Ожидающие предложения", "Cancel offer": "Отменить предложение", "Offer ownership": "Предложить владение",
+        "Privacy choices": "Настройки приватности", "Product analytics": "Аналитика продукта", "Crash reports": "Отчёты о сбоях", "Product email": "Новости продукта",
+        "Save privacy choices": "Сохранить выбор", "Security: Devices": "Безопасность: устройства", "Approve encrypted access": "Разрешить доступ к шифрованным данным",
+        "Security: Sessions": "Безопасность: сессии", "Sign in to review sessions.": "Войдите, чтобы просмотреть сессии.", "No sessions found.": "Сессий нет.",
+        "Last used": "Последнее использование", "Revoke": "Отозвать", "Security: Data Recovery Kit": "Безопасность: recovery kit данных",
+        "Reveal 24-word kit": "Показать набор из 24 слов", "Copy kit": "Копировать набор", "Sign in to reveal it.": "Войдите, чтобы показать его.",
+        "Security: TOTP": "Безопасность: TOTP", "Sign in to manage TOTP.": "Войдите для управления TOTP.", "Manual Entry Key": "Ключ для ручного ввода",
+        "Copy Manual Key": "Копировать ключ", "Copy URI": "Копировать URI", "Security: Password": "Безопасность: пароль",
+        "Sign in to change password.": "Войдите, чтобы изменить пароль.", "Current password": "Текущий пароль", "New password": "Новый пароль",
+        "Confirm new password": "Повторите новый пароль", "Current TOTP or backup code": "Текущий TOTP или backup-код", "Delete account": "Удалить аккаунт",
+        "Refresh status": "Обновить статус", "Current TOTP code, if enabled": "Текущий TOTP-код, если включён",
+    };
+    const t = (english: string) => $locale === "ru" ? (ruCopy[english] ?? english) : english;
 
     /**
      * Minimal settings modal used to override cloud API base URL.
@@ -911,14 +929,14 @@
     }
 </script>
 
-<Modal {open} title="Web Settings" {onClose}>
+<Modal {open} title={t("Web Settings")} {onClose}>
     <div class="space-y-4">
         <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
-            Cloud Base URL
+            {t("Cloud Base URL")}
         </p>
         <Input bind:value={settingsCloudBaseUrl} />
         <div class="pt-1">
-            <Button on:click={saveCloudBaseUrl}>Save Settings</Button>
+            <Button on:click={saveCloudBaseUrl}>{t("Save Settings")}</Button>
         </div>
 
         <div class="border-t border-slate/15 pt-3">
@@ -926,10 +944,10 @@
                 <p
                     class="text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    Ownership transfers
+                    {t("Ownership transfers")}
                 </p>
                 {#if $appState.accessToken}
-                    <Button variant="ghost" on:click={loadOwnership}>Refresh</Button>
+                    <Button variant="ghost" on:click={loadOwnership}>{t("Refresh")}</Button>
                 {/if}
             </div>
             <p class="mt-2 text-xs text-slate/70">
@@ -962,14 +980,14 @@
                                         resolveOwnershipOffer(offer, true)}
                                     disabled={totpBusyAction ===
                                         `ownership-offer-${offer.transfer_id}`}
-                                >Accept ownership</Button>
+                                >{t("Accept ownership")}</Button>
                                 <Button
                                     variant="ghost"
                                     on:click={() =>
                                         resolveOwnershipOffer(offer, false)}
                                     disabled={totpBusyAction ===
                                         `ownership-offer-${offer.transfer_id}`}
-                                >Decline</Button>
+                                >{t("Decline")}</Button>
                             </div>
                         </div>
                     {/each}
@@ -977,7 +995,7 @@
             {/if}
             {#if outgoingOwnershipOffers.length > 0}
                 <div class="mt-3 space-y-2">
-                    <p class="text-xs font-semibold text-slate">Pending offers</p>
+                    <p class="text-xs font-semibold text-slate">{t("Pending offers")}</p>
                     {#each outgoingOwnershipOffers as offer}
                         <div
                             class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate/15 bg-white/70 p-3"
@@ -998,7 +1016,7 @@
                                     resolveOwnershipOffer(offer, false)}
                                 disabled={totpBusyAction ===
                                     `ownership-offer-${offer.transfer_id}`}
-                            >Cancel offer</Button>
+                            >{t("Cancel offer")}</Button>
                         </div>
                     {/each}
                 </div>
@@ -1034,7 +1052,7 @@
                                                     )}
                                                 disabled={totpBusyAction ===
                                                     `ownership-${resource.id}-${member.user_id}`}
-                                            >Offer ownership</Button>
+                                            >{t("Offer ownership")}</Button>
                                         </div>
                                     {/each}
                                 </div>
@@ -1049,13 +1067,10 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Privacy choices
+                {t("Privacy choices")}
             </p>
             <p class="mt-2 text-xs text-slate/70">
-                Everything is off by default. No analytics or crash-reporting
-                SDK is loaded and nothing is queued before you explicitly opt
-                in. These choices are independent and can be revoked at any
-                time.
+                {$locale === "ru" ? "Всё отключено по умолчанию. До явного согласия SDK аналитики и отчётов о сбоях не загружаются, а данные не накапливаются. Каждое согласие можно отозвать независимо." : "Everything is off by default. No analytics or crash-reporting SDK is loaded and nothing is queued before you explicitly opt in. These choices are independent and can be revoked at any time."}
             </p>
             {#if !$appState.accessToken}
                 <p class="mt-2 text-xs text-slate/70">
@@ -1071,7 +1086,7 @@
                             disabled={consentLoading}
                         />
                         <span>
-                            <strong>Product analytics</strong><br />
+                            <strong>{t("Product analytics")}</strong><br />
                             <span class="text-xs text-slate/70">
                                 Share privacy-filtered feature usage and
                                 performance counters.
@@ -1086,7 +1101,7 @@
                             disabled={consentLoading}
                         />
                         <span>
-                            <strong>Crash reports</strong><br />
+                            <strong>{t("Crash reports")}</strong><br />
                             <span class="text-xs text-slate/70">
                                 Send redacted crash diagnostics without content,
                                 keys, or tokens.
@@ -1101,7 +1116,7 @@
                             disabled={consentLoading}
                         />
                         <span>
-                            <strong>Product email</strong><br />
+                            <strong>{t("Product email")}</strong><br />
                             <span class="text-xs text-slate/70">
                                 Receive optional product news. Security notices
                                 remain operational.
@@ -1113,7 +1128,7 @@
                         on:click={saveConsents}
                         disabled={consentLoading ||
                             totpBusyAction === "consents"}
-                    >Save privacy choices</Button>
+                    >{t("Save privacy choices")}</Button>
                 </div>
             {/if}
         </div>
@@ -1123,10 +1138,10 @@
                 <p
                     class="text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    Security: Devices
+                    {t("Security: Devices")}
                 </p>
                 {#if $appState.accessToken}
-                    <Button variant="ghost" on:click={loadDevices}>Refresh</Button>
+                    <Button variant="ghost" on:click={loadDevices}>{t("Refresh")}</Button>
                 {/if}
             </div>
             <p class="mt-2 text-xs text-slate/70">
@@ -1154,7 +1169,7 @@
                                         on:click={() => approveDevice(entry)}
                                         disabled={totpBusyAction ===
                                             `device-${entry.device.device_id}`}
-                                    >Approve encrypted access</Button>
+                                    >{t("Approve encrypted access")}</Button>
                                 </div>
                             {/if}
                         </div>
@@ -1168,18 +1183,18 @@
                 <p
                     class="text-xs font-semibold uppercase tracking-wide text-slate/70"
                 >
-                    Security: Sessions
+                    {t("Security: Sessions")}
                 </p>
                 {#if $appState.accessToken}
-                    <Button variant="ghost" on:click={loadSessions}>Refresh</Button>
+                    <Button variant="ghost" on:click={loadSessions}>{t("Refresh")}</Button>
                 {/if}
             </div>
             {#if !$appState.accessToken}
                 <p class="mt-2 text-xs text-slate/70">
-                    Sign in to review sessions.
+                    {t("Sign in to review sessions.")}
                 </p>
             {:else if sessions.length === 0}
-                <p class="mt-2 text-xs text-slate/70">No sessions found.</p>
+                <p class="mt-2 text-xs text-slate/70">{t("No sessions found.")}</p>
             {:else}
                 <div class="mt-2 space-y-2">
                     {#each sessions as session}
@@ -1192,7 +1207,7 @@
                             <p class="mt-1 text-xs text-slate/65">
                                 IP {session.ip_address || "unknown"} · Created
                                 {formatSessionTime(session.created_at_unix_ms)} ·
-                                Last used
+                                {t("Last used")}
                                 {formatSessionTime(session.last_used_at_unix_ms)}
                             </p>
                             {#if session.revoked_at_unix_ms}
@@ -1209,7 +1224,7 @@
                                             )}
                                         disabled={totpBusyAction ===
                                             `session-${session.refresh_token_id}`}
-                                    >Revoke</Button>
+                                    >{t("Revoke")}</Button>
                                 </div>
                             {/if}
                         </div>
@@ -1222,7 +1237,7 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Security: Data Recovery Kit
+                {t("Security: Data Recovery Kit")}
             </p>
             <p class="mt-2 text-xs text-slate/70">
                 These 24 words restore your encrypted data key. They are
@@ -1232,7 +1247,7 @@
             {#if $appState.accessToken}
                 <div class="mt-2 space-y-2">
                     <Button variant="ghost" on:click={revealDataRecoveryKit}>
-                        Reveal 24-word kit
+                        {t("Reveal 24-word kit")}
                     </Button>
                     {#if dataRecoveryKit}
                         <p
@@ -1244,11 +1259,11 @@
                             variant="secondary"
                             on:click={() =>
                                 copyText(dataRecoveryKit, "Data recovery kit")}
-                        >Copy kit</Button>
+                        >{t("Copy kit")}</Button>
                     {/if}
                 </div>
             {:else}
-                <p class="mt-2 text-xs text-slate/70">Sign in to reveal it.</p>
+                <p class="mt-2 text-xs text-slate/70">{t("Sign in to reveal it.")}</p>
             {/if}
         </div>
 
@@ -1256,12 +1271,12 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Security: TOTP
+                {t("Security: TOTP")}
             </p>
 
             {#if !$appState.accessToken}
                 <p class="mt-2 text-xs text-slate/70">
-                    Sign in to manage TOTP.
+                    {t("Sign in to manage TOTP.")}
                 </p>
             {:else}
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1280,7 +1295,7 @@
                         on:click={loadTotpStatus}
                         disabled={Boolean(totpBusyAction)}
                     >
-                        Refresh
+                        {t("Refresh")}
                     </Button>
                     <Button
                         variant="secondary"
@@ -1329,7 +1344,7 @@
                                 <p
                                     class="text-[11px] font-semibold uppercase tracking-wide text-slate/70"
                                 >
-                                    Manual Entry Key
+                                    {t("Manual Entry Key")}
                                 </p>
                                 <p
                                     class="break-all font-mono text-xs text-slate"
@@ -1344,7 +1359,7 @@
                                             "Manual entry key",
                                         )}
                                 >
-                                    Copy Manual Key
+                                    {t("Copy Manual Key")}
                                 </Button>
                             </div>
 
@@ -1364,13 +1379,13 @@
                                     on:click={() =>
                                         copyText(totpOtpAuthUri, "OTPAuth URI")}
                                 >
-                                    Copy URI
+                                    {t("Copy URI")}
                                 </Button>
                             </div>
 
                             <Input
                                 bind:value={totpSetupCode}
-                                placeholder="Enter current 6-digit TOTP code"
+                                placeholder={$locale === "ru" ? "Введите текущий 6-значный TOTP-код" : "Enter current 6-digit TOTP code"}
                             />
                             <Button
                                 on:click={finishTotpSetup}
@@ -1394,7 +1409,7 @@
                         </p>
                         <Input
                             bind:value={totpDisableCode}
-                            placeholder="Enter current 6-digit TOTP code"
+                            placeholder={$locale === "ru" ? "Введите текущий 6-значный TOTP-код" : "Enter current 6-digit TOTP code"}
                         />
                         <Button
                             variant="danger"
@@ -1444,12 +1459,12 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Security: Password
+                {t("Security: Password")}
             </p>
 
             {#if !$appState.accessToken}
                 <p class="mt-2 text-xs text-slate/70">
-                    Sign in to change password.
+                    {t("Sign in to change password.")}
                 </p>
             {:else}
                 <div
@@ -1458,22 +1473,22 @@
                     <Input
                         bind:value={passwordChangeCurrent}
                         type="password"
-                        placeholder="Current password"
+                        placeholder={t("Current password")}
                     />
                     <Input
                         bind:value={passwordChangeNew}
                         type="password"
-                        placeholder="New password"
+                        placeholder={t("New password")}
                     />
                     <Input
                         bind:value={passwordChangeConfirm}
                         type="password"
-                        placeholder="Confirm new password"
+                        placeholder={t("Confirm new password")}
                     />
                     {#if totpEnabled}
                         <Input
                             bind:value={passwordChangeTotp}
-                            placeholder="Current TOTP or backup code"
+                            placeholder={t("Current TOTP or backup code")}
                         />
                     {/if}
                     <Button
@@ -1498,11 +1513,11 @@
                 <p
                     class="text-xs font-semibold uppercase tracking-wide text-coral"
                 >
-                    Delete account
+                    {t("Delete account")}
                 </p>
                 {#if $appState.accessToken}
                     <Button variant="ghost" on:click={loadDeletionStatus}
-                        >Refresh status</Button
+                        >{t("Refresh status")}</Button
                     >
                 {/if}
             </div>
@@ -1529,11 +1544,11 @@
                     <Input
                         bind:value={accountDeletePassword}
                         type="password"
-                        placeholder="Current password"
+                        placeholder={t("Current password")}
                     />
                     <Input
                         bind:value={accountDeleteTotp}
-                        placeholder="Current TOTP code, if enabled"
+                        placeholder={t("Current TOTP code, if enabled")}
                     />
                     <Input
                         bind:value={accountDeleteConfirmation}

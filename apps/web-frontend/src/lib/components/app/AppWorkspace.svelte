@@ -48,6 +48,26 @@
     import Card from "$lib/components/ui/Card.svelte";
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
+    import { locale } from "$lib/i18n";
+
+    const ruCopy: Record<string, string> = {
+        "Confirm this code in your desktop app": "Сверьте этот код с кодом в приложении для компьютера",
+        "Approve Desktop": "Подтвердить компьютер",
+        "Dashboard": "Обзор", "Current user": "Текущий пользователь", "Not signed in": "Вход не выполнен",
+        "Collections": "Пространства", "Synced events total": "Всего синхронизировано", "Last synced seq": "Последняя операция",
+        "Syncing...": "Синхронизация…", "Sync Now": "Синхронизировать", "Collection name": "Название пространства",
+        "Create Collection": "Создать пространство", "No collections yet.": "Пространств пока нет.", "Approval required on another device": "Нужно подтверждение на другом устройстве",
+        "Delete": "Удалить", "Trash · retained for 30 days": "Корзина · хранение 30 дней", "Restore": "Восстановить",
+        "Tasks": "Задачи", "New task": "Новая задача", "Saving...": "Сохранение…", "Add Task": "Добавить задачу",
+        "Completed": "Выполнено", "Open": "Открыто", "Reopen": "Вернуть", "Complete": "Выполнить", "No tasks on this device yet.": "На этом устройстве задач пока нет.",
+        "Calendar": "Календарь", "Event title": "Название события", "Add Event": "Добавить событие", "No events on this device yet.": "На этом устройстве событий пока нет.",
+        "Contacts": "Контакты", "Full name": "Полное имя", "Email": "Email", "Phone": "Телефон", "Add Contact": "Добавить контакт", "No contacts on this device yet.": "На этом устройстве контактов пока нет.",
+        "Invite Codes": "Коды приглашений", "Generate": "Создать", "No collections": "Нет пространств", "Editor": "Редактор", "Reader": "Чтение",
+        "Optional encrypted note for recipient": "Необязательная зашифрованная заметка получателю", "Generating...": "Создание…", "Generate Invite Code": "Создать код приглашения",
+        "Redeem": "Принять", "Redeeming...": "Принимаем…", "Redeem Code": "Принять код", "Invite Note": "Заметка приглашения",
+        "Delete Collection": "Удалить пространство", "Cancel": "Отмена", "Move to Trash": "Переместить в корзину",
+    };
+    const t = (english: string) => $locale === "ru" ? (ruCopy[english] ?? english) : english;
 
     /**
      * Authenticated workspace:
@@ -84,14 +104,14 @@
     const textDecoder = new TextDecoder();
 
     const inviteTtlOptions = [
-        { value: 15, label: "15 minutes" },
-        { value: 30, label: "30 minutes" },
-        { value: 60, label: "1 hour" },
-        { value: 180, label: "3 hours" },
-        { value: 720, label: "12 hours" },
-        { value: 1440, label: "24 hours" },
-        { value: 4320, label: "3 days" },
-        { value: 10080, label: "7 days" },
+        { value: 15, en: "15 minutes", ru: "15 минут" },
+        { value: 30, en: "30 minutes", ru: "30 минут" },
+        { value: 60, en: "1 hour", ru: "1 час" },
+        { value: 180, en: "3 hours", ru: "3 часа" },
+        { value: 720, en: "12 hours", ru: "12 часов" },
+        { value: 1440, en: "24 hours", ru: "24 часа" },
+        { value: 4320, en: "3 days", ru: "3 дня" },
+        { value: 10080, en: "7 days", ru: "7 дней" },
     ];
 
     /**
@@ -1164,12 +1184,11 @@
 {#if deviceAuthorizationCode}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
-            Authorize Kamori Desktop
+            {$locale === "ru" ? "Подтвердить Kamori на компьютере" : "Authorize Kamori Desktop"}
         </h2>
         <p class="mt-2 text-sm text-slate/80">
-            Confirm that code <strong>{deviceAuthorizationCode}</strong> is also
-            shown in your desktop app. Approving creates a desktop session; it
-            does not expose session tokens in this browser URL.
+            {$locale === "ru" ? "Убедитесь, что этот же код показан в приложении для компьютера:" : "Confirm that this code is also shown in your desktop app:"}
+            <strong>{deviceAuthorizationCode}</strong>.
         </p>
         <div class="mt-3 flex gap-2">
             <Button
@@ -1177,11 +1196,11 @@
                 disabled={loadingAction === "device-authorization"}
             >
                 {loadingAction === "device-authorization"
-                    ? "Approving..."
-                    : "Approve Desktop"}
+                    ? ($locale === "ru" ? "Подтверждаем…" : "Approving...")
+                    : t("Approve Desktop")}
             </Button>
             <Button variant="secondary" on:click={clearDeviceAuthorizationQuery}>
-                Cancel
+                {t("Cancel")}
             </Button>
         </div>
     </Card>
@@ -1189,32 +1208,32 @@
 
 <div class="grid gap-4 md:grid-cols-2">
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">Dashboard</h2>
+        <h2 class="font-heading text-xl font-semibold text-slate">{t("Dashboard")}</h2>
         <div class="mt-3 space-y-2 text-sm text-slate/80">
-            <p>Current user: {$appState.currentUsername || "Not signed in"}</p>
-            <p>Collections: {$appState.collections.length}</p>
-            <p>Synced events total: {$appState.syncedItemsTotal}</p>
-            <p>Last synced seq: {$appState.lastSyncedSeq}</p>
+            <p>{t("Current user")}: {$appState.currentUsername || t("Not signed in")}</p>
+            <p>{t("Collections")}: {$appState.collections.length}</p>
+            <p>{t("Synced events total")}: {$appState.syncedItemsTotal}</p>
+            <p>{t("Last synced seq")}: {$appState.lastSyncedSeq}</p>
         </div>
         <div class="mt-3">
             <Button on:click={syncNow} disabled={loadingAction === "sync-now"}>
-                {loadingAction === "sync-now" ? "Syncing..." : "Sync Now"}
+                {loadingAction === "sync-now" ? t("Syncing...") : t("Sync Now")}
             </Button>
         </div>
     </Card>
 
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
-            Collections
+            {t("Collections")}
         </h2>
         <div class="mt-3 space-y-2">
-            <Input bind:value={collectionName} placeholder="Collection name" />
-            <Button on:click={createCollection}>Create Collection</Button>
+            <Input bind:value={collectionName} placeholder={t("Collection name")} />
+            <Button on:click={createCollection}>{t("Create Collection")}</Button>
         </div>
 
         <div class="mt-4 space-y-2">
             {#if $appState.collections.length === 0}
-                <p class="text-sm text-slate/70">No collections yet.</p>
+                <p class="text-sm text-slate/70">{t("No collections yet.")}</p>
             {:else}
                 {#each $appState.collections as collection}
                     <div
@@ -1229,7 +1248,7 @@
                         <p class="mt-1 text-xs text-slate/65">
                             {collection.keyAvailable
                                 ? `Key epoch ${collection.keyEpoch}`
-                                : "Approval required on another device"}
+                                : t("Approval required on another device")}
                         </p>
                         {#if collection.role === "owner"}
                         <div class="mt-2">
@@ -1238,7 +1257,7 @@
                                 on:click={() =>
                                     requestCollectionDelete(collection.id)}
                             >
-                                Delete
+                                {t("Delete")}
                             </Button>
                         </div>
                         {/if}
@@ -1250,7 +1269,7 @@
         {#if trashedCollections.length > 0}
             <div class="mt-5 border-t border-slate/15 pt-4">
                 <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
-                    Trash · retained for 30 days
+                    {t("Trash · retained for 30 days")}
                 </p>
                 <div class="mt-2 space-y-2">
                     {#each trashedCollections as collection}
@@ -1260,7 +1279,7 @@
                                 variant="ghost"
                                 on:click={() => restoreCollection(collection.id)}
                                 disabled={loadingAction === `space-restore-${collection.id}`}
-                            >Restore</Button>
+                            >{t("Restore")}</Button>
                         </div>
                     {/each}
                 </div>
@@ -1269,10 +1288,9 @@
     </Card>
 
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">Tasks</h2>
+        <h2 class="font-heading text-xl font-semibold text-slate">{t("Tasks")}</h2>
         <p class="mt-2 text-xs text-slate/70">
-            Edits are encrypted and signed locally. Offline writes stay in the
-            encrypted outbox until the next successful sync.
+            {$locale === "ru" ? "Изменения шифруются и подписываются локально. Офлайн-записи остаются в зашифрованной очереди до успешной синхронизации." : "Edits are encrypted and signed locally. Offline writes stay in the encrypted outbox until the next successful sync."}
         </p>
         <div class="mt-3 space-y-2">
             <select
@@ -1283,12 +1301,12 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={taskTitle} placeholder="New task" />
+            <Input bind:value={taskTitle} placeholder={t("New task")} />
             <Button
                 on:click={createTask}
                 disabled={loadingAction === "task-create"}
             >
-                {loadingAction === "task-create" ? "Saving..." : "Add Task"}
+                {loadingAction === "task-create" ? t("Saving...") : t("Add Task")}
             </Button>
         </div>
         <div class="mt-4 space-y-2">
@@ -1296,8 +1314,8 @@
                 <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
                     <p class="font-semibold text-slate">{item.title}</p>
                     <p class="text-xs text-slate/65">
-                        {item.completed ? "Completed" : "Open"}
-                        {item.conflict ? " · concurrent edit needs review" : ""}
+                        {item.completed ? t("Completed") : t("Open")}
+                        {item.conflict ? ($locale === "ru" ? " · проверьте параллельное изменение" : " · concurrent edit needs review") : ""}
                     </p>
                     <div class="mt-2 flex flex-wrap gap-2">
                         <Button
@@ -1306,23 +1324,23 @@
                                 setTaskCompleted(item, !item.completed)}
                             disabled={loadingAction === `task-${item.resourceId}`}
                         >
-                            {item.completed ? "Reopen" : "Complete"}
+                            {item.completed ? t("Reopen") : t("Complete")}
                         </Button>
                         <Button
                             variant="danger"
                             on:click={() => deletePimItem(item)}
                             disabled={loadingAction === `delete-${item.resourceId}`}
-                        >Delete</Button>
+                        >{t("Delete")}</Button>
                     </div>
                 </div>
             {:else}
-                <p class="text-sm text-slate/70">No tasks on this device yet.</p>
+                <p class="text-sm text-slate/70">{t("No tasks on this device yet.")}</p>
             {/each}
         </div>
     </Card>
 
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">Calendar</h2>
+        <h2 class="font-heading text-xl font-semibold text-slate">{t("Calendar")}</h2>
         <div class="mt-3 space-y-2">
             <select
                 class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
@@ -1332,14 +1350,14 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={eventTitle} placeholder="Event title" />
+            <Input bind:value={eventTitle} placeholder={t("Event title")} />
             <Input bind:value={eventStart} type="datetime-local" />
             <Input bind:value={eventEnd} type="datetime-local" />
             <Button
                 on:click={createCalendarEvent}
                 disabled={loadingAction === "event-create"}
             >
-                {loadingAction === "event-create" ? "Saving..." : "Add Event"}
+                {loadingAction === "event-create" ? t("Saving...") : t("Add Event")}
             </Button>
         </div>
         <div class="mt-4 space-y-2">
@@ -1357,17 +1375,17 @@
                             variant="danger"
                             on:click={() => deletePimItem(item)}
                             disabled={loadingAction === `delete-${item.resourceId}`}
-                        >Delete</Button>
+                        >{t("Delete")}</Button>
                     </div>
                 </div>
             {:else}
-                <p class="text-sm text-slate/70">No events on this device yet.</p>
+                <p class="text-sm text-slate/70">{t("No events on this device yet.")}</p>
             {/each}
         </div>
     </Card>
 
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">Contacts</h2>
+        <h2 class="font-heading text-xl font-semibold text-slate">{t("Contacts")}</h2>
         <div class="mt-3 space-y-2">
             <select
                 class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
@@ -1377,14 +1395,14 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={contactName} placeholder="Full name" />
-            <Input bind:value={contactEmail} type="email" placeholder="Email" />
-            <Input bind:value={contactPhone} type="tel" placeholder="Phone" />
+            <Input bind:value={contactName} placeholder={t("Full name")} />
+            <Input bind:value={contactEmail} type="email" placeholder={t("Email")} />
+            <Input bind:value={contactPhone} type="tel" placeholder={t("Phone")} />
             <Button
                 on:click={createContact}
                 disabled={loadingAction === "contact-create"}
             >
-                {loadingAction === "contact-create" ? "Saving..." : "Add Contact"}
+                {loadingAction === "contact-create" ? t("Saving...") : t("Add Contact")}
             </Button>
         </div>
         <div class="mt-4 space-y-2">
@@ -1402,49 +1420,36 @@
                             variant="danger"
                             on:click={() => deletePimItem(item)}
                             disabled={loadingAction === `delete-${item.resourceId}`}
-                        >Delete</Button>
+                        >{t("Delete")}</Button>
                     </div>
                 </div>
             {:else}
-                <p class="text-sm text-slate/70">No contacts on this device yet.</p>
+                <p class="text-sm text-slate/70">{t("No contacts on this device yet.")}</p>
             {/each}
         </div>
     </Card>
 
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
-            Invite Codes
+            {t("Invite Codes")}
         </h2>
         <p class="mt-2 text-xs text-slate/70">
-            Only users already registered on Kamori can redeem invite codes.
+            {$locale === "ru" ? "Принять код могут только зарегистрированные пользователи Kamori." : "Only users already registered on Kamori can redeem invite codes."}
         </p>
         <p class="mt-1 text-xs text-slate/70">
-            Collection key wrapping/unwrapping happens in the client; server
-            stores opaque bytes only.
+            {$locale === "ru" ? "Ключ пространства шифруется и расшифровывается на клиенте; сервер хранит только непрозрачные байты." : "The space key is wrapped and unwrapped on the client; the server stores opaque bytes only."}
         </p>
         <div class="mt-3 rounded-xl border border-slate/15 bg-white/70 p-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                How Invite Codes Work
+                {$locale === "ru" ? "Как работают коды" : "How invite codes work"}
             </p>
             <ol class="mt-2 space-y-1 text-xs text-slate/80">
-                <li>
-                    1. You generate a code locally. The collection key is
-                    encrypted in your browser with that code.
-                </li>
-                <li>
-                    2. Server stores only hash(code) + encrypted payload +
-                    optional encrypted note + TTL.
-                </li>
-                <li>
-                    3. Recipient enters the code and decrypts payload locally to
-                    recover the collection key.
-                </li>
-                <li>
-                    4. Invite is single-use and can be redeemed only before
-                    expiration.
-                </li>
+                <li>1. {$locale === "ru" ? "Код создаётся локально и шифрует ключ пространства в браузере." : "The code is generated locally and encrypts the space key in your browser."}</li>
+                <li>2. {$locale === "ru" ? "Сервер хранит хеш кода, зашифрованные данные, необязательную заметку и срок действия." : "The server stores the code hash, encrypted payload, optional note, and expiry."}</li>
+                <li>3. {$locale === "ru" ? "Получатель вводит код и локально восстанавливает ключ пространства." : "The recipient enters the code and restores the space key locally."}</li>
+                <li>4. {$locale === "ru" ? "Приглашение одноразовое и действует только до истечения срока." : "The invitation is single-use and expires."}</li>
             </ol>
         </div>
 
@@ -1452,7 +1457,7 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Generate
+                {t("Generate")}
             </p>
 
             <select
@@ -1460,7 +1465,7 @@
                 bind:value={selectedCollectionId}
             >
                 {#if $appState.collections.length === 0}
-                    <option value="">No collections</option>
+                    <option value="">{t("No collections")}</option>
                 {:else}
                     {#each $appState.collections as collection}
                         <option value={collection.id}>{collection.name}</option>
@@ -1473,8 +1478,8 @@
                 aria-label="Invite role"
                 bind:value={inviteRole}
             >
-                <option value="editor">Editor</option>
-                <option value="reader">Reader</option>
+                <option value="editor">{t("Editor")}</option>
+                <option value="reader">{t("Reader")}</option>
             </select>
 
             <select
@@ -1483,13 +1488,13 @@
                 bind:value={inviteTtlMinutes}
             >
                 {#each inviteTtlOptions as option}
-                    <option value={String(option.value)}>{option.label}</option>
+                    <option value={String(option.value)}>{option[$locale]}</option>
                 {/each}
             </select>
 
             <Input
                 bind:value={inviteNotePlaintext}
-                placeholder="Optional encrypted note for recipient"
+                placeholder={t("Optional encrypted note for recipient")}
             />
 
             <Button
@@ -1497,8 +1502,8 @@
                 disabled={loadingAction === "invite-generate"}
             >
                 {loadingAction === "invite-generate"
-                    ? "Generating..."
-                    : "Generate Invite Code"}
+                    ? t("Generating...")
+                    : t("Generate Invite Code")}
             </Button>
 
             {#if inviteCodeIssued}
@@ -1512,7 +1517,7 @@
             <p
                 class="pt-3 text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Redeem
+                {t("Redeem")}
             </p>
             <Input
                 bind:value={inviteCodeToRedeem}
@@ -1524,8 +1529,8 @@
                 disabled={loadingAction === "invite-redeem"}
             >
                 {loadingAction === "invite-redeem"
-                    ? "Redeeming..."
-                    : "Redeem Code"}
+                    ? t("Redeeming...")
+                    : t("Redeem Code")}
             </Button>
 
             {#if inviteRedeemedNote}
@@ -1535,7 +1540,7 @@
                     <p
                         class="text-xs font-semibold uppercase tracking-wide text-slate/70"
                     >
-                        Invite Note
+                        {t("Invite Note")}
                     </p>
                     <p class="mt-1 whitespace-pre-wrap">{inviteRedeemedNote}</p>
                 </div>
@@ -1546,23 +1551,22 @@
 
 <Modal
     open={deleteModalOpen}
-    title="Delete Collection"
+    title={t("Delete Collection")}
     onClose={() => (deleteModalOpen = false)}
 >
     <div class="space-y-3">
         <p class="text-sm text-slate">
-            Move this collection to trash? Its encrypted history can be
-            restored for 30 days.
+            {$locale === "ru" ? "Переместить пространство в корзину? Зашифрованную историю можно восстановить в течение 30 дней." : "Move this space to trash? Its encrypted history can be restored for 30 days."}
         </p>
         <div class="flex gap-2">
             <Button variant="ghost" on:click={() => (deleteModalOpen = false)}
-                >Cancel</Button
+                >{t("Cancel")}</Button
             >
             <Button
                 variant="danger"
                 on:click={deleteCollection}
                 disabled={loadingAction === "space-delete"}
-            >Move to Trash</Button>
+            >{t("Move to Trash")}</Button>
         </div>
     </div>
 </Modal>

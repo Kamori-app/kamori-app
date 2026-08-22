@@ -5,6 +5,35 @@
   import Badge from '../components/ui/Badge.svelte';
   import { api, type DavConnectionInfo } from '../tauri';
   import { session, loginNotice } from '../stores/app';
+  import { locale } from '../i18n';
+
+  const copies = {
+    en: {
+      title: 'Desktop control center', intro: 'Encrypted sync is primary. The local DAV bridge is an optional compatibility layer.', running: 'Running', stopped: 'Stopped',
+      server: 'Local DAV bridge', port: 'Address', spaces: 'Spaces', vaults: 'Encrypted spaces', items: 'Synced items', cache: 'Applied to local cache',
+      start: 'Start DAV bridge', stop: 'Stop DAV bridge', syncing: 'Syncing…', sync: 'Sync now', hide: 'Hide DAV details', show: 'Set up a DAV app',
+      started: 'Local DAV bridge started. Background encrypted sync is active.', stoppedNotice: 'Local DAV bridge and background sync stopped.',
+      syncDone: (count: number) => `Sync complete: applied ${count} encrypted operations.`, stopRotate: 'Stop the local bridge before rotating credentials.',
+      rotateConfirm: 'Rotate the DAV password? Existing DAV apps will need the new password.', rotated: 'DAV password rotated. Update every connected DAV app.',
+      copied: (label: string) => `${label} copied.`, copyFailed: (label: string) => `Could not copy ${label.toLowerCase()}. Select it manually.`,
+      setup: 'Optional DAV app setup', setupBody: 'Details remain visible for 60 seconds. The bridge accepts connections only from this computer.', rotate: 'Rotate password',
+      username: 'Username', password: 'Dedicated DAV password', copy: 'Copy', noSpaces: 'Create a space before connecting a DAV app.', calendar: 'Calendar URL', addressBook: 'Address book URL',
+      davFootnote: 'Use a direct collection URL in an app that supports custom CalDAV/CardDAV servers. Your Kamori account password is never exposed to DAV.',
+    },
+    ru: {
+      title: 'Центр управления', intro: 'Основа продукта — зашифрованная синхронизация. Локальный DAV-мост остаётся необязательным слоем совместимости.', running: 'Работает', stopped: 'Остановлен',
+      server: 'Локальный DAV-мост', port: 'Адрес', spaces: 'Пространства', vaults: 'Зашифрованные пространства', items: 'Синхронизировано', cache: 'Применено к локальному кешу',
+      start: 'Запустить DAV-мост', stop: 'Остановить DAV-мост', syncing: 'Синхронизация…', sync: 'Синхронизировать', hide: 'Скрыть данные DAV', show: 'Настроить DAV-приложение',
+      started: 'Локальный DAV-мост запущен. Фоновая зашифрованная синхронизация активна.', stoppedNotice: 'Локальный DAV-мост и фоновая синхронизация остановлены.',
+      syncDone: (count: number) => `Синхронизация завершена: применено операций — ${count}.`, stopRotate: 'Перед сменой реквизитов остановите локальный мост.',
+      rotateConfirm: 'Сменить пароль DAV? Его потребуется обновить во всех подключённых приложениях.', rotated: 'Пароль DAV изменён. Обновите его во всех подключённых приложениях.',
+      copied: (label: string) => `${label}: скопировано.`, copyFailed: (label: string) => `Не удалось скопировать «${label}». Выделите значение вручную.`,
+      setup: 'Настройка необязательного DAV-приложения', setupBody: 'Данные показываются 60 секунд. Мост принимает подключения только с этого компьютера.', rotate: 'Сменить пароль',
+      username: 'Имя пользователя', password: 'Отдельный пароль DAV', copy: 'Копировать', noSpaces: 'Создайте пространство перед подключением DAV-приложения.', calendar: 'URL календаря', addressBook: 'URL адресной книги',
+      davFootnote: 'Используйте прямой URL коллекции в приложении с поддержкой собственных CalDAV/CardDAV-серверов. Пароль аккаунта Kamori никогда не передаётся в DAV.',
+    },
+  } as const;
+  $: copy = copies[$locale];
 
   let syncing = false;
   let operationError = '';
@@ -29,7 +58,7 @@
     operationError = '';
     try {
       await api.startLocalServer();
-      loginNotice.set('Local DAV bridge started. Background encrypted sync is active.');
+      loginNotice.set(copy.started);
       await refresh();
     } catch (error) {
       operationError = errorMessage(error);
@@ -40,7 +69,7 @@
     operationError = '';
     try {
       await api.stopLocalServer();
-      loginNotice.set('Local DAV bridge and background sync stopped.');
+      loginNotice.set(copy.stoppedNotice);
       await refresh();
     } catch (error) {
       operationError = errorMessage(error);
@@ -52,7 +81,7 @@
     operationError = '';
     try {
       const applied = await api.syncNow();
-      loginNotice.set(`Sync complete: applied ${applied} encrypted operations.`);
+      loginNotice.set(copy.syncDone(applied));
       await refresh();
     } catch (error) {
       operationError = errorMessage(error);
@@ -86,15 +115,15 @@
   const rotateCredentials = async () => {
     operationError = '';
     if ($session.serverRunning) {
-      operationError = 'Stop the local bridge before rotating credentials.';
+      operationError = copy.stopRotate;
       return;
     }
-    if (!window.confirm('Rotate the DAV password? Existing DAV clients will need the new password.')) {
+    if (!window.confirm(copy.rotateConfirm)) {
       return;
     }
     try {
       davInfo = await api.rotateDavCredentials();
-      loginNotice.set('DAV password rotated. Update every connected DAV client.');
+      loginNotice.set(copy.rotated);
     } catch (error) {
       operationError = errorMessage(error);
     }
@@ -103,9 +132,9 @@
   const copyValue = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      loginNotice.set(`${label} copied.`);
+      loginNotice.set(copy.copied(label));
     } catch {
-      operationError = `Could not copy ${label.toLowerCase()}. Select it manually.`;
+      operationError = copy.copyFailed(label);
     }
   };
 
@@ -116,39 +145,39 @@
 <section class="animate-fade-slide">
   <div class="mb-6 flex items-center justify-between">
     <div>
-      <h1 class="font-heading text-3xl font-bold text-slate">Dashboard</h1>
-      <p class="mt-1 text-sm text-slate/70">Monitor local bridge runtime and synchronization status.</p>
+      <h1 class="font-heading text-3xl font-bold text-slate">{copy.title}</h1>
+      <p class="mt-1 text-sm text-slate/70">{copy.intro}</p>
     </div>
 
-    <Badge active={$session.serverRunning}>{$session.serverRunning ? 'Running' : 'Stopped'}</Badge>
+    <Badge active={$session.serverRunning}>{$session.serverRunning ? copy.running : copy.stopped}</Badge>
   </div>
 
   <div class="grid gap-4 md:grid-cols-3">
     <Card>
-      <p class="text-xs uppercase tracking-wide text-slate/60">Local Server</p>
-      <p class="mt-2 text-2xl font-bold text-slate">{$session.serverRunning ? 'Running' : 'Stopped'}</p>
-      <p class="text-sm text-slate/70">Port {$session.bindAddr}</p>
+      <p class="text-xs uppercase tracking-wide text-slate/60">{copy.server}</p>
+      <p class="mt-2 text-2xl font-bold text-slate">{$session.serverRunning ? copy.running : copy.stopped}</p>
+      <p class="text-sm text-slate/70">{copy.port}: {$session.bindAddr}</p>
     </Card>
 
     <Card>
-      <p class="text-xs uppercase tracking-wide text-slate/60">Collections</p>
+      <p class="text-xs uppercase tracking-wide text-slate/60">{copy.spaces}</p>
       <p class="mt-2 text-2xl font-bold text-slate">{$session.collectionsTotal}</p>
-      <p class="text-sm text-slate/70">Configured local vaults</p>
+      <p class="text-sm text-slate/70">{copy.vaults}</p>
     </Card>
 
     <Card>
-      <p class="text-xs uppercase tracking-wide text-slate/60">Synced Items</p>
+      <p class="text-xs uppercase tracking-wide text-slate/60">{copy.items}</p>
       <p class="mt-2 text-2xl font-bold text-slate">{$session.syncedItemsTotal}</p>
-      <p class="text-sm text-slate/70">Applied in local cache</p>
+      <p class="text-sm text-slate/70">{copy.cache}</p>
     </Card>
   </div>
 
   <div class="mt-6 flex flex-wrap gap-3">
-    <Button disabled={$session.serverRunning} on:click={startServer}>Start DAV Bridge</Button>
-    <Button variant="ghost" disabled={!$session.serverRunning} on:click={stopServer}>Stop DAV Bridge</Button>
-    <Button variant="secondary" disabled={syncing || !$session.serverRunning} on:click={syncNow}>{syncing ? 'Syncing...' : 'Sync Now'}</Button>
+    <Button disabled={$session.serverRunning} on:click={startServer}>{copy.start}</Button>
+    <Button variant="ghost" disabled={!$session.serverRunning} on:click={stopServer}>{copy.stop}</Button>
+    <Button variant="secondary" disabled={syncing || !$session.serverRunning} on:click={syncNow}>{syncing ? copy.syncing : copy.sync}</Button>
     <Button variant="secondary" on:click={davInfo ? hideDavSetup : showDavSetup}>
-      {davInfo ? 'Hide Setup Details' : 'Show DAV Setup'}
+      {davInfo ? copy.hide : copy.show}
     </Button>
   </div>
 
@@ -161,49 +190,49 @@
     <Card>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="text-lg font-semibold text-slate">DAV client setup</p>
+          <p class="text-lg font-semibold text-slate">{copy.setup}</p>
           <p class="mt-1 text-sm text-slate/70">
-            These details are shown for 60 seconds. The bridge accepts connections only from this computer.
+            {copy.setupBody}
           </p>
         </div>
         <Button variant="ghost" disabled={$session.serverRunning} on:click={rotateCredentials}>
-          Rotate Password
+          {copy.rotate}
         </Button>
       </div>
 
       <div class="mt-4 grid gap-3 md:grid-cols-2">
         <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
-          <p class="text-xs uppercase tracking-wide text-slate/60">Username</p>
+          <p class="text-xs uppercase tracking-wide text-slate/60">{copy.username}</p>
           <code class="mt-1 block break-all text-sm">{davInfo.username}</code>
-          <button class="mt-2 text-xs font-semibold text-teal-700" on:click={() => copyValue(davInfo?.username ?? '', 'Username')}>Copy</button>
+          <button class="mt-2 text-xs font-semibold text-teal-700" on:click={() => copyValue(davInfo?.username ?? '', copy.username)}>{copy.copy}</button>
         </div>
         <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
-          <p class="text-xs uppercase tracking-wide text-slate/60">Dedicated DAV password</p>
+          <p class="text-xs uppercase tracking-wide text-slate/60">{copy.password}</p>
           <code class="mt-1 block break-all text-sm">{davInfo.password}</code>
-          <button class="mt-2 text-xs font-semibold text-teal-700" on:click={() => copyValue(davInfo?.password ?? '', 'Password')}>Copy</button>
+          <button class="mt-2 text-xs font-semibold text-teal-700" on:click={() => copyValue(davInfo?.password ?? '', copy.password)}>{copy.copy}</button>
         </div>
       </div>
 
       {#if davInfo.collections.length === 0}
-        <p class="mt-4 text-sm text-slate/70">Create a space before connecting a DAV client.</p>
+        <p class="mt-4 text-sm text-slate/70">{copy.noSpaces}</p>
       {:else}
         <div class="mt-4 space-y-4">
           {#each davInfo.collections as collection}
             <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
               <p class="font-semibold text-slate">{collection.name}</p>
-              <p class="mt-2 text-xs uppercase tracking-wide text-slate/60">Calendar URL</p>
+              <p class="mt-2 text-xs uppercase tracking-wide text-slate/60">{copy.calendar}</p>
               <code class="mt-1 block break-all text-xs">{collection.calendar_url}</code>
-              <button class="mt-1 text-xs font-semibold text-teal-700" on:click={() => copyValue(collection.calendar_url, 'Calendar URL')}>Copy</button>
-              <p class="mt-3 text-xs uppercase tracking-wide text-slate/60">Address book URL</p>
+              <button class="mt-1 text-xs font-semibold text-teal-700" on:click={() => copyValue(collection.calendar_url, copy.calendar)}>{copy.copy}</button>
+              <p class="mt-3 text-xs uppercase tracking-wide text-slate/60">{copy.addressBook}</p>
               <code class="mt-1 block break-all text-xs">{collection.address_book_url}</code>
-              <button class="mt-1 text-xs font-semibold text-teal-700" on:click={() => copyValue(collection.address_book_url, 'Address book URL')}>Copy</button>
+              <button class="mt-1 text-xs font-semibold text-teal-700" on:click={() => copyValue(collection.address_book_url, copy.addressBook)}>{copy.copy}</button>
             </div>
           {/each}
         </div>
       {/if}
 
       <p class="mt-4 text-xs text-slate/60">
-        Use the direct collection URL in a client that supports custom CalDAV/CardDAV URLs. Your Kamori account password is never used for DAV.
+        {copy.davFootnote}
       </p>
     </Card>
     </div>

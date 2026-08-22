@@ -1,3 +1,6 @@
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource/ibm-plex-serif/400.css';
+import '@fontsource/ibm-plex-serif/600.css';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';

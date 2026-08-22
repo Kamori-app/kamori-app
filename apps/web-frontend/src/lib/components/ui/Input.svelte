@@ -13,7 +13,7 @@
 </script>
 
 <input
-    class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none ring-mint/40 focus:ring disabled:opacity-70"
+    class="w-full border border-slate/25 bg-paper px-3 py-2 text-sm text-slate outline-none ring-mint/40 focus:ring disabled:opacity-70"
     {type}
     bind:value
     {placeholder}

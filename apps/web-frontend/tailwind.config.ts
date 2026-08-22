@@ -5,8 +5,8 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        heading: ['ui-sans-serif', 'system-ui'],
-        body: ['ui-sans-serif', 'system-ui'],
+        heading: ['IBM Plex Serif', 'serif'],
+        body: ['IBM Plex Sans Variable', 'IBM Plex Sans', 'sans-serif'],
       },
       colors: {
         surface: '#f4f7f5',
@@ -14,6 +14,7 @@ const config: Config = {
         mint: '#0f8b6d',
         coral: '#f45b69',
         sand: '#ffd6a5',
+        paper: '#f3eee2',
       },
       boxShadow: {
         panel: '0 24px 60px -32px rgba(31, 42, 49, 0.45)',

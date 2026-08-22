@@ -385,7 +385,7 @@
 
 <footer>
   Kamori Operator Console is AGPL-3.0-only and comes without warranty.
-  <a href="https://github.com/Kamori-app/kamori-app" target="_blank" rel="noreferrer">Corresponding source and license</a>
+  <a href="https://github.com/Kamori-app/kamori-app/blob/main/LICENSE.md" target="_blank" rel="noreferrer">Corresponding source and license</a>
 </footer>
 
 <style>

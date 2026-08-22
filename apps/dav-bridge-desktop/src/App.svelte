@@ -17,6 +17,23 @@
   import Modal from './lib/components/ui/Modal.svelte';
   import Input from './lib/components/ui/Input.svelte';
   import Button from './lib/components/ui/Button.svelte';
+  import { locale } from './lib/i18n';
+
+  const copies = {
+    en: {
+      openSettings: 'Open desktop settings', settings: 'Desktop settings', cloudUrl: 'Kamori service URL', cache: 'SQLite cache path', fixed: 'fixed',
+      closeBehavior: 'When the window closes', hide: 'Keep running in background', minimize: 'Minimize the window', quit: 'Quit Kamori', tray: 'Show tray icon',
+      save: 'Save settings', saved: 'Settings saved.', savedTray: 'Settings saved. The tray icon was enabled because background mode needs it.', failed: 'Failed to save settings.',
+      unsaved: 'Unsaved changes', unsavedBody: 'You have unsaved settings changes. Closing now will discard them.', keep: 'Keep editing', discard: 'Discard changes',
+    },
+    ru: {
+      openSettings: 'Открыть настройки приложения', settings: 'Настройки приложения', cloudUrl: 'Адрес сервиса Kamori', cache: 'Путь к кешу SQLite', fixed: 'неизменяемый',
+      closeBehavior: 'При закрытии окна', hide: 'Продолжать работу в фоне', minimize: 'Свернуть окно', quit: 'Завершить Kamori', tray: 'Показывать значок в трее',
+      save: 'Сохранить настройки', saved: 'Настройки сохранены.', savedTray: 'Настройки сохранены. Значок в трее включён для фонового режима.', failed: 'Не удалось сохранить настройки.',
+      unsaved: 'Несохранённые изменения', unsavedBody: 'Настройки изменены. Если закрыть окно сейчас, изменения будут потеряны.', keep: 'Продолжить редактирование', discard: 'Отменить изменения',
+    },
+  } as const;
+  $: copy = copies[$locale];
 
   const FIXED_SQLITE_CACHE_PATH = '.kamori/local-cache.sqlite3';
 
@@ -117,8 +134,8 @@
       const trayAdjusted =
         settingsCloseBehavior === 'hide' && settingsShowTrayIcon !== windowNext.showTrayIcon;
       const savedMessage = trayAdjusted
-        ? 'Settings saved. Tray icon was enabled because close behavior is set to hide.'
-        : 'Settings saved successfully.';
+        ? copy.savedTray
+        : copy.saved;
 
       loginNotice.set(savedMessage);
       if (settingsNoticeTimer) {
@@ -131,7 +148,7 @@
       closeSettingsImmediately();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      settingsSaveError = message || 'Failed to save settings.';
+      settingsSaveError = message || copy.failed;
     }
   };
 
@@ -171,11 +188,12 @@
 <svelte:window on:keydown|capture={onAppKeydown} />
 
 <main class="min-h-screen px-4 py-6 md:px-8">
+  <div class="fixed right-4 top-4 z-40 flex items-center gap-2">
   <button
-    class="fixed right-4 top-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/70 bg-white/85 text-slate shadow-panel transition hover:bg-white"
+    class="inline-flex h-11 w-11 items-center justify-center border border-slate/20 bg-paper text-slate transition hover:bg-sand/50"
     on:click={openSettings}
-    aria-label="Open backend settings"
-    title="Backend settings"
+    aria-label={copy.openSettings}
+    title={copy.settings}
   >
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -192,6 +210,7 @@
       <path d="m19.4 15-.3.6a1 1 0 0 0 .2 1.1l.1.1a1 1 0 0 1 0 1.4l-1.3 1.3a1 1 0 0 1-1.4 0l-.1-.1a1 1 0 0 0-1.1-.2l-.6.3a1 1 0 0 0-.6.9V21a1 1 0 0 1-1 1h-1.8a1 1 0 0 1-1-1v-.2a1 1 0 0 0-.6-.9l-.6-.3a1 1 0 0 0-1.1.2l-.1.1a1 1 0 0 1-1.4 0L4.6 18a1 1 0 0 1 0-1.4l.1-.1a1 1 0 0 0 .2-1.1l-.3-.6a1 1 0 0 0-.9-.6H3.5a1 1 0 0 1-1-1v-1.8a1 1 0 0 1 1-1h.2a1 1 0 0 0 .9-.6l.3-.6a1 1 0 0 0-.2-1.1l-.1-.1a1 1 0 0 1 0-1.4L5.9 4a1 1 0 0 1 1.4 0l.1.1a1 1 0 0 0 1.1.2l.6-.3a1 1 0 0 0 .6-.9V3a1 1 0 0 1 1-1h1.8a1 1 0 0 1 1 1v.2a1 1 0 0 0 .6.9l.6.3a1 1 0 0 0 1.1-.2l.1-.1a1 1 0 0 1 1.4 0l1.3 1.3a1 1 0 0 1 0 1.4l-.1.1a1 1 0 0 0-.2 1.1l.3.6a1 1 0 0 0 .9.6h.2a1 1 0 0 1 1 1v1.8a1 1 0 0 1-1 1h-.2a1 1 0 0 0-.9.6Z" />
     </svg>
   </button>
+  </div>
 
   {#if $route === '/login'}
     <LoginPage />
@@ -207,24 +226,24 @@
   {/if}
 </main>
 
-<Modal open={settingsOpen} title="Desktop Settings" onClose={requestCloseSettings}>
+<Modal open={settingsOpen} title={copy.settings} onClose={requestCloseSettings}>
   <div class="space-y-3">
-    <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">Cloud Base URL</p>
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">{copy.cloudUrl}</p>
     <Input bind:value={settingsCloudBaseUrl} />
 
-    <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">SQLite Cache Path</p>
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">{copy.cache}</p>
     <p class="rounded-xl border border-slate/15 bg-white/70 px-3 py-2 text-sm text-slate/80">
-      {FIXED_SQLITE_CACHE_PATH} (fixed)
+      {FIXED_SQLITE_CACHE_PATH} ({copy.fixed})
     </p>
 
     <div class="pt-2">
       <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
-        Window Behavior On Close
+        {copy.closeBehavior}
       </p>
       <div class="mt-2 space-y-2 text-sm text-slate">
         <label class="flex cursor-pointer items-center gap-2">
           <input type="radio" name="closeBehavior" value="hide" bind:group={settingsCloseBehavior} />
-          <span>Hide on close</span>
+          <span>{copy.hide}</span>
         </label>
         <label class="flex cursor-pointer items-center gap-2">
           <input
@@ -233,18 +252,18 @@
             value="minimize"
             bind:group={settingsCloseBehavior}
           />
-          <span>Minimize on close</span>
+          <span>{copy.minimize}</span>
         </label>
         <label class="flex cursor-pointer items-center gap-2">
           <input type="radio" name="closeBehavior" value="quit" bind:group={settingsCloseBehavior} />
-          <span>Quit on close</span>
+          <span>{copy.quit}</span>
         </label>
       </div>
     </div>
 
     <label class="flex cursor-pointer items-center gap-2 pt-1 text-sm text-slate">
       <input type="checkbox" bind:checked={settingsShowTrayIcon} />
-      <span>Show tray icon</span>
+      <span>{copy.tray}</span>
     </label>
 
     {#if settingsSaveError}
@@ -252,19 +271,19 @@
     {/if}
 
     <div class="pt-1">
-      <Button on:click={saveSettings}>Save Settings</Button>
+      <Button on:click={saveSettings}>{copy.save}</Button>
     </div>
   </div>
 </Modal>
 
-<Modal open={discardChangesOpen} title="Unsaved Changes" onClose={keepEditingSettings}>
+<Modal open={discardChangesOpen} title={copy.unsaved} onClose={keepEditingSettings}>
   <div class="space-y-4">
     <p class="text-sm text-slate">
-      You have unsaved settings changes. If you close now, all unsaved changes will be lost.
+      {copy.unsavedBody}
     </p>
     <div class="flex gap-2">
-      <Button variant="ghost" on:click={keepEditingSettings}>Keep Editing</Button>
-      <Button variant="secondary" on:click={discardSettingsChanges}>Discard Changes</Button>
+      <Button variant="ghost" on:click={keepEditingSettings}>{copy.keep}</Button>
+      <Button variant="secondary" on:click={discardSettingsChanges}>{copy.discard}</Button>
     </div>
   </div>
 </Modal>

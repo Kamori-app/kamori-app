@@ -25,7 +25,7 @@
     {type}
     {disabled}
     on:click
-    class={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-50 ${
+    class={`inline-flex items-center justify-center border border-transparent px-4 py-2 text-sm font-semibold tracking-[0.01em] transition disabled:opacity-50 ${
         fullWidth ? "w-full" : ""
     } ${variants[variant]}`}
 >

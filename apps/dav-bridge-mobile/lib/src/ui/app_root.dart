@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'package:dav_bridge_mobile/src/i18n/app_localizations.dart';
 import 'package:dav_bridge_mobile/src/state/bridge_controller.dart';
+import 'package:dav_bridge_mobile/src/state/locale_controller.dart';
 import 'package:dav_bridge_mobile/src/ui/auth_screen.dart';
 import 'package:dav_bridge_mobile/src/ui/dashboard_screen.dart';
 
@@ -38,9 +41,20 @@ class _KamoriMobileAppState extends ConsumerState<KamoriMobileApp>
   @override
   Widget build(BuildContext context) {
     final bridgeState = ref.watch(bridgeControllerProvider);
+    final language = ref.watch(localeControllerProvider);
 
     return MaterialApp(
       title: 'Kamori',
+      locale: language.locale,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      localeResolutionCallback: (deviceLocale, _) =>
+          AppLocalizations.resolve(deviceLocale),
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: const Color(0xFF0A7F73),

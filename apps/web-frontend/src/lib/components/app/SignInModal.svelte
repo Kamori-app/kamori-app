@@ -30,6 +30,66 @@
         serializeAssertionCredential,
         toUtf8Bytes,
     } from "$lib/webauthn";
+    import { locale } from "$lib/i18n";
+
+    const signinCopy = {
+        en: {
+            title: "Sign in",
+            username: "Username",
+            password: "Password",
+            totp: "TOTP or one-time backup code (if enabled)",
+            signingIn: "Signing in…",
+            signIn: "Sign in",
+            recovery: "Account recovery",
+            kit: "24-word data recovery kit",
+            newPassword: "New password",
+            confirmPassword: "Confirm new password",
+            recovering: "Recovering…",
+            recover: "Recover account",
+            recoveryBody: "The 24-word data recovery kit authorizes recovery and restores your account key. It resets the password, rewraps that key, revokes active sessions, and disables TOTP. TOTP backup codes are separate and are never required here.",
+            passkey: "Passkey",
+            signInPasskey: "Sign in with passkey",
+            passkeyBody: "Passkey login uses discoverable authentication and does not require username input.",
+            credentialsRequired: "Username and password are required.",
+            signedIn: "Signed in with password.",
+            totpRequired: "TOTP is required. Enter a code and submit sign in again.",
+            passwordFailed: "Password sign-in failed.",
+            signInFailed: "Sign-in failed",
+            passkeyUnsupported: "Passkey login is not supported in this browser.",
+            passkeyFailed: "Passkey sign-in failed",
+            passkeyUnlocked: "Signed in with passkey and unlocked this approved browser.",
+            passkeyApprove: "Passkey authentication succeeded. Enter your password once to approve and unlock this new browser.",
+        },
+        ru: {
+            title: "Войти",
+            username: "Имя пользователя",
+            password: "Пароль",
+            totp: "TOTP или одноразовый backup-код (если включено)",
+            signingIn: "Входим…",
+            signIn: "Войти",
+            recovery: "Восстановление аккаунта",
+            kit: "Recovery kit из 24 слов",
+            newPassword: "Новый пароль",
+            confirmPassword: "Повторите новый пароль",
+            recovering: "Восстанавливаем…",
+            recover: "Восстановить аккаунт",
+            recoveryBody: "Recovery kit из 24 слов подтверждает восстановление и возвращает ключ аккаунта. Пароль сбрасывается, ключ оборачивается заново, активные сессии отзываются, а TOTP отключается. Backup-коды TOTP здесь не нужны.",
+            passkey: "Passkey",
+            signInPasskey: "Войти с passkey",
+            passkeyBody: "Passkey использует discoverable-аутентификацию, поэтому имя пользователя вводить не нужно.",
+            credentialsRequired: "Введите имя пользователя и пароль.",
+            signedIn: "Вход по паролю выполнен.",
+            totpRequired: "Нужен TOTP-код. Введите его и повторите вход.",
+            passwordFailed: "Не удалось войти по паролю.",
+            signInFailed: "Не удалось войти",
+            passkeyUnsupported: "Этот браузер не поддерживает вход с passkey.",
+            passkeyFailed: "Не удалось войти с passkey",
+            passkeyUnlocked: "Вход с passkey выполнен, одобренный браузер разблокирован.",
+            passkeyApprove: "Passkey подтверждён. Один раз введите пароль, чтобы одобрить и разблокировать новый браузер.",
+        },
+    } as const;
+
+    $: copy = signinCopy[$locale];
 
     /**
      * Sign-in modal supporting:
@@ -66,7 +126,7 @@
     const signinWithOpaque = async () => {
         const username = loginUsername.trim();
         if (!username || !loginPassword) {
-            setNotice("Username and password are required.");
+            setNotice(copy.credentialsRequired);
             return;
         }
 
@@ -135,7 +195,7 @@
                     currentUsername: username,
                     accessToken: finishResponse.access_token ?? null,
                     preauthToken: null,
-                    notice: "Signed in with password.",
+                    notice: copy.signedIn,
                 }));
                 loginPassword = "";
                 loginTotpCode = "";
@@ -152,16 +212,16 @@
                     preauthToken: finishResponse.preauth_token ?? null,
                 }));
                 setNotice(
-                    "TOTP is required. Enter a TOTP code and submit Sign In again.",
+                    copy.totpRequired,
                 );
                 return;
             }
 
-            setNotice("Password sign-in failed.");
+            setNotice(copy.passwordFailed);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Sign-in failed: ${message}`);
+            setNotice(`${copy.signInFailed}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -274,7 +334,7 @@
      */
     const signinWithPasskey = async () => {
         if (!("PublicKeyCredential" in window) || !navigator.credentials) {
-            setNotice("Passkey login is not supported in this browser.");
+            setNotice(copy.passkeyUnsupported);
             return;
         }
 
@@ -314,8 +374,8 @@
                 accessToken: finish.access_token,
                 preauthToken: null,
                 notice: localDevice
-                    ? "Signed in with passkey and unlocked this approved browser."
-                    : "Passkey authentication succeeded. Enter your password once to approve and unlock this new browser.",
+                    ? copy.passkeyUnlocked
+                    : copy.passkeyApprove,
             }));
             if (localDevice) {
                 onClose();
@@ -323,7 +383,7 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Passkey sign-in failed: ${message}`);
+            setNotice(`${copy.passkeyFailed}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -347,45 +407,45 @@
     }
 </script>
 
-<Modal {open} title="Sign In" {onClose}>
+<Modal {open} title={copy.title} {onClose}>
     <div class="space-y-3">
-        <Input bind:value={loginUsername} placeholder="Username" />
+        <Input bind:value={loginUsername} placeholder={copy.username} />
         <Input
             bind:value={loginPassword}
             type="password"
-            placeholder="Password"
+            placeholder={copy.password}
         />
         <Input
             bind:value={loginTotpCode}
-            placeholder="TOTP or one-time backup code (if enabled)"
+            placeholder={copy.totp}
         />
         <Button
             on:click={signinWithOpaque}
             disabled={loadingAction === "signin-opaque"}
         >
-            {loadingAction === "signin-opaque" ? "Signing In..." : "Sign In"}
+            {loadingAction === "signin-opaque" ? copy.signingIn : copy.signIn}
         </Button>
 
         <div class="space-y-2 rounded-xl border border-slate/15 p-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Account Recovery
+                {copy.recovery}
             </p>
             <Input
                 bind:value={recoveryPhrase}
                 autocomplete="off"
-                placeholder="24-word data recovery kit"
+                placeholder={copy.kit}
             />
             <Input
                 bind:value={recoveryNewPassword}
                 type="password"
-                placeholder="New password"
+                placeholder={copy.newPassword}
             />
             <Input
                 bind:value={recoveryPasswordConfirm}
                 type="password"
-                placeholder="Confirm new password"
+                placeholder={copy.confirmPassword}
             />
             <Button
                 variant="secondary"
@@ -393,14 +453,11 @@
                 disabled={loadingAction === "account-recovery"}
             >
                 {loadingAction === "account-recovery"
-                    ? "Recovering..."
-                    : "Recover Account"}
+                    ? copy.recovering
+                    : copy.recover}
             </Button>
             <p class="text-xs text-slate/70">
-                The 24-word data recovery kit authorizes recovery and restores
-                your account key. It resets the password, rewraps that key,
-                revokes active sessions, and disables TOTP. TOTP backup codes
-                are separate and are never required here.
+                {copy.recoveryBody}
             </p>
         </div>
 
@@ -408,7 +465,7 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
-                Passkey
+                {copy.passkey}
             </p>
             <div class="mt-2">
                 <Button
@@ -417,13 +474,12 @@
                     disabled={loadingAction === "signin-passkey"}
                 >
                     {loadingAction === "signin-passkey"
-                        ? "Signing In..."
-                        : "Sign in with Passkey"}
+                        ? copy.signingIn
+                        : copy.signInPasskey}
                 </Button>
             </div>
             <p class="mt-2 text-xs text-slate/70">
-                Passkey login uses discoverable authentication and does not
-                require username input.
+                {copy.passkeyBody}
             </p>
         </div>
     </div>
