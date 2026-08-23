@@ -26,7 +26,10 @@ updates:
 
 1. With `hostProvisioningPhase=retire`, run `Hosted infrastructure / preview`,
    confirm that only host/volume protections change, then run `up`. This phase
-   deliberately ignores changed immutable `userData`.
+   deliberately ignores changed immutable `userData`. It may create the
+   dedicated configuration identity in Pulumi state, but skips host delivery:
+   existing machines cannot trust that identity until the `replace` phase
+   installs its public half.
 2. Set `hostProvisioningPhase=replace`, preview the expected replacement of
    four VMs, two load-balancer targets, and the PostgreSQL volume attachment.
    The PostgreSQL data volume and stable ops public IP must remain unchanged.

@@ -66,6 +66,12 @@ jobs:
           pulumi login "$PULUMI_BACKEND_URL"
           pulumi stack select production
 
+          host_phase=$(pulumi config get kamori:hostProvisioningPhase)
+          if [[ "$host_phase" == "retire" ]]; then
+            echo "retire phase updates protection and state only; host configuration starts after replacement"
+            exit 0
+          fi
+
           ssh_dir="$RUNNER_TEMP/kamori-infrastructure-ssh"
           install -d -m 0700 "$ssh_dir"
           trap 'rm -rf "$ssh_dir"' EXIT
