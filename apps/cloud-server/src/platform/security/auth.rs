@@ -97,6 +97,17 @@ fn hotp(secret: &[u8], counter: u64, digits: u32) -> String {
     format!("{:0width$}", code, width = digits as usize)
 }
 
+#[cfg(test)]
+pub(crate) fn generate_totp_for_test(secret_b32: &str, now: OffsetDateTime) -> String {
+    let config = TotpConfig::default();
+    let secret = base32_decode(secret_b32).expect("test TOTP secret");
+    hotp(
+        &secret,
+        (now.unix_timestamp() / config.step_seconds) as u64,
+        config.digits,
+    )
+}
+
 /// Decodes a base32 string into bytes.
 fn base32_decode(input: &str) -> Option<Vec<u8>> {
     let mut buffer: u32 = 0;

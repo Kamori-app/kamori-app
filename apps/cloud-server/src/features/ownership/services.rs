@@ -83,17 +83,30 @@ pub(crate) async fn accept(
     actor_id: Uuid,
     transfer_id: Uuid,
 ) -> Result<OwnershipTransferResultResponse, ApiError> {
-    let effective_limit = crate::features::admin::services::effective_u64(
+    let effective_limits = crate::features::admin::services::effective_u64_values(
         state,
-        "account_storage_bytes",
-        state.config.account_storage_bytes,
+        &[
+            ("account_storage_bytes", state.config.account_storage_bytes),
+            (
+                "account_operation_storage_bytes",
+                state.config.account_operation_storage_bytes,
+            ),
+        ],
     )
     .await?;
+    let limit = |name: &str| {
+        effective_limits
+            .get(name)
+            .copied()
+            .ok_or_else(|| internal_error("ownership-transfer quota is missing"))
+            .and_then(storage_limit)
+    };
     match repositories::accept_offer(
         &state.pool,
         actor_id,
         transfer_id,
-        storage_limit(effective_limit)?,
+        limit("account_storage_bytes")?,
+        limit("account_operation_storage_bytes")?,
     )
     .await
     .map_err(internal_error)?
@@ -101,8 +114,11 @@ pub(crate) async fn accept(
         AcceptOfferResult::Accepted => Ok(OwnershipTransferResultResponse { changed: true }),
         AcceptOfferResult::NotFound => Err(not_found("ownership transfer not found")),
         AcceptOfferResult::NoLongerValid => Err(conflict("ownership transfer is no longer valid")),
-        AcceptOfferResult::StorageQuotaExceeded => Err(quota_exceeded(
+        AcceptOfferResult::BlobStorageQuotaExceeded => Err(quota_exceeded(
             "accepting this space would exceed the target account storage quota",
+        )),
+        AcceptOfferResult::OperationStorageQuotaExceeded => Err(quota_exceeded(
+            "accepting this space would exceed the target account operation-log quota",
         )),
     }
 }

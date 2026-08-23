@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
@@ -10,6 +11,38 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+func decodeHostConfiguration(t *testing.T, encoded string) map[string]string {
+	t.Helper()
+	compressed, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipReader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tarReader := tar.NewReader(gzipReader)
+	files := make(map[string]string)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[header.Name] = string(contents)
+	}
+	if err := gzipReader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
 
 func TestAutomatedCloudInitIsDeterministicAndBelowProviderLimit(t *testing.T) {
 	common := commonHostMaterial{
@@ -49,6 +82,50 @@ func TestAutomatedCloudInitIsDeterministicAndBelowProviderLimit(t *testing.T) {
 	for _, required := range []string{"#cloud-config", "/usr/local/sbin/kamori-first-boot", "gzip+base64", "kamori-beta-app-1"} {
 		if !strings.Contains(first, required) {
 			t.Fatalf("cloud-init is missing %q", required)
+		}
+	}
+}
+
+func TestRotatableApplicationMaterialLivesOutsideImmutableCloudInit(t *testing.T) {
+	t.Parallel()
+	material := appCloudInitMaterial{
+		commonHostMaterial: commonHostMaterial{
+			hostName: "kamori-beta-app-1", hostPrivateKey: "HOST PRIVATE", hostPublicKey: "ssh-ed25519 HOST", hostCertificate: "HOST CERT", configPublicKey: "ssh-ed25519 CONFIG",
+		},
+		deployPublicKey: "ssh-ed25519 DEPLOY", cloudEnvironment: "KAMORI_JWT_SECRET=runtime-secret\n", opaqueServerSetup: "opaque-secret", refreshRotationKey: "rotation-secret",
+		postgresCACertificate: "POSTGRES CA", postgresClientCertificate: "POSTGRES CLIENT", postgresClientPrivateKey: "POSTGRES PRIVATE",
+	}
+	cloudInit, err := renderAppCloudInit(material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapFiles := decodeCloudInitFiles(t, cloudInit)
+	for _, forbidden := range []string{
+		"/etc/kamori/cloud.env",
+		"/etc/kamori/secrets/opaque-server-setup",
+		"/etc/kamori/postgres-client.key",
+		"/etc/ssh/ssh_host_ed25519_key-cert.pub",
+	} {
+		if _, ok := bootstrapFiles[forbidden]; ok {
+			t.Fatalf("rotatable file %s leaked into immutable cloud-init", forbidden)
+		}
+	}
+
+	configuration, err := renderAppHostConfiguration(material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configurationFiles := decodeHostConfiguration(t, configuration)
+	for path, expected := range map[string]string{
+		".kamori-role":                                 "app\n",
+		"root/etc/kamori/cloud.env":                    "KAMORI_JWT_SECRET=runtime-secret\n",
+		"root/etc/kamori/secrets/opaque-server-setup":  "opaque-secret",
+		"root/etc/kamori/secrets/refresh-rotation-key": "rotation-secret",
+		"root/etc/kamori/postgres-client.key":          "POSTGRES PRIVATE",
+		"root/etc/ssh/ssh_host_ed25519_key-cert.pub":   "HOST CERT",
+	} {
+		if got := configurationFiles[path]; got != expected {
+			t.Fatalf("host configuration %s = %q, want %q", path, got, expected)
 		}
 	}
 }
@@ -254,7 +331,7 @@ func TestFirstBootPinsSSHSocketBeforePackageInstallation(t *testing.T) {
 		"install -d -o root -g root -m 0700 /var/lib/kamori/bootstrap",
 		"install -o root -g root -m 0600 /var/lib/kamori/bootstrap/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key",
 		"install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub",
-		"install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub /etc/ssh/ssh_host_ed25519_key-cert.pub",
+		"install -o deploy -g deploy -m 0600 /etc/kamori/config-authorized-key /home/deploy/.ssh/authorized_keys",
 		"install -d -o root -g root -m 0755 /run/sshd",
 		"sshd -t",
 		"systemctl stop ssh.service",
@@ -347,7 +424,7 @@ func TestRenderedCloudInitReplacesDefaultSSHSocketListener(t *testing.T) {
 	t.Fatalf("cloud-init is missing %s", socketDropIn)
 }
 
-func TestRenderedCloudInitStagesCompleteSSHHostIdentityOutsideEtcSSH(t *testing.T) {
+func TestRenderedCloudInitStagesRawSSHHostIdentityOutsideEtcSSH(t *testing.T) {
 	t.Parallel()
 
 	document, err := renderCloudInit("test", commonHostMaterial{
@@ -376,9 +453,8 @@ func TestRenderedCloudInitStagesCompleteSSHHostIdentityOutsideEtcSSH(t *testing.
 		permissions string
 		content     string
 	}{
-		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key":          {permissions: "0600", content: "HOST PRIVATE KEY"},
-		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub":      {permissions: "0644", content: "ssh-ed25519 HOST PUBLIC KEY"},
-		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub": {permissions: "0644", content: "HOST CERTIFICATE"},
+		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key":     {permissions: "0600", content: "HOST PRIVATE KEY"},
+		"/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub": {permissions: "0644", content: "ssh-ed25519 HOST PUBLIC KEY"},
 	}
 
 	for _, file := range parsed.WriteFiles {

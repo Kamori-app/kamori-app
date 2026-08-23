@@ -1,5 +1,7 @@
 //! Persistence for isolated operator identities, sessions, audit, and controls.
 
+use std::collections::HashMap;
+
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngExt;
 use serde_json::{Value, json};
@@ -57,7 +59,13 @@ pub(crate) struct StoredRuntimeSetting {
 pub(crate) enum RemoveSecurityKeyResult {
     Removed,
     NotFound,
-    WouldRemoveLast,
+    WouldViolateMinimum { required: i64 },
+}
+
+pub(crate) enum SetRuntimeValueResult {
+    Changed,
+    VersionConflict,
+    SecurityKeyMinimum,
 }
 
 fn new_secret_token(prefix: &str) -> (String, Vec<u8>) {
@@ -337,21 +345,30 @@ pub(crate) async fn remove_security_key(
     key_id: Uuid,
     reason: &str,
     ip_address: Option<&str>,
+    registration_enabled_default: bool,
 ) -> anyhow::Result<RemoveSecurityKeyResult> {
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
         .bind(admin_id)
         .fetch_one(&mut *tx)
         .await?;
+    let registration_enabled = sqlx::query_scalar::<_, Value>(
+        "SELECT value FROM runtime_config_overrides WHERE key = 'registration_enabled'",
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .and_then(|value| value.as_bool())
+    .unwrap_or(registration_enabled_default);
+    let required = if registration_enabled { 2 } else { 1 };
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM admin_security_keys WHERE admin_user_id = $1",
     )
     .bind(admin_id)
     .fetch_one(&mut *tx)
     .await?;
-    if count <= 1 {
+    if count <= required {
         tx.rollback().await?;
-        return Ok(RemoveSecurityKeyResult::WouldRemoveLast);
+        return Ok(RemoveSecurityKeyResult::WouldViolateMinimum { required });
     }
     let removed =
         sqlx::query("DELETE FROM admin_security_keys WHERE id = $1 AND admin_user_id = $2")
@@ -568,14 +585,6 @@ pub(crate) async fn dashboard_counts(
     })
 }
 
-pub(crate) async fn security_key_count(pool: &PgPool, admin_id: Uuid) -> anyhow::Result<i64> {
-    sqlx::query_scalar("SELECT count(*)::bigint FROM admin_security_keys WHERE admin_user_id = $1")
-        .bind(admin_id)
-        .fetch_one(pool)
-        .await
-        .map_err(Into::into)
-}
-
 pub(crate) async fn list_runtime_settings(
     pool: &PgPool,
 ) -> anyhow::Result<Vec<StoredRuntimeSetting>> {
@@ -604,6 +613,22 @@ pub(crate) async fn get_runtime_value(pool: &PgPool, key: &str) -> anyhow::Resul
         .map_err(Into::into)
 }
 
+pub(crate) async fn get_runtime_values(
+    pool: &PgPool,
+    keys: &[String],
+) -> anyhow::Result<HashMap<String, Value>> {
+    if keys.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query("SELECT key, value FROM runtime_config_overrides WHERE key = ANY($1)")
+        .bind(keys)
+        .fetch_all(pool)
+        .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("key")?, row.try_get("value")?)))
+        .collect()
+}
+
 pub(crate) async fn set_runtime_value(
     pool: &PgPool,
     actor_id: Uuid,
@@ -612,8 +637,24 @@ pub(crate) async fn set_runtime_value(
     expected_version: i64,
     reason: &str,
     ip_address: Option<&str>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<SetRuntimeValueResult> {
     let mut tx = pool.begin().await?;
+    if key == "registration_enabled" && value == &Value::Bool(true) {
+        sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
+            .bind(actor_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let key_count: i64 = sqlx::query_scalar(
+            "SELECT count(*)::bigint FROM admin_security_keys WHERE admin_user_id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if key_count < 2 {
+            tx.rollback().await?;
+            return Ok(SetRuntimeValueResult::SecurityKeyMinimum);
+        }
+    }
     let changed = if expected_version == 0 {
         sqlx::query(
             r#"
@@ -665,7 +706,11 @@ pub(crate) async fn set_runtime_value(
         .await?;
     }
     tx.commit().await?;
-    Ok(changed)
+    Ok(if changed {
+        SetRuntimeValueResult::Changed
+    } else {
+        SetRuntimeValueResult::VersionConflict
+    })
 }
 
 pub(crate) async fn suspend_account(

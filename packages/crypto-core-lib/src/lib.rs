@@ -11,8 +11,8 @@ pub mod recovery;
 pub mod secret_vault;
 
 pub use crypto::{
-    CipherAlgorithm, CryptoEngine, CryptoError, EncryptedGroupKey, EncryptedPayload, Keypair,
-    SymmetricKey,
+    CipherAlgorithm, CryptoEngine, CryptoError, EncryptedDeviceBootstrap, EncryptedGroupKey,
+    EncryptedPayload, Keypair, SymmetricKey,
 };
 #[cfg(any(feature = "local-bridge", feature = "sync-runtime"))]
 pub mod local_bridge_runner;

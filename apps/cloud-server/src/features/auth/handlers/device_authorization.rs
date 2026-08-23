@@ -8,9 +8,21 @@ use crate::{
 
 pub async fn start(
     State(state): State<AppState>,
-    MsgPack(_): MsgPack<DeviceAuthorizationStartRequest>,
+    MsgPack(request): MsgPack<DeviceAuthorizationStartRequest>,
 ) -> Result<MsgPack<DeviceAuthorizationStartResponse>, ApiError> {
-    Ok(MsgPack(services::device_authorization_start(&state).await?))
+    Ok(MsgPack(
+        services::device_authorization_start(&state, request).await?,
+    ))
+}
+
+pub async fn inspect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    MsgPack(request): MsgPack<DeviceAuthorizationInspectRequest>,
+) -> Result<MsgPack<DeviceAuthorizationInspectResponse>, ApiError> {
+    Ok(MsgPack(
+        services::device_authorization_inspect(&state, &headers, request).await?,
+    ))
 }
 
 pub async fn approve(

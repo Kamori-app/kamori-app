@@ -1,7 +1,7 @@
 # Kamori MVP specification
 
 Status: implementation-aligned contract
-Last updated: 2026-08-17
+Last updated: 2026-08-23
 
 This file describes the product implemented by this repository and the exact
 boundary of the first hosted beta. Architecture rationale lives in `docs/adr`;
@@ -40,9 +40,18 @@ attachments, and enterprise policy are not MVP features.
   optional TOTP sign-in.
 - TOTP is optional. Its one-time backup codes are distinct from the data
   recovery kit and are atomically consumed.
+- Sensitive account changes consume a short-lived, single-scope OPAQUE
+  reauthentication proof. When a password sign-in needs TOTP, the second
+  factor completes the same one-time server-held continuation instead of
+  repeating the password exchange.
 - Access tokens are short-lived. Refresh tokens rotate, detect reuse, and can
   be listed and revoked. Web refresh transport uses HttpOnly cookies plus CSRF
-  and Origin/Referer validation; native clients use body transport.
+  and Origin/Referer validation; native clients use body transport. Every
+  client persists a random per-generation rotation request id before sending a
+  refresh. An exact retry returns the same still-active replacement for its
+  lifetime; a different reuse id revokes the account's refresh sessions. Web
+  refresh also rotates its host-only CSRF cookie so a lost response cannot
+  accidentally advance the replacement session again.
 - Registration is disabled by default and additionally protected by a strict,
   operator-configurable active-account cap.
 
@@ -54,17 +63,21 @@ number arrays.
 ## 3. Devices, keys, and recovery
 
 Every device has an Ed25519 signing key and an X25519 HPKE key. Device private
-keys stay in browser encrypted IndexedDB or the platform secret store. A new
-device may authenticate but cannot decrypt an existing security space until a
-trusted client uploads a current device key package.
+keys stay in browser encrypted IndexedDB or the platform secret store. A
+successful sign-in issues a five-minute enrollment grant that can bind to one
+exact device-registration request; a changed request cannot reuse it. The
+client then unwraps the caller's current account-recovery packages and uploads
+the new device packages. Authentication alone never returns plaintext space
+keys from the server.
 
 The web client provides device listing, approval, naming metadata, and
 revocation. A revoked device cannot append new operations. Historical signing
 keys remain discoverable when needed to verify existing log entries.
 
-At web registration Kamori creates a 24-word BIP39 data recovery kit. The
-server receives only a domain-separated verifier and account-master-key-wrapped
-space packages. Recovery:
+At web registration Kamori creates a 24-word BIP39 data recovery kit. It
+deterministically derives an account master key and a separate X25519 account-
+recovery identity. The server receives only a domain-separated kit verifier,
+the recovery public bundle, and HPKE-wrapped current space keys. Recovery:
 
 1. proves possession of the 24 words;
 2. creates a new OPAQUE password record;
@@ -89,15 +102,24 @@ independently shared cryptographic and authorization boundary. Roles are
 owner/editor devices at the current key epoch.
 
 Sharing uses single-use invite codes, never direct member-id entry in client
-UI. The issuer chooses an expiry from 15 minutes through 7 days and a reader or
-editor role. Codes are normalized, hashed, rate-limited, and atomically
-redeemed. The recipient installs both a device package and a recovery package.
+UI. Only the space owner may issue one. Before issuing, the client completes a
+current-state key rotation and binds the invite to that committed rotation.
+The issuer chooses an expiry from 15 minutes through 7 days and a reader or
+editor role. Codes are normalized, hashed, rate-limited, atomically redeemed,
+and exactly idempotent for network retries. The recipient installs both a
+device package and a recovery package and receives current state, not prior
+epoch history.
 
-Member removal requires a complete set of new-epoch packages for the remaining
-members' active devices and atomically rotates the epoch. Removed parties keep
-anything they previously decrypted; Kamori does not claim retroactive erasure.
-Ownership transfer requires explicit offer and acceptance. Spaces enter a
-30-day trash before purge, and account deletion cannot orphan shared assets.
+Invite preparation and member removal require complete new-epoch packages for
+every remaining active device and member recovery identity. The owner submits
+a stable rotation id, the exact base sequence, signed encrypted snapshots for
+every materialized stream, and explicit quarantined-stream identifiers. The
+server validates full coverage and commits packages, snapshots, membership,
+metadata, and epoch atomically. Exact retries return the committed epoch;
+stale or different requests conflict. Removed parties keep anything they
+previously decrypted; Kamori does not claim retroactive erasure. Ownership
+transfer requires explicit offer and acceptance. Spaces enter a 30-day trash
+before purge, and account deletion cannot orphan shared assets.
 
 ## 5. Encrypted operation transport
 
@@ -114,11 +136,14 @@ reusing a `client_op_id` for different bytes is rejected.
 
 `space_seq` is a catch-up cursor, not CRDT causality or a client timestamp.
 The server cannot parse operation plaintext. Current clients emit versioned
-field-oriented PIM upsert/delete payloads. Epoch rotation requires a signed,
-encrypted current-state `snapshot` for every stream before old keys are
-superseded. General background compaction and `control` processing remain
-deferred; the hosted beta therefore retains its operation log instead of
-promising a 90-day compaction window.
+field-oriented PIM upsert/delete payloads. PIM operation v1 has zero or one
+semantic parent. Snapshot v2 is a signed, encrypted full per-stream checkpoint
+that preserves every explicit conflict branch. Epoch rotation requires one for
+every materialized stream before old keys are superseded; an authenticated
+stream that could not be decoded must instead be listed as quarantined so it
+cannot permanently block revocation. Unsupported mandatory key-control
+envelopes still stop sync. General background compaction remains deferred; the
+hosted beta retains its operation log instead of promising a 90-day window.
 
 Future encrypted documents may introduce a benchmarked CRDT payload codec
 without changing this envelope or tying durable history to MLS messages.
@@ -139,6 +164,12 @@ replace local provisional projections even though wall-clock time and server
 sequence are different units. Concurrent upserts with an unobserved head are
 materialized as visibly marked conflict copies. The MVP does not claim a full
 field-by-field conflict editor or CRDT convergence for PIM data.
+
+Membership history entitlement and current-state recovery are separate
+cursors. Clients never move a persisted cursor backwards. A device holding
+only the current epoch starts immediately before that epoch's verified
+snapshots, which makes cross-device recovery independent from old epoch keys
+without granting a newly invited member historical access.
 
 ## 7. Current PIM scope
 

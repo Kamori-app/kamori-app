@@ -9,12 +9,12 @@ import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 
 class SystemProjectionSettings {
   const SystemProjectionSettings({
-    required this.calendarEnabled,
-    required this.contactsEnabled,
+    required this.calendarCollectionIds,
+    required this.contactsCollectionIds,
   });
 
-  final bool calendarEnabled;
-  final bool contactsEnabled;
+  final Set<String> calendarCollectionIds;
+  final Set<String> contactsCollectionIds;
 }
 
 abstract class SystemProjectionService {
@@ -25,13 +25,19 @@ abstract class SystemProjectionService {
 
   Future<SystemProjectionSettings> readSettings();
 
-  Future<void> enableCalendar(List<PimItem> items);
+  Future<void> enableCalendar(String collectionId, List<PimItem> items);
 
-  Future<void> enableContacts(List<PimItem> items);
+  Future<void> enableContacts(String collectionId, List<PimItem> items);
 
-  Future<void> disableCalendar({required bool removeProjectedData});
+  Future<void> disableCalendar(
+    String collectionId, {
+    required bool removeProjectedData,
+  });
 
-  Future<void> disableContacts({required bool removeProjectedData});
+  Future<void> disableContacts(
+    String collectionId, {
+    required bool removeProjectedData,
+  });
 
   Future<void> projectEnabled(List<PimItem> items);
 }
@@ -45,12 +51,13 @@ class NativeSystemProjectionService implements SystemProjectionService {
   NativeSystemProjectionService({FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage();
 
-  static const _calendarEnabledKey = 'kamori.projection.calendar.enabled';
-  static const _contactsEnabledKey = 'kamori.projection.contacts.enabled';
+  static const _calendarCollectionsKey =
+      'kamori.projection.calendar.collections.v2';
+  static const _contactsCollectionsKey =
+      'kamori.projection.contacts.collections.v2';
   static const _calendarIdKey = 'kamori.projection.calendar.id';
   static const _eventMapKey = 'kamori.projection.calendar.events';
   static const _contactMapKey = 'kamori.projection.contacts.items';
-  static const _calendarName = 'Kamori';
   static const _descriptionPrefix = 'Kamori encrypted projection';
   static const _androidOptions = AndroidOptions();
   static const _iosOptions = IOSOptions(
@@ -74,25 +81,33 @@ class NativeSystemProjectionService implements SystemProjectionService {
   @override
   Future<SystemProjectionSettings> readSettings() async {
     return SystemProjectionSettings(
-      calendarEnabled: await _readBool(_calendarEnabledKey),
-      contactsEnabled: await _readBool(_contactsEnabledKey),
+      calendarCollectionIds: await _readSet(_calendarCollectionsKey),
+      contactsCollectionIds: await _readSet(_contactsCollectionsKey),
     );
   }
 
   @override
-  Future<void> enableCalendar(List<PimItem> items) async {
+  Future<void> enableCalendar(
+    String collectionId,
+    List<PimItem> items,
+  ) async {
     final status = await _calendar.requestPermissions(
       level: CalendarAccessLevel.full,
     );
     if (status != CalendarPermissionStatus.granted) {
       throw StateError('Calendar permission was not granted.');
     }
-    await _writeBool(_calendarEnabledKey, true);
-    await _projectCalendar(items);
+    final enabled = await _readSet(_calendarCollectionsKey);
+    enabled.add(collectionId);
+    await _projectCalendar(items, enabled);
+    await _writeSet(_calendarCollectionsKey, enabled);
   }
 
   @override
-  Future<void> enableContacts(List<PimItem> items) async {
+  Future<void> enableContacts(
+    String collectionId,
+    List<PimItem> items,
+  ) async {
     final status = await FlutterContacts.permissions.request(
       PermissionType.readWrite,
     );
@@ -100,58 +115,101 @@ class NativeSystemProjectionService implements SystemProjectionService {
         status != PermissionStatus.limited) {
       throw StateError('Contacts permission was not granted.');
     }
-    await _writeBool(_contactsEnabledKey, true);
-    await _projectContacts(items);
+    final enabled = await _readSet(_contactsCollectionsKey);
+    enabled.add(collectionId);
+    await _projectContacts(items, enabled);
+    await _writeSet(_contactsCollectionsKey, enabled);
   }
 
   @override
-  Future<void> disableCalendar({required bool removeProjectedData}) async {
+  Future<void> disableCalendar(
+    String collectionId, {
+    required bool removeProjectedData,
+  }) async {
+    final mapping = await _readMap(_eventMapKey);
     if (removeProjectedData) {
-      final ids = (await _readMap(_eventMapKey)).values.toSet();
-      for (final id in ids) {
-        await _ignoreMissing(() => _calendar.deleteEvent(eventId: id));
+      final keys = mapping.keys
+          .where((key) => key.startsWith('$collectionId/'))
+          .toList(growable: false);
+      for (final key in keys) {
+        final id = mapping[key];
+        if (id != null && await _calendar.getEvent(id) != null) {
+          await _calendar.deleteEvent(eventId: id);
+        }
+        mapping.remove(key);
+        await _writeMap(_eventMapKey, mapping);
       }
-      await _writeMap(_eventMapKey, const <String, String>{});
     }
-    await _writeBool(_calendarEnabledKey, false);
+    final enabled = await _readSet(_calendarCollectionsKey);
+    enabled.remove(collectionId);
+    await _writeSet(_calendarCollectionsKey, enabled);
   }
 
   @override
-  Future<void> disableContacts({required bool removeProjectedData}) async {
+  Future<void> disableContacts(
+    String collectionId, {
+    required bool removeProjectedData,
+  }) async {
+    final mapping = await _readMap(_contactMapKey);
     if (removeProjectedData) {
-      final ids = (await _readMap(_contactMapKey)).values.toSet();
-      for (final id in ids) {
-        await _ignoreMissing(() => FlutterContacts.delete(id));
+      final keys = mapping.keys
+          .where((key) => key.startsWith('$collectionId/'))
+          .toList(growable: false);
+      for (final key in keys) {
+        final id = mapping[key];
+        if (id != null && await FlutterContacts.get(id) != null) {
+          await FlutterContacts.delete(id);
+        }
+        mapping.remove(key);
+        await _writeMap(_contactMapKey, mapping);
       }
-      await _writeMap(_contactMapKey, const <String, String>{});
     }
-    await _writeBool(_contactsEnabledKey, false);
+    final enabled = await _readSet(_contactsCollectionsKey);
+    enabled.remove(collectionId);
+    await _writeSet(_contactsCollectionsKey, enabled);
   }
 
   @override
   Future<void> projectEnabled(List<PimItem> items) async {
     final settings = await readSettings();
-    if (settings.calendarEnabled) {
-      await _projectCalendar(items);
+    if (settings.calendarCollectionIds.isNotEmpty) {
+      await _projectCalendar(items, settings.calendarCollectionIds);
     }
-    if (settings.contactsEnabled) {
-      await _projectContacts(items);
+    if (settings.contactsCollectionIds.isNotEmpty) {
+      await _projectContacts(items, settings.contactsCollectionIds);
     }
   }
 
-  Future<void> _projectCalendar(List<PimItem> items) async {
+  Future<void> _projectCalendar(
+    List<PimItem> items,
+    Set<String> enabledCollectionIds,
+  ) async {
     final calendarId = await _getOrCreateCalendarId();
     final mapping = await _readMap(_eventMapKey);
     final events = items
-        .where((item) => item.kind == PimItemKind.calendarEvent)
+        .where(
+          (item) =>
+              item.kind == PimItemKind.calendarEvent &&
+              !item.conflict &&
+              enabledCollectionIds.contains(item.spaceId),
+        )
         .toList(growable: false);
     final activeKeys = events.map(_itemKey).toSet();
 
-    for (final staleKey in mapping.keys.toSet().difference(activeKeys)) {
-      final eventId = mapping.remove(staleKey);
-      if (eventId != null) {
-        await _ignoreMissing(() => _calendar.deleteEvent(eventId: eventId));
+    final managedKeys = mapping.keys
+        .where(
+          (key) => enabledCollectionIds.any(
+            (collectionId) => key.startsWith('$collectionId/'),
+          ),
+        )
+        .toSet();
+    for (final staleKey in managedKeys.difference(activeKeys)) {
+      final eventId = mapping[staleKey];
+      if (eventId != null && await _calendar.getEvent(eventId) != null) {
+        await _calendar.deleteEvent(eventId: eventId);
       }
+      mapping.remove(staleKey);
+      await _writeMap(_eventMapKey, mapping);
     }
 
     for (final item in events) {
@@ -165,46 +223,66 @@ class NativeSystemProjectionService implements SystemProjectionService {
           title: item.title,
           startDate: start,
           endDate: end,
-          description: '$_descriptionPrefix\n$key',
+          description: _descriptionPrefix,
           timeZone: 'UTC',
         );
+        await _writeMap(_eventMapKey, mapping);
       } else {
-        try {
+        final existing = await _calendar.getEvent(existingId);
+        if (existing != null) {
           await _calendar.updateEvent(
             eventId: existingId,
             title: item.title,
             startDate: start,
             endDate: end,
-            description: Patch.set('$_descriptionPrefix\n$key'),
+            description: Patch.set(_descriptionPrefix),
             timeZone: 'UTC',
           );
-        } catch (_) {
+        } else {
           mapping[key] = await _calendar.createEvent(
             calendarId: calendarId,
             title: item.title,
             startDate: start,
             endDate: end,
-            description: '$_descriptionPrefix\n$key',
+            description: _descriptionPrefix,
             timeZone: 'UTC',
           );
+          await _writeMap(_eventMapKey, mapping);
         }
       }
     }
     await _writeMap(_eventMapKey, mapping);
   }
 
-  Future<void> _projectContacts(List<PimItem> items) async {
+  Future<void> _projectContacts(
+    List<PimItem> items,
+    Set<String> enabledCollectionIds,
+  ) async {
     final mapping = await _readMap(_contactMapKey);
     final contacts = items
-        .where((item) => item.kind == PimItemKind.contact)
+        .where(
+          (item) =>
+              item.kind == PimItemKind.contact &&
+              !item.conflict &&
+              enabledCollectionIds.contains(item.spaceId),
+        )
         .toList(growable: false);
     final activeKeys = contacts.map(_itemKey).toSet();
 
-    for (final staleKey in mapping.keys.toSet().difference(activeKeys)) {
-      final contactId = mapping.remove(staleKey);
-      if (contactId != null) {
-        await _ignoreMissing(() => FlutterContacts.delete(contactId));
+    final managedKeys = mapping.keys
+        .where(
+          (key) => enabledCollectionIds.any(
+            (collectionId) => key.startsWith('$collectionId/'),
+          ),
+        )
+        .toSet();
+    for (final staleKey in managedKeys.difference(activeKeys)) {
+      final contactId = mapping[staleKey];
+      if (contactId != null && await FlutterContacts.get(contactId) != null) {
+        await FlutterContacts.delete(contactId);
       }
+      mapping.remove(staleKey);
+      await _writeMap(_contactMapKey, mapping);
     }
 
     for (final item in contacts) {
@@ -224,6 +302,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
             emails: emails,
           ),
         );
+        await _writeMap(_contactMapKey, mapping);
         continue;
       }
 
@@ -243,6 +322,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
             emails: emails,
           ),
         );
+        await _writeMap(_contactMapKey, mapping);
       } else {
         await FlutterContacts.update(
           existing.copyWith(
@@ -276,6 +356,14 @@ class NativeSystemProjectionService implements SystemProjectionService {
     return created;
   }
 
+  String get _calendarName {
+    final scope = _accountScope;
+    if (scope == null) {
+      throw StateError('System projection account is not configured.');
+    }
+    return 'Kamori ${scope.substring(0, 8).toUpperCase()}';
+  }
+
   DateTime _parseCompactUtc(String? value, {required String field}) {
     final normalized = value?.trim() ?? '';
     final match = RegExp(
@@ -284,7 +372,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
     if (match == null) {
       throw FormatException('Invalid calendar $field timestamp.');
     }
-    return DateTime.utc(
+    final parsed = DateTime.utc(
       int.parse(match.group(1)!),
       int.parse(match.group(2)!),
       int.parse(match.group(3)!),
@@ -292,22 +380,32 @@ class NativeSystemProjectionService implements SystemProjectionService {
       int.parse(match.group(5)!),
       int.parse(match.group(6)!),
     );
-  }
-
-  String _itemKey(PimItem item) => '${item.spaceId}/${item.resourceId}';
-
-  Future<void> _ignoreMissing(Future<void> Function() operation) async {
-    try {
-      await operation();
-    } catch (_) {
-      // The user may have removed a projection directly in the system app.
+    if (parsed.year != int.parse(match.group(1)!) ||
+        parsed.month != int.parse(match.group(2)!) ||
+        parsed.day != int.parse(match.group(3)!) ||
+        parsed.hour != int.parse(match.group(4)!) ||
+        parsed.minute != int.parse(match.group(5)!) ||
+        parsed.second != int.parse(match.group(6)!)) {
+      throw FormatException('Invalid calendar $field timestamp.');
     }
+    return parsed;
   }
 
-  Future<bool> _readBool(String key) async => (await _read(key)) == 'true';
+  String _itemKey(PimItem item) => '${item.spaceId}/${item.projectionId}';
 
-  Future<void> _writeBool(String key, bool value) =>
-      _write(key, value.toString());
+  Future<Set<String>> _readSet(String key) async {
+    final encoded = await _read(key);
+    if (encoded == null || encoded.isEmpty) return <String>{};
+    final decoded = jsonDecode(encoded);
+    if (decoded is! List) return <String>{};
+    return decoded
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .toSet();
+  }
+
+  Future<void> _writeSet(String key, Set<String> value) =>
+      _write(key, jsonEncode(value.toList()..sort()));
 
   Future<Map<String, String>> _readMap(String key) async {
     final encoded = await _read(key);

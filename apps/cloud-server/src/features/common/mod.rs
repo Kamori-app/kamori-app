@@ -4,7 +4,9 @@ mod authz;
 mod errors;
 mod msgpack;
 
-pub use authz::{Principal, authorize_principal, authorize_session};
+pub use authz::{
+    Principal, authorize_enrollment_principal, authorize_principal, authorize_session,
+};
 pub use errors::{
     ApiError, ErrorResponse, bad_request, conflict, internal_error, not_found, quota_exceeded,
     unauthenticated, unauthorized,

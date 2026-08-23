@@ -1,6 +1,6 @@
 //! Versioned signed envelope shared by every Kamori transport.
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -143,6 +143,13 @@ impl OperationEnvelopeV1 {
         space_key: &[u8; 32],
         signing_key: &SigningKey,
     ) -> anyhow::Result<Self> {
+        if context.space_id.is_nil()
+            || context.stream_id.is_nil()
+            || context.client_op_id.is_nil()
+            || context.author_device_id.is_nil()
+        {
+            anyhow::bail!("operation envelope ids must be non-nil UUIDs");
+        }
         if context.key_epoch == 0 {
             anyhow::bail!("key epoch must be positive");
         }
@@ -212,7 +219,7 @@ impl OperationEnvelopeV1 {
             .try_into()
             .map_err(|_| anyhow::anyhow!("operation signature must be 64 bytes"))?;
         let verifying_key = VerifyingKey::from_bytes(&public_key)?;
-        verifying_key.verify(
+        verifying_key.verify_strict(
             &self.canonical_signing_bytes(),
             &Signature::from_bytes(&signature),
         )?;

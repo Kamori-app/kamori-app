@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::operation_envelope::OperationEnvelopeV1;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileSigninStartRequest {
     pub(super) username: String,
@@ -13,7 +15,6 @@ pub(super) struct MobileSigninStartResponse {
     pub(super) opaque_flow_id: Uuid,
     #[serde(with = "serde_bytes")]
     pub(super) opaque_server_message: Vec<u8>,
-    pub(super) preauth_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -23,7 +24,6 @@ pub(super) struct MobileSigninFinishRequest {
     #[serde(with = "serde_bytes")]
     pub(super) opaque_finish_request: Vec<u8>,
     pub(super) totp_code: Option<String>,
-    pub(super) preauth_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,7 +31,8 @@ pub(super) struct MobileSigninFinishResponse {
     pub(super) access_token: Option<String>,
     pub(super) refresh_token: Option<String>,
     pub(super) totp_verified: bool,
-    pub(super) preauth_token: Option<String>,
+    pub(super) totp_continuation_token: Option<String>,
+    pub(super) device_enrollment_token: Option<String>,
     #[serde(with = "serde_bytes")]
     pub(super) encrypted_master_key: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -39,8 +40,15 @@ pub(super) struct MobileSigninFinishResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileSigninTotpRequest {
+    pub(super) continuation_token: String,
+    pub(super) totp_code: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileCreateInviteCodeRequest {
     pub(super) space_id: Uuid,
+    pub(super) rotation_id: Uuid,
     pub(super) role: String,
     #[serde(with = "serde_bytes")]
     pub(super) invite_code_hash: Vec<u8>,
@@ -67,6 +75,8 @@ pub(super) struct MobileRedeemInviteCodeResponse {
     pub(super) space_id: Uuid,
     pub(super) role: String,
     pub(super) key_epoch: u32,
+    pub(super) history_start_seq: u64,
+    pub(super) current_state_start_seq: u64,
     #[serde(with = "serde_bytes")]
     pub(super) encrypted_key_package: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -77,7 +87,8 @@ pub(super) struct MobileRedeemInviteCodeResponse {
 pub struct MobileLoginResult {
     pub username: Option<String>,
     pub access_token: Option<String>,
-    pub preauth_token: Option<String>,
+    pub totp_continuation_token: Option<String>,
+    pub device_enrollment_token: Option<String>,
     pub totp_verified: bool,
     pub account_master_key: Option<[u8; 32]>,
 }
@@ -96,6 +107,8 @@ pub struct MobileCollection {
     pub name: String,
     pub role: String,
     pub key_epoch: u32,
+    pub history_start_seq: u64,
+    pub current_state_start_seq: u64,
     pub collection_key: [u8; 32],
 }
 
@@ -103,6 +116,8 @@ pub struct MobileCollection {
 pub struct MobilePimItem {
     pub space_id: String,
     pub resource_id: String,
+    pub projection_id: String,
+    pub head_operation_id: String,
     pub resource_kind: String,
     pub title: String,
     pub completed: bool,
@@ -122,6 +137,7 @@ pub struct MobileProvisionResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileRegisterDeviceRequest {
+    pub(super) enrollment_token: String,
     pub(super) device_id: Uuid,
     #[serde(with = "serde_bytes")]
     pub(super) signing_public_key: Vec<u8>,
@@ -165,6 +181,8 @@ pub(super) struct MobileSpaceSummary {
     pub(super) workspace_id: Uuid,
     pub(super) role: String,
     pub(super) key_epoch: u32,
+    pub(super) history_start_seq: u64,
+    pub(super) current_state_start_seq: u64,
     #[serde(with = "serde_bytes")]
     pub(super) encrypted_metadata: Vec<u8>,
     pub(super) device_key_packages: Vec<MobileDeviceKeyPackage>,
@@ -174,6 +192,78 @@ pub(super) struct MobileSpaceSummary {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct MobileListSpacesResponse {
     pub(super) spaces: Vec<MobileSpaceSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileSpaceMemberSummary {
+    pub(super) user_id: Uuid,
+    pub(super) username: String,
+    pub(super) role: String,
+    pub(super) key_epoch: u32,
+    #[serde(with = "serde_bytes")]
+    pub(super) public_key_bundle: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileListSpaceMembersResponse {
+    pub(super) members: Vec<MobileSpaceMemberSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileSpaceDeviceSummary {
+    pub(super) device_id: Uuid,
+    pub(super) user_id: Uuid,
+    pub(super) active: bool,
+    #[serde(with = "serde_bytes")]
+    pub(super) signing_public_key: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub(super) hpke_public_key: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileListSpaceDevicesResponse {
+    pub(super) devices: Vec<MobileSpaceDeviceSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileMemberRecoveryKeyPackage {
+    pub(super) user_id: Uuid,
+    pub(super) key_epoch: u32,
+    #[serde(with = "serde_bytes")]
+    pub(super) encrypted_key_package: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileRotateSpaceKeyRequest {
+    pub(super) rotation_id: Uuid,
+    pub(super) expected_key_epoch: u32,
+    pub(super) new_key_epoch: u32,
+    pub(super) base_space_seq: u64,
+    #[serde(with = "serde_bytes")]
+    pub(super) new_encrypted_metadata: Vec<u8>,
+    pub(super) remaining_device_packages: Vec<MobileDeviceKeyPackage>,
+    pub(super) remaining_recovery_packages: Vec<MobileMemberRecoveryKeyPackage>,
+    pub(super) snapshots: Vec<OperationEnvelopeV1>,
+    pub(super) quarantined_streams: Vec<Uuid>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileRotateSpaceKeyResponse {
+    pub(super) rotated: bool,
+    pub(super) key_epoch: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileRecoverySpaceKeyPackage {
+    pub(super) space_id: Uuid,
+    pub(super) key_epoch: u32,
+    #[serde(with = "serde_bytes")]
+    pub(super) encrypted_key_package: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct MobileListRecoveryKeyPackagesResponse {
+    pub(super) packages: Vec<MobileRecoverySpaceKeyPackage>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -217,6 +307,9 @@ pub(super) struct MobileSpaceLifecycleResponse {
 pub struct MobileIssuedInviteCode {
     pub code: String,
     pub ttl_minutes: u32,
+    pub key_epoch: u32,
+    pub current_state_start_seq: u64,
+    pub collection_key: [u8; 32],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -224,6 +317,8 @@ pub struct MobileRedeemedInvite {
     pub collection_id: String,
     pub role: String,
     pub key_epoch: u32,
+    pub history_start_seq: u64,
+    pub current_state_start_seq: u64,
     pub collection_key: [u8; 32],
 }
 

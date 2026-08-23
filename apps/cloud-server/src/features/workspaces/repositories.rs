@@ -176,31 +176,6 @@ pub(crate) async fn list_workspaces_for_user(
     Ok(out)
 }
 
-/// Checks whether user is an active member of workspace.
-pub(crate) async fn is_active_workspace_member(
-    pool: &PgPool,
-    workspace_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, ApiError> {
-    let exists: bool = sqlx::query_scalar(
-        r#"
-        SELECT EXISTS(
-            SELECT 1
-            FROM workspace_members
-            WHERE workspace_id = $1
-              AND user_id = $2
-              AND status = 'active'
-        )
-        "#,
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .map_err(internal_error)?;
-    Ok(exists)
-}
-
 /// Returns role for active workspace member.
 pub(crate) async fn get_active_workspace_member_role(
     pool: &PgPool,
@@ -236,12 +211,17 @@ pub(crate) async fn get_active_workspace_member_role(
 pub(crate) async fn list_active_workspace_members(
     pool: &PgPool,
     workspace_id: Uuid,
+    actor_id: Uuid,
 ) -> Result<Vec<WorkspaceMember>, ApiError> {
     let rows = sqlx::query(
         r#"
         SELECT wm.user_id, u.username, wm.role
         FROM workspace_members wm
         JOIN users u ON u.id = wm.user_id
+        JOIN workspace_members actor
+          ON actor.workspace_id = wm.workspace_id
+         AND actor.user_id = $2
+         AND actor.status = 'active'
         WHERE wm.workspace_id = $1
           AND wm.status = 'active'
           AND u.deleted_at IS NULL
@@ -250,6 +230,7 @@ pub(crate) async fn list_active_workspace_members(
         "#,
     )
     .bind(workspace_id)
+    .bind(actor_id)
     .fetch_all(pool)
     .await
     .map_err(internal_error)?;
@@ -274,19 +255,35 @@ pub(crate) async fn update_workspace_member_role(
     pool: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
+    actor_id: Uuid,
     role: WorkspaceRole,
 ) -> Result<bool, ApiError> {
     let result = sqlx::query(
         r#"
-        UPDATE workspace_members
-        SET role = $3
-        WHERE workspace_id = $1
-          AND user_id = $2
-          AND status = 'active'
+        UPDATE workspace_members target
+        SET role = $4
+        WHERE target.workspace_id = $1
+          AND target.user_id = $2
+          AND target.status = 'active'
+          AND target.role <> 'owner'
+          AND $4 <> 'owner'
+          AND EXISTS (
+              SELECT 1
+              FROM workspace_members actor
+              WHERE actor.workspace_id = target.workspace_id
+                AND actor.user_id = $3
+                AND actor.status = 'active'
+                AND actor.role IN ('owner', 'admin')
+                AND (
+                    actor.role = 'owner'
+                    OR (target.role = 'member' AND $4 = 'member')
+                )
+          )
         "#,
     )
     .bind(workspace_id)
     .bind(user_id)
+    .bind(actor_id)
     .bind(role.as_db_value())
     .execute(pool)
     .await
@@ -299,18 +296,30 @@ pub(crate) async fn revoke_workspace_member(
     pool: &PgPool,
     workspace_id: Uuid,
     user_id: Uuid,
+    actor_id: Uuid,
 ) -> Result<bool, ApiError> {
     let result = sqlx::query(
         r#"
-        UPDATE workspace_members
+        UPDATE workspace_members target
         SET status = 'revoked'
-        WHERE workspace_id = $1
-          AND user_id = $2
-          AND status = 'active'
+        WHERE target.workspace_id = $1
+          AND target.user_id = $2
+          AND target.status = 'active'
+          AND target.role <> 'owner'
+          AND EXISTS (
+              SELECT 1
+              FROM workspace_members actor
+              WHERE actor.workspace_id = target.workspace_id
+                AND actor.user_id = $3
+                AND actor.status = 'active'
+                AND actor.role IN ('owner', 'admin')
+                AND (actor.role = 'owner' OR target.role = 'member')
+          )
         "#,
     )
     .bind(workspace_id)
     .bind(user_id)
+    .bind(actor_id)
     .execute(pool)
     .await
     .map_err(internal_error)?;

@@ -20,7 +20,7 @@ pub(crate) fn ensure_can_manage_members(actor_role: WorkspaceRole) -> Result<(),
 
 /// Enforces role-update constraints for target user.
 pub(crate) fn ensure_role_update_allowed(
-    _actor_role: WorkspaceRole,
+    actor_role: WorkspaceRole,
     target_role: WorkspaceRole,
     new_role: WorkspaceRole,
 ) -> Result<(), ApiError> {
@@ -32,13 +32,28 @@ pub(crate) fn ensure_role_update_allowed(
             "workspace ownership must be transferred and accepted explicitly",
         ));
     }
+    if actor_role == WorkspaceRole::Admin
+        && (target_role == WorkspaceRole::Admin || new_role == WorkspaceRole::Admin)
+    {
+        return Err(unauthorized(
+            "only the workspace owner may grant or modify administrator access",
+        ));
+    }
     Ok(())
 }
 
 /// Enforces revoke constraints for target user.
-pub(crate) fn ensure_revoke_allowed(target_role: WorkspaceRole) -> Result<(), ApiError> {
+pub(crate) fn ensure_revoke_allowed(
+    actor_role: WorkspaceRole,
+    target_role: WorkspaceRole,
+) -> Result<(), ApiError> {
     if target_role == WorkspaceRole::Owner {
         return Err(unauthorized("cannot revoke workspace owner"));
+    }
+    if actor_role == WorkspaceRole::Admin && target_role == WorkspaceRole::Admin {
+        return Err(unauthorized(
+            "only the workspace owner may revoke an administrator",
+        ));
     }
     Ok(())
 }
@@ -52,5 +67,27 @@ mod tests {
         assert!(can_manage_members(WorkspaceRole::Owner));
         assert!(can_manage_members(WorkspaceRole::Admin));
         assert!(!can_manage_members(WorkspaceRole::Member));
+    }
+
+    #[test]
+    fn administrator_cannot_change_or_revoke_administrators() {
+        assert!(
+            ensure_role_update_allowed(
+                WorkspaceRole::Admin,
+                WorkspaceRole::Member,
+                WorkspaceRole::Admin,
+            )
+            .is_err()
+        );
+        assert!(
+            ensure_role_update_allowed(
+                WorkspaceRole::Admin,
+                WorkspaceRole::Admin,
+                WorkspaceRole::Member,
+            )
+            .is_err()
+        );
+        assert!(ensure_revoke_allowed(WorkspaceRole::Admin, WorkspaceRole::Admin).is_err());
+        assert!(ensure_revoke_allowed(WorkspaceRole::Owner, WorkspaceRole::Admin).is_ok());
     }
 }

@@ -17,8 +17,15 @@ void backgroundSyncCallbackDispatcher() {
       if (snapshot == null) {
         return true;
       }
-      final vault = await SecureDeviceVaultStorage().read();
-      if (vault == null || vault.cloudBaseUrl != snapshot.cloudBaseUrl) {
+      final vault = snapshot.username == null
+          ? await SecureDeviceVaultStorage().read()
+          : await SecureDeviceVaultStorage().read(
+              cloudBaseUrl: snapshot.cloudBaseUrl,
+              username: snapshot.username,
+            );
+      if (vault == null ||
+          vault.cloudBaseUrl != snapshot.cloudBaseUrl ||
+          (snapshot.username != null && vault.username != snapshot.username)) {
         return false;
       }
       await bridge.configureSync(
@@ -29,26 +36,49 @@ void backgroundSyncCallbackDispatcher() {
         device: vault.device,
       );
       final tokenStorage = SecureRefreshTokenStorage();
-      final refreshToken = await tokenStorage.read(
+      final refreshCredential = await tokenStorage.readCredential(
         cloudBaseUrl: snapshot.cloudBaseUrl,
       );
-      if (refreshToken != null) {
-        await bridge.importRefreshToken(refreshToken: refreshToken);
+      final refreshToken = refreshCredential?.refreshToken;
+      if (refreshCredential != null) {
+        await bridge.importRefreshToken(
+          refreshToken: refreshCredential.refreshToken,
+          rotationRequestId: refreshCredential.rotationRequestId,
+        );
       }
       for (final collection in snapshot.collections) {
         await bridge.registerCollectionKey(
           collectionId: collection.id,
           keyEpoch: collection.keyEpoch,
+          syncStartSeq:
+              collection.historyStartSeq > collection.currentStateStartSeq
+                  ? collection.historyStartSeq
+                  : collection.currentStateStartSeq,
           cmk: collection.cmk,
         );
       }
       await bridge.syncNow();
       final rotatedRefreshToken = await bridge.exportRefreshToken();
       if (rotatedRefreshToken != null && rotatedRefreshToken.isNotEmpty) {
-        await tokenStorage.write(
+        final rotatedRequestId =
+            await bridge.exportRefreshRotationRequestId();
+        if (rotatedRequestId == null || rotatedRequestId.isEmpty) {
+          return false;
+        }
+        final currentCredential = await tokenStorage.readCredential(
           cloudBaseUrl: snapshot.cloudBaseUrl,
-          refreshToken: rotatedRefreshToken,
         );
+        // Never let an older background isolate overwrite a token already
+        // advanced by the foreground client. Server refresh retries are exact,
+        // so equal replacements remain safe.
+        if (currentCredential?.refreshToken == refreshToken ||
+            currentCredential?.refreshToken == rotatedRefreshToken) {
+          await tokenStorage.write(
+            cloudBaseUrl: snapshot.cloudBaseUrl,
+            refreshToken: rotatedRefreshToken,
+            rotationRequestId: rotatedRequestId,
+          );
+        }
       }
       return true;
     } catch (error, stackTrace) {

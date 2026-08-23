@@ -8,8 +8,10 @@ use super::dto::{DevicePlatform, DeviceSummary, RegisterDeviceRequest};
 pub(crate) async fn upsert_device(
     pool: &PgPool,
     user_id: Uuid,
+    session_id: Uuid,
     request: &RegisterDeviceRequest,
-) -> anyhow::Result<DeviceSummary> {
+) -> anyhow::Result<Option<DeviceSummary>> {
+    let mut tx = pool.begin().await?;
     let row = sqlx::query(
         r#"
         INSERT INTO devices (
@@ -34,9 +36,30 @@ pub(crate) async fn upsert_device(
     .bind(&request.hpke_public_key)
     .bind(&request.encrypted_name)
     .bind(request.platform.as_db_value())
-    .fetch_one(pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    device_from_row(&row)
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let bound = sqlx::query(
+        r#"
+        UPDATE refresh_tokens
+        SET device_id = $3
+        WHERE id = $1 AND user_id = $2
+          AND revoked_at IS NULL AND expires_at > now()
+          AND (device_id IS NULL OR device_id = $3)
+        "#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(request.device_id)
+    .execute(&mut *tx)
+    .await?;
+    if bound.rows_affected() != 1 {
+        return Ok(None);
+    }
+    tx.commit().await?;
+    device_from_row(&row).map(Some)
 }
 
 pub(crate) async fn list_devices(
@@ -64,6 +87,7 @@ pub(crate) async fn revoke_device(
     user_id: Uuid,
     device_id: Uuid,
 ) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE devices
@@ -73,9 +97,42 @@ pub(crate) async fn revoke_device(
     )
     .bind(device_id)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() == 1)
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+    let now = time::OffsetDateTime::now_utc();
+    sqlx::query(
+        r#"
+        UPDATE refresh_tokens
+        SET revoked_at = COALESCE(revoked_at, $3)
+        WHERE user_id = $1 AND device_id = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(device_id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM security_space_device_keys WHERE user_id = $1 AND device_id = $2")
+        .bind(user_id)
+        .bind(device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO security_events (id, user_id, event_kind, details)
+        VALUES ($1, $2, 'device_revoked', jsonb_build_object('device_id', $3::text))
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(device_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(true)
 }
 
 fn device_from_row(row: &sqlx::postgres::PgRow) -> anyhow::Result<DeviceSummary> {

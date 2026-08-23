@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:crypto/crypto.dart';
 
 import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 
@@ -75,32 +76,30 @@ class MobileDeviceVault {
 
 abstract class DeviceVaultStorage {
   Future<void> write(MobileDeviceVault vault);
-  Future<MobileDeviceVault?> read();
+  Future<MobileDeviceVault?> read({String? cloudBaseUrl, String? username});
 }
 
 class SecureDeviceVaultStorage implements DeviceVaultStorage {
   SecureDeviceVaultStorage({FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage();
 
-  static const _storageKey = 'kamori.mobile.device_vault.v1';
+  static const _legacyStorageKey = 'kamori.mobile.device_vault.v1';
   static const _androidOptions = AndroidOptions();
   static const _iosOptions = IOSOptions(
     accessibility: KeychainAccessibility.first_unlock_this_device,
   );
   final FlutterSecureStorage _storage;
 
-  @override
-  Future<void> write(MobileDeviceVault vault) => _storage.write(
-        key: _storageKey,
-        value: jsonEncode(vault.toJson()),
-        aOptions: _androidOptions,
-        iOptions: _iosOptions,
-      );
+  static String _scopedStorageKey(String cloudBaseUrl, String username) {
+    final scope = '${cloudBaseUrl.trim().toLowerCase()}\u0000'
+        '${username.trim().toLowerCase()}';
+    return 'kamori.mobile.device_vault.v2.'
+        '${sha256.convert(utf8.encode(scope))}';
+  }
 
-  @override
-  Future<MobileDeviceVault?> read() async {
+  Future<MobileDeviceVault?> _readKey(String key) async {
     final value = await _storage.read(
-      key: _storageKey,
+      key: key,
       aOptions: _androidOptions,
       iOptions: _iosOptions,
     );
@@ -113,6 +112,49 @@ class SecureDeviceVaultStorage implements DeviceVaultStorage {
     }
     return MobileDeviceVault.fromJson(decoded);
   }
+
+  @override
+  Future<void> write(MobileDeviceVault vault) => _storage.write(
+        key: _scopedStorageKey(vault.cloudBaseUrl, vault.username),
+        value: jsonEncode(vault.toJson()),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+      );
+
+  @override
+  Future<MobileDeviceVault?> read({
+    String? cloudBaseUrl,
+    String? username,
+  }) async {
+    if ((cloudBaseUrl == null) != (username == null)) {
+      throw ArgumentError(
+          'cloudBaseUrl and username must be provided together');
+    }
+    if (cloudBaseUrl == null || username == null) {
+      return _readKey(_legacyStorageKey);
+    }
+    final scopedKey = _scopedStorageKey(cloudBaseUrl, username);
+    final scoped = await _readKey(scopedKey);
+    if (scoped != null) {
+      return scoped;
+    }
+
+    // Transparently migrate the single-account v1 entry only when its own
+    // embedded scope matches the requested account.
+    final legacy = await _readKey(_legacyStorageKey);
+    if (legacy == null ||
+        legacy.cloudBaseUrl != cloudBaseUrl ||
+        legacy.username != username) {
+      return null;
+    }
+    await write(legacy);
+    await _storage.delete(
+      key: _legacyStorageKey,
+      aOptions: _androidOptions,
+      iOptions: _iosOptions,
+    );
+    return legacy;
+  }
 }
 
 class MobileSyncRuntimeSnapshot {
@@ -121,18 +163,24 @@ class MobileSyncRuntimeSnapshot {
     required this.sqlitePath,
     required this.accessToken,
     required this.collections,
+    required this.backgroundSyncEnabled,
+    this.username,
   });
 
   final String cloudBaseUrl;
+  final String? username;
   final String sqlitePath;
   final String accessToken;
   final List<CollectionEntry> collections;
+  final bool backgroundSyncEnabled;
 
   Map<String, Object> toJson() => <String, Object>{
-        'version': 1,
+        'version': 4,
         'cloudBaseUrl': cloudBaseUrl,
+        if (username != null) 'username': username!,
         'sqlitePath': sqlitePath,
         'accessToken': accessToken,
+        'backgroundSyncEnabled': backgroundSyncEnabled,
         'collections': collections
             .map(
               (entry) => <String, Object>{
@@ -140,6 +188,8 @@ class MobileSyncRuntimeSnapshot {
                 'name': entry.name,
                 'cmk': base64UrlEncode(entry.cmk),
                 'keyEpoch': entry.keyEpoch,
+                'historyStartSeq': entry.historyStartSeq,
+                'currentStateStartSeq': entry.currentStateStartSeq,
                 'role': entry.role,
               },
             )
@@ -147,8 +197,16 @@ class MobileSyncRuntimeSnapshot {
       };
 
   static MobileSyncRuntimeSnapshot fromJson(Map<String, Object?> json) {
-    if (json['version'] != 1) {
+    if (json['version'] != 1 &&
+        json['version'] != 2 &&
+        json['version'] != 3 &&
+        json['version'] != 4) {
       throw const FormatException('unsupported mobile runtime version');
+    }
+    if (json['version'] == 4 &&
+        (json['username'] is! String ||
+            (json['username']! as String).trim().isEmpty)) {
+      throw const FormatException('mobile runtime account identity is missing');
     }
     final rawCollections = json['collections'];
     if (rawCollections is! List<Object?>) {
@@ -167,14 +225,20 @@ class MobileSyncRuntimeSnapshot {
         name: raw['name']! as String,
         cmk: key,
         keyEpoch: (raw['keyEpoch'] as int?) ?? 1,
+        historyStartSeq: (raw['historyStartSeq'] as int?) ?? 0,
+        currentStateStartSeq: (raw['currentStateStartSeq'] as int?) ??
+            (raw['historyStartSeq'] as int?) ??
+            0,
         role: (raw['role'] as String?) ?? 'owner',
       );
     }).toList(growable: false);
     return MobileSyncRuntimeSnapshot(
       cloudBaseUrl: json['cloudBaseUrl']! as String,
+      username: json['username'] as String?,
       sqlitePath: json['sqlitePath']! as String,
       accessToken: json['accessToken']! as String,
       collections: collections,
+      backgroundSyncEnabled: json['backgroundSyncEnabled'] as bool? ?? true,
     );
   }
 }

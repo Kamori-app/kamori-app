@@ -1,7 +1,9 @@
 //! HTTP/API error type and error response helpers.
 
-use axum::{Json, http::StatusCode};
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+
+use super::msgpack::MsgPack;
 
 /// Error response payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +17,7 @@ pub struct ErrorResponse {
 }
 
 /// Common API error shape used by handlers.
-pub type ApiError = (StatusCode, Json<ErrorResponse>);
+pub type ApiError = (StatusCode, MsgPack<ErrorResponse>);
 
 impl ErrorResponse {
     pub(crate) fn new(code: &str, message: &str) -> Self {
@@ -31,7 +33,7 @@ impl ErrorResponse {
 pub fn bad_request(message: &str) -> ApiError {
     (
         StatusCode::BAD_REQUEST,
-        Json(ErrorResponse::new("invalid_request", message)),
+        MsgPack(ErrorResponse::new("invalid_request", message)),
     )
 }
 
@@ -39,7 +41,7 @@ pub fn bad_request(message: &str) -> ApiError {
 pub fn unauthenticated(message: &str) -> ApiError {
     (
         StatusCode::UNAUTHORIZED,
-        Json(ErrorResponse::new("unauthenticated", message)),
+        MsgPack(ErrorResponse::new("unauthenticated", message)),
     )
 }
 
@@ -47,7 +49,7 @@ pub fn unauthenticated(message: &str) -> ApiError {
 pub fn unauthorized(message: &str) -> ApiError {
     (
         StatusCode::FORBIDDEN,
-        Json(ErrorResponse::new("forbidden", message)),
+        MsgPack(ErrorResponse::new("forbidden", message)),
     )
 }
 
@@ -55,7 +57,7 @@ pub fn unauthorized(message: &str) -> ApiError {
 pub fn conflict(message: &str) -> ApiError {
     (
         StatusCode::CONFLICT,
-        Json(ErrorResponse::new("conflict", message)),
+        MsgPack(ErrorResponse::new("conflict", message)),
     )
 }
 
@@ -63,7 +65,7 @@ pub fn conflict(message: &str) -> ApiError {
 pub fn quota_exceeded(message: &str) -> ApiError {
     (
         StatusCode::TOO_MANY_REQUESTS,
-        Json(ErrorResponse::new("quota_exceeded", message)),
+        MsgPack(ErrorResponse::new("quota_exceeded", message)),
     )
 }
 
@@ -71,7 +73,7 @@ pub fn quota_exceeded(message: &str) -> ApiError {
 pub fn not_found(message: &str) -> ApiError {
     (
         StatusCode::NOT_FOUND,
-        Json(ErrorResponse::new("not_found", message)),
+        MsgPack(ErrorResponse::new("not_found", message)),
     )
 }
 
@@ -79,5 +81,31 @@ pub fn not_found(message: &str) -> ApiError {
 pub fn internal_error<E: std::fmt::Display>(err: E) -> ApiError {
     let response = ErrorResponse::new("internal_error", "Unexpected server error");
     tracing::error!(request_id = %response.request_id, error = %err, "request failed");
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+    (StatusCode::INTERNAL_SERVER_ERROR, MsgPack(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::to_bytes, response::IntoResponse};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn api_errors_use_the_messagepack_contract() {
+        let response = bad_request("invalid input").into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/msgpack")
+        );
+        let body = to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .expect("read response");
+        let error: ErrorResponse = rmp_serde::from_slice(&body).expect("decode MessagePack");
+        assert_eq!(error.code, "invalid_request");
+        assert_eq!(error.message, "invalid input");
+    }
 }

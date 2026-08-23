@@ -69,7 +69,6 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		"KAMORI_JWT_AUDIENCE=kamori-clients\n" +
 		"KAMORI_ACCESS_TOKEN_TTL_SECONDS=300\n" +
 		"KAMORI_REFRESH_TOKEN_TTL_SECONDS=2592000\n" +
-		"KAMORI_JWT_PREAUTH_TTL_SECONDS=300\n" +
 		"KAMORI_JWT_ACCOUNT_RECOVERY_TTL_SECONDS=600\n" +
 		"KAMORI_OPAQUE_SERVER_SETUP_FILE=/run/secrets/opaque-server-setup\n" +
 		"KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP=false\n" +
@@ -82,10 +81,14 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		envLine("KAMORI_ADMIN_TOTP_KEK", secrets.adminTotpKek) +
 		envLine("KAMORI_AUTH_TOTP_KEK", secrets.authTotpKek) +
 		"KAMORI_ENABLE_TOTP=true\n" +
-		"KAMORI_CORS_ALLOW_ORIGINS=https://app.kamori.app,https://admin.kamori.app,tauri://localhost\n" +
+		"KAMORI_CORS_ALLOW_ORIGINS=https://app.kamori.app,tauri://localhost\n" +
+		"KAMORI_WEB_COOKIE_ORIGINS=https://app.kamori.app\n" +
+		"KAMORI_ADMIN_CORS_ALLOW_ORIGINS=https://admin.kamori.app\n" +
 		"KAMORI_CORS_ALLOW_METHODS=GET,POST,DELETE,OPTIONS\n" +
 		"KAMORI_CORS_ALLOW_HEADERS=authorization,content-type,accept,x-kamori-refresh-transport,x-kamori-csrf-token\n" +
 		"KAMORI_CORS_ALLOW_CREDENTIALS=true\n" +
+		"KAMORI_API_RATE_LIMIT_PER_MINUTE=10000\n" +
+		"KAMORI_SESSION_RATE_LIMIT_UNITS_PER_MINUTE=6000\n" +
 		"KAMORI_WEB_REFRESH_COOKIE_NAME=__Host-kamori_rt\n" +
 		"KAMORI_WEB_CSRF_COOKIE_NAME=__Host-kamori_csrf\n" +
 		"KAMORI_WEB_REFRESH_COOKIE_PATH=/\n" +
@@ -93,11 +96,19 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		"KAMORI_WEB_REFRESH_COOKIE_SAMESITE=lax\n" +
 		"KAMORI_REGISTRATION_ENABLED=false\n" +
 		"KAMORI_BETA_ACCOUNT_LIMIT=1000\n" +
+		"KAMORI_MAX_OPERATION_BYTES=1048576\n" +
+		"KAMORI_MAX_SNAPSHOT_BYTES=4194304\n" +
+		"KAMORI_MAX_OPERATION_PAGE_BYTES=8388608\n" +
+		"KAMORI_SPACE_OPERATION_STORAGE_BYTES=250000000\n" +
+		"KAMORI_ACCOUNT_OPERATION_STORAGE_BYTES=1000000000\n" +
+		"KAMORI_MAX_CONCURRENT_LARGE_REQUESTS=16\n" +
+		"KAMORI_MAX_INFLIGHT_REQUEST_BYTES=134217728\n" +
 		"KAMORI_MAX_BLOB_BYTES=26214400\n" +
 		"KAMORI_ACCOUNT_STORAGE_BYTES=5000000000\n" +
 		"KAMORI_OWNER_MONTHLY_EGRESS_BYTES=10000000000\n" +
 		"KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES=2000000000\n" +
 		"KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS=2\n" +
+		"KAMORI_GLOBAL_CONCURRENT_BLOB_DOWNLOADS=64\n" +
 		"KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND=1250000\n" +
 		"KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES=16000000000000\n" +
 		"KAMORI_GLOBAL_EMERGENCY_EGRESS_BREAKER_BYTES=19000000000000\n" +
@@ -111,6 +122,7 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		envLine("KAMORI_METRICS_BEARER_TOKEN", secrets.metricsBearerToken) +
 		"KAMORI_AUTH_RATE_LIMIT_PER_MINUTE=30\n" +
 		"KAMORI_API_RATE_LIMIT_PER_MINUTE=1200\n" +
+		"KAMORI_TRUSTED_PROXY_CIDRS=172.30.0.2/32,10.42.0.5/32\n" +
 		"RUST_LOG=cloud_server=info,tower_http=warn\n"
 }
 

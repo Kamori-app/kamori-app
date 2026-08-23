@@ -109,6 +109,10 @@ reset() {
 
 run_suite() {
   suite="$1"
+  # Acceptance accounts and quota ledgers are intentionally disposable. Start
+  # every suite from a fresh database so repeated local/CI runs cannot affect
+  # one another or eventually exhaust the beta account cap.
+  reset
   up
   export KAMORI_ACCEPTANCE_WEB_URL="http://127.0.0.1:14173"
   export KAMORI_ACCEPTANCE_API_URL="http://127.0.0.1:18080"

@@ -85,15 +85,39 @@ class BridgeController extends Notifier<BridgeState> {
       if (snapshot == null) {
         return;
       }
+      final vault = snapshot.username == null
+          ? await _deviceVaultStorage.read()
+          : await _deviceVaultStorage.read(
+              cloudBaseUrl: snapshot.cloudBaseUrl,
+              username: snapshot.username,
+            );
+      if (vault == null ||
+          vault.cloudBaseUrl != snapshot.cloudBaseUrl ||
+          (snapshot.username != null && vault.username != snapshot.username)) {
+        throw StateError(
+            'The persisted session does not match a device vault.');
+      }
       state = state.copyWith(
         isAuthenticated: true,
         accessToken: snapshot.accessToken,
+        username: vault.username,
         cloudBaseUrl: snapshot.cloudBaseUrl,
         sqlitePath: snapshot.sqlitePath,
         collections: snapshot.collections,
+        backgroundSyncEnabled: snapshot.backgroundSyncEnabled,
       );
       await _hydrateRefreshTokenIntoRuntime();
       await _configureSyncForActiveSession();
+      try {
+        await _reconcileProvisioning();
+      } catch (error) {
+        // Keep the decrypted offline cache available when the server cannot be
+        // reached. The next manual/background sync retries reconciliation.
+        state = state.copyWith(
+          error:
+              'Offline data is available; account reconciliation will retry: $error',
+        );
+      }
       await _reloadPimItems();
       await _loadProjectionSettings();
       await _projectSystemCopies(state.pimItems);
@@ -101,17 +125,35 @@ class BridgeController extends Notifier<BridgeState> {
         await _schedulePeriodicSync();
       }
     } catch (error) {
-      state = state.copyWith(error: 'Failed to restore secure session: $error');
+      state = state.copyWith(
+        isAuthenticated: false,
+        clearAccessToken: true,
+        clearUsername: true,
+        collections: const <CollectionEntry>[],
+        pimItems: const <PimItem>[],
+        error: 'Failed to restore secure session: $error',
+      );
     }
   }
 
   /// Updates cloud backend base URL for next bridge start.
   Future<void> updateCloudBaseUrl(String value) async {
-    state = state.copyWith(cloudBaseUrl: value.trim(), clearError: true);
-    if (state.isAuthenticated) {
-      await _configureSyncForActiveSession();
-      await _persistSyncRuntime();
+    final normalized = _validatedCloudBaseUrl(value);
+    if (normalized == null) {
+      state = state.copyWith(
+        error: kDebugMode
+            ? 'Use HTTPS, or HTTP only for a localhost debug server.'
+            : 'The server address must be an HTTPS origin.',
+      );
+      return;
     }
+    if (state.isAuthenticated && normalized != state.cloudBaseUrl) {
+      state = state.copyWith(
+        error: 'Sign out before changing the server address.',
+      );
+      return;
+    }
+    state = state.copyWith(cloudBaseUrl: normalized, clearError: true);
   }
 
   /// Performs password login and configures offline sync on success.
@@ -124,10 +166,15 @@ class BridgeController extends Notifier<BridgeState> {
       state = state.copyWith(error: 'Username and password are required.');
       return;
     }
+    if (state.isAuthenticated) {
+      state = state.copyWith(error: 'Sign out before switching accounts.');
+      return;
+    }
 
     state = state.copyWith(isBusy: true, clearError: true);
+    LoginResult? login;
     try {
-      final login = await _rustBridge.passwordLogin(
+      login = await _rustBridge.passwordLogin(
         cloudBaseUrl: state.cloudBaseUrl,
         username: username.trim(),
         password: password,
@@ -137,7 +184,7 @@ class BridgeController extends Notifier<BridgeState> {
       if (login.accessToken == null) {
         state = state.copyWith(
           isBusy: false,
-          error: login.preauthToken != null
+          error: login.totpContinuationToken != null
               ? 'TOTP is required. Enter your code and try again.'
               : 'Password login failed.',
         );
@@ -148,11 +195,24 @@ class BridgeController extends Notifier<BridgeState> {
       await _completeAuthenticatedLogin(login);
       await _configureSyncForActiveSession();
       await _loadProjectionSettings();
-      await _schedulePeriodicSync();
+      if (state.backgroundSyncEnabled) {
+        await _schedulePeriodicSync();
+      }
       await _persistSyncRuntime();
       state = state.copyWith(isBusy: false);
     } catch (error) {
-      state = state.copyWith(isBusy: false, error: 'Login failed: $error');
+      final rollbackWarning =
+          login?.accessToken == null ? null : await _rollbackIncompleteLogin();
+      state = state.copyWith(
+        isBusy: false,
+        isAuthenticated: false,
+        clearAccessToken: true,
+        clearUsername: true,
+        collections: const <CollectionEntry>[],
+        error: rollbackWarning == null
+            ? 'Login failed: $error'
+            : 'Login failed: $error. $rollbackWarning',
+      );
     }
   }
 
@@ -187,12 +247,13 @@ class BridgeController extends Notifier<BridgeState> {
         isBusy: false,
         isAuthenticated: false,
         clearAccessToken: true,
+        clearUsername: true,
         collections: const <CollectionEntry>[],
         pimItems: const <PimItem>[],
         syncedItemsTotal: 0,
         clearLastSyncAt: true,
-        calendarProjectionEnabled: false,
-        contactsProjectionEnabled: false,
+        calendarProjectionCollectionIds: const <String>{},
+        contactsProjectionCollectionIds: const <String>{},
         error: serverWarning,
       );
     } catch (error) {
@@ -215,6 +276,7 @@ class BridgeController extends Notifier<BridgeState> {
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       await _hydrateRefreshTokenIntoRuntime();
+      await _reconcileProvisioning();
       final synced = await _rustBridge.syncNow();
       final pimItems = await _rustBridge.listPimItems();
       await _persistRuntimeRefreshToken();
@@ -241,6 +303,8 @@ class BridgeController extends Notifier<BridgeState> {
   Future<void> savePimItem({
     required String spaceId,
     String? resourceId,
+    String? projectionId,
+    String? headOperationId,
     required PimItemKind kind,
     required String title,
     bool completed = false,
@@ -261,6 +325,8 @@ class BridgeController extends Notifier<BridgeState> {
       final item = await _rustBridge.upsertPimItem(
         spaceId: spaceId,
         resourceId: resourceId,
+        projectionId: projectionId,
+        headOperationId: headOperationId,
         kind: kind,
         title: title,
         completed: completed,
@@ -274,7 +340,7 @@ class BridgeController extends Notifier<BridgeState> {
         ..removeWhere(
           (existing) =>
               existing.spaceId == item.spaceId &&
-              existing.resourceId == item.resourceId,
+              existing.projectionId == item.projectionId,
         )
         ..add(item);
       items.sort((left, right) => left.title.compareTo(right.title));
@@ -304,7 +370,7 @@ class BridgeController extends Notifier<BridgeState> {
             .where(
               (existing) =>
                   existing.spaceId != item.spaceId ||
-                  existing.resourceId != item.resourceId,
+                  existing.projectionId != item.projectionId,
             )
             .toList(growable: false),
       );
@@ -368,7 +434,45 @@ class BridgeController extends Notifier<BridgeState> {
       await _hydrateRefreshTokenIntoRuntime();
       await _rustBridge.moveCollectionToTrash(collectionId: collectionId);
       await _persistRuntimeRefreshToken();
-      state = state.copyWith(isBusy: false, collections: updated);
+      String? projectionWarning;
+      if (state.calendarProjectionCollectionIds.contains(collectionId)) {
+        try {
+          await _systemProjectionService.disableCalendar(
+            collectionId,
+            removeProjectedData: true,
+          );
+        } catch (error) {
+          projectionWarning = 'Calendar projection cleanup failed: $error';
+        }
+      }
+      if (state.contactsProjectionCollectionIds.contains(collectionId)) {
+        try {
+          await _systemProjectionService.disableContacts(
+            collectionId,
+            removeProjectedData: true,
+          );
+        } catch (error) {
+          projectionWarning = [
+            if (projectionWarning != null) projectionWarning,
+            'Contacts projection cleanup failed: $error',
+          ].join(' ');
+        }
+      }
+      state = state.copyWith(
+        isBusy: false,
+        collections: updated,
+        pimItems: state.pimItems
+            .where((item) => item.spaceId != collectionId)
+            .toList(growable: false),
+        calendarProjectionCollectionIds: {
+          ...state.calendarProjectionCollectionIds,
+        }..remove(collectionId),
+        contactsProjectionCollectionIds: {
+          ...state.contactsProjectionCollectionIds,
+        }..remove(collectionId),
+        error: projectionWarning,
+        clearError: projectionWarning == null,
+      );
       await _persistSyncRuntime();
     } catch (error) {
       state = state.copyWith(
@@ -404,8 +508,29 @@ class BridgeController extends Notifier<BridgeState> {
         collectionKey: collection.cmk,
         ttlMinutes: ttlMinutes,
       );
+      if (issued.collectionKey.length != 32 ||
+          issued.keyEpoch <= collection.keyEpoch) {
+        throw StateError(
+            'Invite creation returned invalid rotated key material.');
+      }
+      final updated = state.collections
+          .map(
+            (item) => item.id == collection!.id
+                ? CollectionEntry(
+                    id: item.id,
+                    name: item.name,
+                    cmk: issued.collectionKey,
+                    keyEpoch: issued.keyEpoch,
+                    historyStartSeq: item.historyStartSeq,
+                    currentStateStartSeq: issued.currentStateStartSeq,
+                    role: item.role,
+                  )
+                : item,
+          )
+          .toList(growable: false);
       await _persistRuntimeRefreshToken();
-      state = state.copyWith(isBusy: false);
+      state = state.copyWith(isBusy: false, collections: updated);
+      await _persistSyncRuntime();
       return issued;
     } catch (error) {
       state = state.copyWith(
@@ -440,6 +565,8 @@ class BridgeController extends Notifier<BridgeState> {
           name: current[existingIndex].name,
           cmk: redeemed.collectionKey,
           keyEpoch: redeemed.keyEpoch,
+          historyStartSeq: redeemed.historyStartSeq,
+          currentStateStartSeq: redeemed.currentStateStartSeq,
           role: redeemed.role,
         );
       } else {
@@ -449,6 +576,8 @@ class BridgeController extends Notifier<BridgeState> {
             name: 'Shared ${redeemed.collectionId.substring(0, 8)}',
             cmk: redeemed.collectionKey,
             keyEpoch: redeemed.keyEpoch,
+            historyStartSeq: redeemed.historyStartSeq,
+            currentStateStartSeq: redeemed.currentStateStartSeq,
             role: redeemed.role,
           ),
         );
@@ -474,6 +603,7 @@ class BridgeController extends Notifier<BridgeState> {
     }
 
     try {
+      await _persistSyncRuntime();
       if (enabled) {
         await _schedulePeriodicSync();
       } else {
@@ -485,21 +615,38 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   Future<void> setCalendarProjectionEnabled(
+    String collectionId,
     bool enabled, {
     bool removeProjectedData = false,
   }) async {
+    if (!state.collections.any((collection) => collection.id == collectionId)) {
+      state = state.copyWith(error: 'Collection not found.');
+      return;
+    }
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       if (enabled) {
-        await _systemProjectionService.enableCalendar(state.pimItems);
+        await _systemProjectionService.enableCalendar(
+          collectionId,
+          state.pimItems,
+        );
       } else {
         await _systemProjectionService.disableCalendar(
+          collectionId,
           removeProjectedData: removeProjectedData,
         );
       }
+      final enabledCollections = {
+        ...state.calendarProjectionCollectionIds,
+      };
+      if (enabled) {
+        enabledCollections.add(collectionId);
+      } else {
+        enabledCollections.remove(collectionId);
+      }
       state = state.copyWith(
         isBusy: false,
-        calendarProjectionEnabled: enabled,
+        calendarProjectionCollectionIds: enabledCollections,
       );
     } catch (error) {
       state = state.copyWith(
@@ -510,21 +657,38 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   Future<void> setContactsProjectionEnabled(
+    String collectionId,
     bool enabled, {
     bool removeProjectedData = false,
   }) async {
+    if (!state.collections.any((collection) => collection.id == collectionId)) {
+      state = state.copyWith(error: 'Collection not found.');
+      return;
+    }
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       if (enabled) {
-        await _systemProjectionService.enableContacts(state.pimItems);
+        await _systemProjectionService.enableContacts(
+          collectionId,
+          state.pimItems,
+        );
       } else {
         await _systemProjectionService.disableContacts(
+          collectionId,
           removeProjectedData: removeProjectedData,
         );
       }
+      final enabledCollections = {
+        ...state.contactsProjectionCollectionIds,
+      };
+      if (enabled) {
+        enabledCollections.add(collectionId);
+      } else {
+        enabledCollections.remove(collectionId);
+      }
       state = state.copyWith(
         isBusy: false,
-        contactsProjectionEnabled: enabled,
+        contactsProjectionCollectionIds: enabledCollections,
       );
     } catch (error) {
       state = state.copyWith(
@@ -551,7 +715,7 @@ class BridgeController extends Notifier<BridgeState> {
 
     try {
       await _hydrateRefreshTokenIntoRuntime();
-      await _configureSyncForActiveSession();
+      await _reconcileProvisioning();
     } catch (_) {
       // best-effort lifecycle resume
     }
@@ -565,7 +729,14 @@ class BridgeController extends Notifier<BridgeState> {
       return;
     }
 
-    final vault = await _deviceVaultStorage.read();
+    final username = state.username;
+    if (username == null || username.isEmpty) {
+      throw StateError('The authenticated account identity is unavailable.');
+    }
+    final vault = await _deviceVaultStorage.read(
+      cloudBaseUrl: state.cloudBaseUrl,
+      username: username,
+    );
     if (vault == null || vault.cloudBaseUrl != state.cloudBaseUrl) {
       throw StateError('This mobile device has not been provisioned.');
     }
@@ -582,6 +753,10 @@ class BridgeController extends Notifier<BridgeState> {
       await _rustBridge.registerCollectionKey(
         collectionId: collection.id,
         keyEpoch: collection.keyEpoch,
+        syncStartSeq:
+            collection.historyStartSeq > collection.currentStateStartSeq
+                ? collection.historyStartSeq
+                : collection.currentStateStartSeq,
         cmk: collection.cmk,
       );
     }
@@ -593,34 +768,54 @@ class BridgeController extends Notifier<BridgeState> {
     final accessToken = login.accessToken;
     final username = login.username;
     final accountMasterKey = login.accountMasterKey;
+    final deviceEnrollmentToken = login.deviceEnrollmentToken;
     if (accessToken == null ||
         username == null ||
         username.isEmpty ||
         accountMasterKey == null ||
-        accountMasterKey.length != 32) {
+        accountMasterKey.length != 32 ||
+        deviceEnrollmentToken == null ||
+        deviceEnrollmentToken.isEmpty) {
       throw StateError('Login did not unlock the encrypted account key.');
     }
-    final existingVault = await _deviceVaultStorage.read();
+    final existingVault = await _deviceVaultStorage.read(
+      cloudBaseUrl: state.cloudBaseUrl,
+      username: username,
+    );
     final existingDevice = existingVault != null &&
             existingVault.cloudBaseUrl == state.cloudBaseUrl &&
             existingVault.username == username
         ? existingVault.device
         : null;
-    final provisioned = await _rustBridge.provisionDeviceAndSpaces(
-      cloudBaseUrl: state.cloudBaseUrl,
-      accessToken: accessToken,
-      accountMasterKey: accountMasterKey,
-      platform: ref.read(mobilePlatformProvider),
-      existingDevice: existingDevice,
-    );
+    final device = existingDevice ?? await _rustBridge.generateDeviceSecrets();
+    // Persist the private identity before the first server mutation. If any
+    // later request fails, the next login reuses this exact device instead of
+    // orphaning a registered public key whose private half was lost.
     await _deviceVaultStorage.write(
       MobileDeviceVault(
         cloudBaseUrl: state.cloudBaseUrl,
         username: username,
-        accountMasterKey: accountMasterKey,
-        device: provisioned.device,
+        accountMasterKey: List<int>.from(accountMasterKey),
+        device: device,
       ),
     );
+    final workingMasterKey = List<int>.from(accountMasterKey);
+    late final ProvisionResult provisioned;
+    try {
+      provisioned = await _rustBridge.provisionDeviceAndSpaces(
+        cloudBaseUrl: state.cloudBaseUrl,
+        accessToken: accessToken,
+        accountMasterKey: workingMasterKey,
+        platform: ref.read(mobilePlatformProvider),
+        deviceEnrollmentToken: deviceEnrollmentToken,
+        existingDevice: device,
+      );
+    } finally {
+      workingMasterKey.fillRange(0, workingMasterKey.length, 0);
+    }
+    if (provisioned.device.deviceId != device.deviceId) {
+      throw StateError('Provisioning returned a different device identity.');
+    }
     _systemProjectionService.configureAccount(
       cloudBaseUrl: state.cloudBaseUrl,
       username: username,
@@ -628,6 +823,7 @@ class BridgeController extends Notifier<BridgeState> {
     state = state.copyWith(
       isAuthenticated: true,
       accessToken: provisioned.accessToken,
+      username: username,
       collections: provisioned.collections,
     );
     await _persistRuntimeRefreshToken();
@@ -637,8 +833,23 @@ class BridgeController extends Notifier<BridgeState> {
   /// create recovery-wrapped space keys. Normal offline sync does not require
   /// this network round trip.
   Future<void> _ensureProvisioningSecrets() async {
+    await _reconcileProvisioning();
+  }
+
+  /// Reconciles server membership and current key epochs before network work.
+  ///
+  /// Provisioning is idempotent for an existing device. It refreshes device
+  /// packages, removes spaces that are no longer accessible, and updates the
+  /// in-memory key registry before the next sync cycle.
+  Future<void> _reconcileProvisioning() async {
     final accessToken = state.accessToken;
-    final vault = await _deviceVaultStorage.read();
+    final username = state.username;
+    final vault = username == null
+        ? null
+        : await _deviceVaultStorage.read(
+            cloudBaseUrl: state.cloudBaseUrl,
+            username: username,
+          );
     if (accessToken == null || accessToken.isEmpty || vault == null) {
       throw StateError('The secure mobile account vault is unavailable.');
     }
@@ -647,6 +858,7 @@ class BridgeController extends Notifier<BridgeState> {
       accessToken: accessToken,
       accountMasterKey: vault.accountMasterKey,
       platform: ref.read(mobilePlatformProvider),
+      deviceEnrollmentToken: null,
       existingDevice: vault.device,
     );
     final collectionsById = <String, CollectionEntry>{
@@ -656,9 +868,19 @@ class BridgeController extends Notifier<BridgeState> {
     };
     state = state.copyWith(
       accessToken: provisioned.accessToken,
-      collections: collectionsById.values.toList(growable: false),
+      collections: provisioned.collections.isEmpty
+          ? const <CollectionEntry>[]
+          : collectionsById.values
+              .where(
+                (collection) => provisioned.collections.any(
+                  (available) => available.id == collection.id,
+                ),
+              )
+              .toList(growable: false),
     );
+    await _configureSyncForActiveSession();
     await _persistRuntimeRefreshToken();
+    await _persistSyncRuntime();
   }
 
   bool _canWriteSpace(String spaceId) {
@@ -671,7 +893,13 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   Future<void> _loadProjectionSettings() async {
-    final vault = await _deviceVaultStorage.read();
+    final username = state.username;
+    final vault = username == null
+        ? null
+        : await _deviceVaultStorage.read(
+            cloudBaseUrl: state.cloudBaseUrl,
+            username: username,
+          );
     if (vault == null) {
       return;
     }
@@ -681,13 +909,14 @@ class BridgeController extends Notifier<BridgeState> {
     );
     final settings = await _systemProjectionService.readSettings();
     state = state.copyWith(
-      calendarProjectionEnabled: settings.calendarEnabled,
-      contactsProjectionEnabled: settings.contactsEnabled,
+      calendarProjectionCollectionIds: settings.calendarCollectionIds,
+      contactsProjectionCollectionIds: settings.contactsCollectionIds,
     );
   }
 
   Future<void> _projectSystemCopies(List<PimItem> items) async {
-    if (!state.calendarProjectionEnabled && !state.contactsProjectionEnabled) {
+    if (state.calendarProjectionCollectionIds.isEmpty &&
+        state.contactsProjectionCollectionIds.isEmpty) {
       return;
     }
     try {
@@ -701,14 +930,17 @@ class BridgeController extends Notifier<BridgeState> {
 
   /// Imports refresh token from secure storage into Rust runtime state.
   Future<void> _hydrateRefreshTokenIntoRuntime() async {
-    final refreshToken = await _refreshTokenStorage.read(
+    final credential = await _refreshTokenStorage.readCredential(
       cloudBaseUrl: state.cloudBaseUrl,
     );
-    if (refreshToken == null) {
+    if (credential == null) {
       await _rustBridge.clearRefreshToken();
       return;
     }
-    await _rustBridge.importRefreshToken(refreshToken: refreshToken);
+    await _rustBridge.importRefreshToken(
+      refreshToken: credential.refreshToken,
+      rotationRequestId: credential.rotationRequestId,
+    );
   }
 
   /// Persists refresh token from Rust runtime into platform secure storage.
@@ -718,10 +950,50 @@ class BridgeController extends Notifier<BridgeState> {
       await _refreshTokenStorage.delete(cloudBaseUrl: state.cloudBaseUrl);
       return;
     }
+    final rotationRequestId =
+        await _rustBridge.exportRefreshRotationRequestId();
+    if (rotationRequestId == null || rotationRequestId.isEmpty) {
+      throw StateError('Rust runtime did not expose a refresh rotation identity');
+    }
     await _refreshTokenStorage.write(
       cloudBaseUrl: state.cloudBaseUrl,
       refreshToken: refreshToken,
+      rotationRequestId: rotationRequestId,
     );
+  }
+
+  /// Revokes or durably queues the refresh session created by a login that
+  /// failed before local provisioning completed.
+  Future<String?> _rollbackIncompleteLogin() async {
+    final refreshToken = await _rustBridge.exportRefreshToken();
+    String? warning;
+    if (refreshToken != null && refreshToken.trim().isNotEmpty) {
+      try {
+        await _rustBridge.revokeRefreshSession(
+          cloudBaseUrl: state.cloudBaseUrl,
+          refreshToken: refreshToken,
+        );
+        await _refreshTokenStorage.deleteQueuedRevocation();
+      } catch (_) {
+        try {
+          await _refreshTokenStorage.queueRevocation(
+            cloudBaseUrl: state.cloudBaseUrl,
+            refreshToken: refreshToken,
+          );
+          warning = 'Server-session revocation was queued for the next launch.';
+        } catch (_) {
+          warning =
+              'The incomplete server session could not be revoked or queued; revoke it from another signed-in device.';
+        }
+      }
+    }
+    try {
+      await _rustBridge.clearRefreshToken();
+      await _refreshTokenStorage.delete(cloudBaseUrl: state.cloudBaseUrl);
+    } catch (_) {
+      warning ??= 'Local refresh-token cleanup did not complete.';
+    }
+    return warning;
   }
 
   /// Clears refresh token from both Rust runtime and secure storage.
@@ -732,16 +1004,44 @@ class BridgeController extends Notifier<BridgeState> {
 
   Future<void> _persistSyncRuntime() async {
     final accessToken = state.accessToken;
-    if (!state.isAuthenticated || accessToken == null || accessToken.isEmpty) {
+    final username = state.username;
+    if (!state.isAuthenticated ||
+        accessToken == null ||
+        accessToken.isEmpty ||
+        username == null ||
+        username.isEmpty) {
       return;
     }
     await _syncRuntimeStorage.write(
       MobileSyncRuntimeSnapshot(
         cloudBaseUrl: state.cloudBaseUrl,
+        username: username,
         sqlitePath: state.sqlitePath,
         accessToken: accessToken,
         collections: state.collections,
+        backgroundSyncEnabled: state.backgroundSyncEnabled,
       ),
     );
+  }
+
+  String? _validatedCloudBaseUrl(String value) {
+    final raw = value.trim();
+    final uri = Uri.tryParse(raw);
+    if (uri == null ||
+        !uri.hasScheme ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.path.isNotEmpty && uri.path != '/')) {
+      return null;
+    }
+    final isHttps = uri.scheme == 'https';
+    final isLoopback =
+        uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '::1';
+    if (!isHttps && !(kDebugMode && uri.scheme == 'http' && isLoopback)) {
+      return null;
+    }
+    return uri.replace(path: '').toString().replaceAll(RegExp(r'/$'), '');
   }
 }

@@ -1,17 +1,19 @@
 //! Service logic for invite-code creation and redemption.
 
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
     features::{
-        common::{ApiError, bad_request, internal_error, unauthorized},
+        common::{ApiError, bad_request, conflict, internal_error, unauthorized},
         invites::{
             dto::{
                 CreateInviteCodeRequest, CreateInviteCodeResponse, RedeemInviteCodeRequest,
                 RedeemInviteCodeResponse,
             },
             repositories::{
-                InviteCodeInsert, can_invite, insert_invite_code, redeem_invite_code_tx,
+                InviteCodeInsert, InviteCodeInsertResult, RedeemInviteOutcome, insert_invite_code,
+                redeem_invite_code_tx,
             },
         },
     },
@@ -35,6 +37,9 @@ pub(crate) async fn create_invite_code(
     actor_id: Uuid,
     payload: CreateInviteCodeRequest,
 ) -> Result<CreateInviteCodeResponse, ApiError> {
+    if payload.space_id.is_nil() || payload.rotation_id.is_nil() {
+        return Err(bad_request("space_id and rotation_id must be non-nil"));
+    }
     if !is_valid_invite_code_hash(&payload.invite_code_hash) {
         return Err(bad_request("invite_code_hash must be 32 bytes"));
     }
@@ -56,31 +61,58 @@ pub(crate) async fn create_invite_code(
         return Err(bad_request("encrypted_note is too large"));
     }
 
-    let can_manage = can_invite(&state.pool, payload.space_id, actor_id)
-        .await
-        .map_err(internal_error)?;
-    if !can_manage {
-        return Err(unauthorized("security-space invite access denied"));
+    let mut hasher = Sha256::new();
+    hasher.update(b"kamori.invite-create-request.v2\0");
+    hasher.update(payload.space_id.as_bytes());
+    hasher.update(payload.rotation_id.as_bytes());
+    hasher.update([match payload.role {
+        crate::features::spaces::dto::SpaceRole::Owner => 0,
+        crate::features::spaces::dto::SpaceRole::Editor => 1,
+        crate::features::spaces::dto::SpaceRole::Reader => 2,
+    }]);
+    for bytes in [
+        payload.invite_code_hash.as_slice(),
+        payload.encrypted_key_package.as_slice(),
+    ] {
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
     }
-
-    let id = Uuid::new_v4();
-    insert_invite_code(
+    match payload.encrypted_note.as_deref() {
+        Some(note) => {
+            hasher.update([1]);
+            hasher.update((note.len() as u64).to_be_bytes());
+            hasher.update(note);
+        }
+        None => hasher.update([0]),
+    }
+    hasher.update(payload.ttl_minutes.to_be_bytes());
+    let request_hash: [u8; 32] = hasher.finalize().into();
+    let inserted = insert_invite_code(
         &state.pool,
         InviteCodeInsert {
-            id,
+            id: Uuid::new_v4(),
             space_id: payload.space_id,
+            rotation_id: payload.rotation_id,
             created_by: actor_id,
             role: payload.role,
             code_hash: &payload.invite_code_hash,
             encrypted_key_package: &payload.encrypted_key_package,
             encrypted_note: payload.encrypted_note.as_ref().map(|bytes| bytes.as_ref()),
             ttl_minutes,
+            request_hash: &request_hash,
         },
     )
     .await
     .map_err(internal_error)?;
-
-    Ok(CreateInviteCodeResponse { id })
+    match inserted {
+        InviteCodeInsertResult::Stored(id) => Ok(CreateInviteCodeResponse { id }),
+        InviteCodeInsertResult::Conflict => Err(conflict(
+            "rotation is already bound to another invite request",
+        )),
+        InviteCodeInsertResult::AccessDenied => {
+            Err(unauthorized("security-space invite access denied"))
+        }
+    }
 }
 
 pub(crate) async fn redeem_invite_code(
@@ -92,14 +124,25 @@ pub(crate) async fn redeem_invite_code(
         return Err(bad_request("invite_code_hash must be 32 bytes"));
     }
 
-    let redeemed = redeem_invite_code_tx(&state.pool, &payload.invite_code_hash, actor_id)
+    let redeemed = match redeem_invite_code_tx(&state.pool, &payload.invite_code_hash, actor_id)
         .await
-        .map_err(|error| bad_request(&error.to_string()))?;
+        .map_err(internal_error)?
+    {
+        RedeemInviteOutcome::Redeemed(redeemed) => redeemed,
+        RedeemInviteOutcome::InvalidOrExpired => {
+            return Err(bad_request("invite code is invalid or expired"));
+        }
+        RedeemInviteOutcome::AlreadyOwner => {
+            return Err(conflict("space owner cannot redeem a member invite"));
+        }
+    };
 
     Ok(RedeemInviteCodeResponse {
         space_id: redeemed.space_id,
         role: redeemed.role,
         key_epoch: redeemed.key_epoch,
+        history_start_seq: redeemed.history_start_seq,
+        current_state_start_seq: redeemed.current_state_start_seq,
         encrypted_key_package: redeemed.encrypted_key_package,
         encrypted_note: redeemed.encrypted_note,
     })

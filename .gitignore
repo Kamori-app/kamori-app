@@ -32,6 +32,9 @@
 # Pulumi.<stack>.yaml remains commit-safe only while every secret uses `secure:`.
 infra/pulumi-*-backup.json
 
+# Local audit/design notes intentionally kept outside version control.
+AUDIT_FOLLOWUPS.local.md
+
 # Allow example / template env files
 !.env.example
 !.env.*.example

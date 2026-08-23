@@ -105,6 +105,7 @@ pub async fn create_collection(
         name: name.clone(),
         cmk: space_key,
         key_epoch: 1,
+        sync_start_seq: 0,
         synced_items: 0,
     };
     state.upsert_collection(record.clone()).await;

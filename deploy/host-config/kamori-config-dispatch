@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  exit 2
+fi
+
+role=$1
+if [[ "${SSH_ORIGINAL_COMMAND:-}" != "apply ${role}" ]]; then
+  echo "this identity may only apply the ${role} host configuration" >&2
+  exit 2
+fi
+
+exec sudo /usr/local/sbin/kamori-apply-host-config "$role"

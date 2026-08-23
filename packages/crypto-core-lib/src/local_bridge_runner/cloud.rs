@@ -4,7 +4,6 @@ use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -14,6 +13,9 @@ use crate::operation_envelope::OperationEnvelopeV1;
 const MSGPACK_CONTENT_TYPE: &str = "application/msgpack";
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 5;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 20;
+
+type CredentialRotationSink = dyn Fn(&str, &str, &str) -> Result<()> + Send + Sync;
+type CredentialRotationAttemptSource = dyn Fn(&str) -> Result<Uuid> + Send + Sync;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CloudStoredOperation {
@@ -41,6 +43,8 @@ pub(crate) struct CloudSyncClient {
     tokens: Arc<RwLock<CloudAuthTokens>>,
     refresh_lock: Arc<Mutex<()>>,
     http: Client,
+    rotation_attempt_source: Arc<CredentialRotationAttemptSource>,
+    rotation_sink: Arc<CredentialRotationSink>,
 }
 
 impl CloudSyncClient {
@@ -48,6 +52,8 @@ impl CloudSyncClient {
         base_url: String,
         access_token: String,
         refresh_token: Option<String>,
+        rotation_attempt_source: Arc<CredentialRotationAttemptSource>,
+        rotation_sink: Arc<CredentialRotationSink>,
     ) -> Result<Self> {
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
@@ -62,6 +68,8 @@ impl CloudSyncClient {
             })),
             refresh_lock: Arc::new(Mutex::new(())),
             http,
+            rotation_attempt_source,
+            rotation_sink,
         })
     }
 
@@ -149,6 +157,45 @@ impl CloudSyncClient {
         self.tokens.read().await.refresh_token.clone()
     }
 
+    pub(crate) async fn current_access_token(&self) -> String {
+        self.tokens.read().await.access_token.clone()
+    }
+
+    pub(crate) async fn get_msgpack(&self, path: &str) -> Result<Vec<u8>> {
+        let url = self.endpoint(path);
+        let response = self
+            .send_with_access_retry(
+                move |access_token| {
+                    self.http
+                        .get(&url)
+                        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
+                        .bearer_auth(access_token)
+                },
+                "authenticated MessagePack GET",
+            )
+            .await?;
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    pub(crate) async fn post_msgpack(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>> {
+        let url = self.endpoint(path);
+        let body = Bytes::from(body);
+        let response = self
+            .send_with_access_retry(
+                move |access_token| {
+                    self.http
+                        .post(&url)
+                        .header(reqwest::header::CONTENT_TYPE, MSGPACK_CONTENT_TYPE)
+                        .header(reqwest::header::ACCEPT, MSGPACK_CONTENT_TYPE)
+                        .bearer_auth(access_token)
+                        .body(body.clone())
+                },
+                "authenticated MessagePack POST",
+            )
+            .await?;
+        Ok(response.bytes().await?.to_vec())
+    }
+
     async fn send_with_access_retry<F>(
         &self,
         build_request: F,
@@ -184,9 +231,10 @@ impl CloudSyncClient {
         let Some(refresh_token) = self.tokens.read().await.refresh_token.clone() else {
             return Ok(false);
         };
-        let rotation_request_id = refresh_rotation_request_id(&refresh_token);
+        let rotation_request_id = (self.rotation_attempt_source)(&refresh_token)
+            .context("persist refresh rotation attempt before request")?;
         let body = encode_msgpack(&CloudRefreshRequest {
-            refresh_token: Some(refresh_token),
+            refresh_token: Some(refresh_token.clone()),
             rotation_request_id,
         })?;
         let response = self
@@ -202,12 +250,14 @@ impl CloudSyncClient {
             return Ok(false);
         }
         let payload: CloudRefreshResponse = decode_msgpack(response.error_for_status()?).await?;
-        let Some(refresh_token) = payload.refresh_token else {
+        let Some(new_refresh_token) = payload.refresh_token else {
             return Err(anyhow!("body refresh transport returned no refresh token"));
         };
+        (self.rotation_sink)(&refresh_token, &payload.access_token, &new_refresh_token)
+            .context("persist rotated credentials before request retry")?;
         let mut tokens = self.tokens.write().await;
         tokens.access_token = payload.access_token;
-        tokens.refresh_token = Some(refresh_token);
+        tokens.refresh_token = Some(new_refresh_token);
         Ok(true)
     }
 }
@@ -246,21 +296,6 @@ struct CloudListSpaceDevicesResponse {
 struct CloudRefreshRequest {
     refresh_token: Option<String>,
     rotation_request_id: Uuid,
-}
-
-fn refresh_rotation_request_id(refresh_token: &str) -> Uuid {
-    let digest = Sha256::digest(
-        [
-            b"kamori.refresh-request.v1\0".as_slice(),
-            refresh_token.as_bytes(),
-        ]
-        .concat(),
-    );
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
 }
 
 #[derive(Deserialize)]

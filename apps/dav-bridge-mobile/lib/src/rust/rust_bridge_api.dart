@@ -11,8 +11,7 @@ import 'package:dav_bridge_mobile/src/rust/rust_bridge_mock.dart';
 abstract class RustBridgeApi {
   /// Performs password-based sign-in.
   ///
-  /// Returns either an access token or a pre-auth token if additional TOTP
-  /// verification is required.
+  /// Returns either an access token or a one-time continuation when TOTP is required.
   Future<LoginResult> passwordLogin({
     required String cloudBaseUrl,
     required String username,
@@ -20,19 +19,29 @@ abstract class RustBridgeApi {
     String? totpCode,
   });
 
+  /// Generates a device identity locally before durable server enrollment.
+  Future<DeviceSecrets> generateDeviceSecrets();
+
   Future<ProvisionResult> provisionDeviceAndSpaces({
     required String cloudBaseUrl,
     required String accessToken,
     required List<int> accountMasterKey,
     required String platform,
+    String? deviceEnrollmentToken,
     DeviceSecrets? existingDevice,
   });
 
   /// Imports refresh token into Rust runtime memory for authenticated refresh flow.
-  Future<void> importRefreshToken({required String refreshToken});
+  Future<void> importRefreshToken({
+    required String refreshToken,
+    required String rotationRequestId,
+  });
 
   /// Exports current refresh token from Rust runtime memory.
   Future<String?> exportRefreshToken();
+
+  /// Exports the durable random identity paired with the current refresh token.
+  Future<String?> exportRefreshRotationRequestId();
 
   /// Clears refresh token from Rust runtime memory.
   Future<void> clearRefreshToken();
@@ -60,6 +69,8 @@ abstract class RustBridgeApi {
   Future<PimItem> upsertPimItem({
     required String spaceId,
     String? resourceId,
+    String? projectionId,
+    String? headOperationId,
     required PimItemKind kind,
     required String title,
     bool completed,
@@ -80,6 +91,7 @@ abstract class RustBridgeApi {
   Future<void> registerCollectionKey({
     required String collectionId,
     required int keyEpoch,
+    required int syncStartSeq,
     required List<int> cmk,
   });
 

@@ -46,7 +46,9 @@ export interface OpaqueSigninFinishResponse {
   totp_verified: boolean;
   encrypted_master_key: number[];
   public_key_bundle: number[];
-  preauth_token?: string | null;
+  totp_continuation_token?: string | null;
+  device_enrollment_token?: string | null;
+  encrypted_master_key_package: number[];
 }
 
 export interface BrowserLoginStartResponse {
@@ -64,6 +66,7 @@ export interface BrowserLoginPollResponse {
   access_token?: string | null;
   refresh_token?: string | null;
   refresh_token_id?: string | null;
+  device_enrollment_token?: string | null;
 }
 
 export const api = {
@@ -87,6 +90,8 @@ export const api = {
       password,
       totpCode,
     }),
+
+  restoreSession: () => invoke<boolean>("restore_session"),
 
   browserLoginStart: () =>
     invoke<BrowserLoginStartResponse>("browser_login_start"),

@@ -17,6 +17,14 @@
         "pkg/**"
       ]
     },
+    "cloud-server#build": {
+      "cache": false,
+      "outputs": []
+    },
+    "crypto-core-lib#build": {
+      "cache": false,
+      "outputs": []
+    },
     "dev": {
       "cache": false,
       "persistent": true

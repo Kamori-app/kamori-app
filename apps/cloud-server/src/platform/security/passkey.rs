@@ -5,6 +5,7 @@ use crate::platform::state_store::{StateStore, StateStoreError};
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,6 +44,12 @@ pub struct PasskeyRegistrationChallenge {
     pub challenge: Vec<u8>,
     /// Serialized PublicKeyCredentialCreationOptions.
     pub public_key_credential_creation_options: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserPasskeyRegistrationState {
+    user_id: Uuid,
+    registration: PasskeyRegistration,
 }
 
 impl PasskeyService {
@@ -111,8 +118,11 @@ impl PasskeyService {
             .start_passkey_registration(user_id, username, display_name, None)
             .map_err(|e| anyhow!("passkey registration start failed: {e:?}"))?;
 
-        let state_bytes =
-            serde_json::to_vec(&state).map_err(|e| anyhow!("serialize passkey state: {e}"))?;
+        let state_bytes = serde_json::to_vec(&UserPasskeyRegistrationState {
+            user_id,
+            registration: state,
+        })
+        .map_err(|e| anyhow!("serialize passkey state: {e}"))?;
         let key = registration_flow_key(flow_id);
         self.state_store
             .put(&key, &state_bytes, self.challenge_ttl)
@@ -133,26 +143,25 @@ impl PasskeyService {
     pub async fn finish_registration(
         &self,
         flow_id: Uuid,
+        expected_user_id: Uuid,
         credential: RegisterPublicKeyCredential,
     ) -> Result<Passkey> {
         let key = registration_flow_key(flow_id);
         let state_bytes = self
             .state_store
-            .get(&key)
+            .take(&key)
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing passkey registration state"))?;
 
-        self.state_store
-            .delete(&key)
-            .await
-            .map_err(map_store_error)?;
-
-        let state: PasskeyRegistration = serde_json::from_slice(&state_bytes)
+        let state: UserPasskeyRegistrationState = serde_json::from_slice(&state_bytes)
             .map_err(|e| anyhow!("deserialize passkey state: {e}"))?;
+        if state.user_id != expected_user_id {
+            anyhow::bail!("passkey registration account mismatch");
+        }
 
         self.webauthn
-            .finish_passkey_registration(&credential, &state)
+            .finish_passkey_registration(&credential, &state.registration)
             .map_err(|e| anyhow!("passkey registration finish failed: {e:?}"))
     }
 
@@ -194,15 +203,10 @@ impl PasskeyService {
         let key = discoverable_authentication_key(flow_id);
         let state_bytes = self
             .state_store
-            .get(&key)
+            .take(&key)
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing passkey discoverable authentication state"))?;
-
-        self.state_store
-            .delete(&key)
-            .await
-            .map_err(map_store_error)?;
 
         let state: DiscoverableAuthentication = serde_json::from_slice(&state_bytes)
             .map_err(|e| anyhow!("deserialize passkey state: {e}"))?;
@@ -254,14 +258,10 @@ impl PasskeyService {
         let key = security_key_registration_flow_key(flow_id);
         let state = self
             .state_store
-            .get(&key)
+            .take(&key)
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing security-key registration state"))?;
-        self.state_store
-            .delete(&key)
-            .await
-            .map_err(map_store_error)?;
         let state: SecurityKeyRegistration = serde_json::from_slice(&state)?;
         self.webauthn
             .finish_securitykey_registration(&credential, &state)
@@ -302,14 +302,10 @@ impl PasskeyService {
         let key = security_key_authentication_flow_key(flow_id);
         let state = self
             .state_store
-            .get(&key)
+            .take(&key)
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing security-key authentication state"))?;
-        self.state_store
-            .delete(&key)
-            .await
-            .map_err(map_store_error)?;
         let state: SecurityKeyAuthentication = serde_json::from_slice(&state)?;
         self.webauthn
             .finish_securitykey_authentication(&credential, &state)

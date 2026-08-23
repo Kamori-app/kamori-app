@@ -24,39 +24,35 @@ class _KamoriBrandPainter extends CustomPainter {
     final scale = size.width / 48;
     canvas.scale(scale, scale);
 
-    final outer = Path()
-      ..moveTo(8, 8.5)
-      ..lineTo(21.5, 8.5)
-      ..cubicTo(31.7, 8.5, 40, 16.8, 40, 27)
-      ..lineTo(40, 39.5)
-      ..lineTo(26.5, 39.5)
-      ..cubicTo(16.3, 39.5, 8, 31.2, 8, 21)
+    final page = Path()
+      ..moveTo(8, 4)
+      ..lineTo(30, 4)
+      ..lineTo(40, 14)
+      ..lineTo(40, 44)
+      ..lineTo(8, 44)
       ..close();
-    canvas.drawPath(outer, Paint()..color = const Color(0xFF173F37));
+    canvas.drawPath(page, Paint()..color = const Color(0xFF173F37));
 
-    final inner = Path()
-      ..moveTo(13.5, 13.5)
-      ..lineTo(21.7, 13.5)
-      ..cubicTo(29.1, 13.5, 35, 19.5, 35, 26.8)
-      ..lineTo(35, 34.5)
-      ..lineTo(26.8, 34.5)
-      ..cubicTo(19.4, 34.5, 13.5, 28.5, 13.5, 21.2)
+    final fold = Path()
+      ..moveTo(30, 4)
+      ..lineTo(30, 14)
+      ..lineTo(40, 14)
       ..close();
-    canvas.drawPath(inner, Paint()..color = const Color(0xFFF1B95B));
+    canvas.drawPath(fold, Paint()..color = const Color(0xFFF1B95B));
 
+    final lightStroke = Paint()
+      ..color = const Color(0xFFF6F0E4)
+      ..strokeWidth = 4.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(17, 14), const Offset(17, 35), lightStroke);
+    canvas.drawLine(const Offset(18, 25), const Offset(29, 14), lightStroke);
     canvas.drawLine(
-      const Offset(13.5, 34.5),
-      const Offset(34.8, 13.2),
-      Paint()
-        ..color = const Color(0xFFF6F0E4)
-        ..strokeWidth = 4.5,
-    );
-    canvas.drawLine(
-      const Offset(23, 25),
-      const Offset(35, 37),
+      const Offset(18, 25),
+      const Offset(31, 37),
       Paint()
         ..color = const Color(0xFFE76F58)
-        ..strokeWidth = 4.5,
+        ..strokeWidth = 4.5
+        ..strokeCap = StrokeCap.round,
     );
   }
 

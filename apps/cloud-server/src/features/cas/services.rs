@@ -1,6 +1,7 @@
 //! Authorization, integrity, and strict quota policy for encrypted blobs.
 
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -15,6 +16,7 @@ use axum::{
 use futures_util::Stream;
 use object_store::{ObjectStoreExt, PutPayload, path::Path};
 use sha2::{Digest, Sha256};
+use tokio::sync::OwnedSemaphorePermit;
 use uuid::Uuid;
 
 use crate::{
@@ -43,12 +45,15 @@ pub(crate) async fn cas_upload(
     payload: CasUploadRequest,
 ) -> Result<CasUploadResponse, ApiError> {
     let actor_id = authorize_session(state, headers).await?;
-    let max_blob_bytes = crate::features::admin::services::effective_u64(
+    let runtime_limits = crate::features::admin::services::effective_u64_values(
         state,
-        "max_blob_bytes",
-        state.config.max_blob_bytes,
+        &[
+            ("max_blob_bytes", state.config.max_blob_bytes),
+            ("account_storage_bytes", state.config.account_storage_bytes),
+        ],
     )
     .await?;
+    let max_blob_bytes = runtime_limit(&runtime_limits, "max_blob_bytes")?;
     if payload.blob_id.is_nil() {
         return Err(bad_request("blob_id must be a random non-nil UUID"));
     }
@@ -78,14 +83,7 @@ pub(crate) async fn cas_upload(
         payload.blob_id,
         &payload.ciphertext_sha256,
         i64_limit(payload.size_padded)?,
-        i64_limit(
-            crate::features::admin::services::effective_u64(
-                state,
-                "account_storage_bytes",
-                state.config.account_storage_bytes,
-            )
-            .await?,
-        )?,
+        i64_limit(runtime_limit(&runtime_limits, "account_storage_bytes")?)?,
     )
     .await
     .map_err(internal_error)?;
@@ -127,37 +125,75 @@ pub(crate) async fn cas_download(
     blob_id: Uuid,
 ) -> Result<Response, ApiError> {
     let actor_id = authorize_session(state, headers).await?;
+    let runtime_limits = crate::features::admin::services::effective_u64_values(
+        state,
+        &[
+            (
+                "owner_monthly_egress_bytes",
+                state.config.owner_monthly_egress_bytes,
+            ),
+            (
+                "owner_rolling_24h_egress_bytes",
+                state.config.owner_rolling_24h_egress_bytes,
+            ),
+            (
+                "global_nonessential_egress_stop_bytes",
+                state.config.global_nonessential_egress_stop_bytes,
+            ),
+            (
+                "global_emergency_egress_breaker_bytes",
+                state.config.global_emergency_egress_breaker_bytes,
+            ),
+            (
+                "owner_concurrent_blob_downloads",
+                state.config.owner_concurrent_blob_downloads,
+            ),
+            (
+                "global_concurrent_blob_downloads",
+                state.config.global_concurrent_blob_downloads,
+            ),
+            (
+                "blob_download_bytes_per_second",
+                state.config.blob_download_bytes_per_second,
+            ),
+        ],
+    )
+    .await?;
+    let stream_permit = state
+        .blob_download_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| quota_exceeded("blob gateway concurrency limit exceeded"))?;
     let result = reserve_download(
         &state.pool,
         actor_id,
         space_id,
         blob_id,
         EgressLimits {
-            owner_monthly: i64_limit(
-                crate::features::admin::services::effective_u64(
-                    state,
-                    "owner_monthly_egress_bytes",
-                    state.config.owner_monthly_egress_bytes,
-                )
-                .await?,
-            )?,
-            owner_rolling_24h: i64_limit(
-                crate::features::admin::services::effective_u64(
-                    state,
-                    "owner_rolling_24h_egress_bytes",
-                    state.config.owner_rolling_24h_egress_bytes,
-                )
-                .await?,
-            )?,
-            global_nonessential_stop: i64_limit(
-                crate::features::admin::services::effective_u64(
-                    state,
-                    "global_nonessential_egress_stop_bytes",
-                    state.config.global_nonessential_egress_stop_bytes,
-                )
-                .await?,
-            )?,
-            owner_concurrent_downloads: i64_limit(state.config.owner_concurrent_blob_downloads)?,
+            owner_monthly: i64_limit(runtime_limit(
+                &runtime_limits,
+                "owner_monthly_egress_bytes",
+            )?)?,
+            owner_rolling_24h: i64_limit(runtime_limit(
+                &runtime_limits,
+                "owner_rolling_24h_egress_bytes",
+            )?)?,
+            global_nonessential_stop: i64_limit(runtime_limit(
+                &runtime_limits,
+                "global_nonessential_egress_stop_bytes",
+            )?)?,
+            global_emergency_breaker: i64_limit(runtime_limit(
+                &runtime_limits,
+                "global_emergency_egress_breaker_bytes",
+            )?)?,
+            owner_concurrent_downloads: i64_limit(runtime_limit(
+                &runtime_limits,
+                "owner_concurrent_blob_downloads",
+            )?)?,
+            global_concurrent_downloads: i64_limit(runtime_limit(
+                &runtime_limits,
+                "global_concurrent_blob_downloads",
+            )?)?,
         },
     )
     .await
@@ -179,14 +215,18 @@ pub(crate) async fn cas_download(
             };
             let size = u64::try_from(reservation.blob.size_padded).map_err(internal_error)?;
             let hash = reservation.blob.ciphertext_sha256.clone();
+            let expected_hash: [u8; 32] = hash
+                .as_slice()
+                .try_into()
+                .map_err(|_| internal_error("stored ciphertext hash metadata is invalid"))?;
             let stream = MeteredObjectStream::new(
                 object.into_stream(),
+                size,
+                expected_hash,
                 state.pool.clone(),
                 reservation.id,
-                size,
-                hash.clone(),
-                blob_id,
-                state.config.blob_download_bytes_per_second,
+                runtime_limit(&runtime_limits, "blob_download_bytes_per_second")?,
+                stream_permit,
             );
             let mut response = Response::new(Body::from_stream(stream));
             *response.status_mut() = StatusCode::OK;
@@ -212,50 +252,58 @@ pub(crate) async fn cas_download(
         ReserveDownloadResult::ConcurrentLimitExceeded => Err(quota_exceeded(
             "owner concurrent blob download limit exceeded",
         )),
+        ReserveDownloadResult::GlobalConcurrentLimitExceeded => Err(quota_exceeded(
+            "global concurrent blob download limit exceeded",
+        )),
         ReserveDownloadResult::GlobalQuotaExceeded => Err(quota_exceeded(
             "blob delivery is temporarily limited by the global safety budget",
+        )),
+        ReserveDownloadResult::EmergencyBreakerExceeded => Err(quota_exceeded(
+            "blob delivery is disabled by the global emergency budget",
         )),
     }
 }
 
 struct MeteredObjectStream {
-    inner: Pin<Box<dyn Stream<Item = object_store::Result<Bytes>> + Send>>,
+    source: Pin<Box<dyn Stream<Item = object_store::Result<Bytes>> + Send>>,
+    expected_size: u64,
+    expected_hash: [u8; 32],
+    observed: u64,
+    hasher: Sha256,
     pool: sqlx::PgPool,
     reservation_id: Uuid,
-    expected_size: u64,
-    expected_hash: Vec<u8>,
-    blob_id: Uuid,
     delivered: u64,
-    hasher: Option<Sha256>,
     finalized: bool,
     ended: bool,
     bytes_per_second: u64,
     pending_chunk: Option<(Bytes, Pin<Box<tokio::time::Sleep>>)>,
+    _permit: OwnedSemaphorePermit,
 }
 
 impl MeteredObjectStream {
     fn new(
-        inner: Pin<Box<dyn Stream<Item = object_store::Result<Bytes>> + Send>>,
+        source: Pin<Box<dyn Stream<Item = object_store::Result<Bytes>> + Send>>,
+        expected_size: u64,
+        expected_hash: [u8; 32],
         pool: sqlx::PgPool,
         reservation_id: Uuid,
-        expected_size: u64,
-        expected_hash: Vec<u8>,
-        blob_id: Uuid,
         bytes_per_second: u64,
+        permit: OwnedSemaphorePermit,
     ) -> Self {
         Self {
-            inner,
-            pool,
-            reservation_id,
+            source,
             expected_size,
             expected_hash,
-            blob_id,
+            observed: 0,
+            hasher: Sha256::new(),
+            pool,
+            reservation_id,
             delivered: 0,
-            hasher: Some(Sha256::new()),
             finalized: false,
             ended: false,
             bytes_per_second,
             pending_chunk: None,
+            _permit: permit,
         }
     }
 
@@ -266,7 +314,11 @@ impl MeteredObjectStream {
         self.finalized = true;
         let pool = self.pool.clone();
         let reservation_id = self.reservation_id;
-        let delivered = i64::try_from(self.delivered).unwrap_or(i64::MAX);
+        // Origin bytes are billable even when the client disconnects while a
+        // throttled chunk is pending. Charging the larger counter prevents an
+        // attacker from repeatedly forcing unmetered B2 reads by aborting.
+        let billable = self.delivered.max(self.observed).min(self.expected_size);
+        let delivered = i64::try_from(billable).unwrap_or(i64::MAX);
         tokio::spawn(async move {
             if let Err(error) =
                 finalize_download_reservation(&pool, reservation_id, delivered).await
@@ -288,51 +340,59 @@ impl Stream for MeteredObjectStream {
             if delay.as_mut().poll(cx).is_pending() {
                 return Poll::Pending;
             }
-            let (bytes, _) = self.pending_chunk.take().expect("pending chunk exists");
+            let Some((bytes, _)) = self.pending_chunk.take() else {
+                self.ended = true;
+                self.finalize_reservation();
+                return Poll::Ready(Some(Err(std::io::Error::other(
+                    "download throttle state was lost",
+                ))));
+            };
             self.delivered = self.delivered.saturating_add(bytes.len() as u64);
-            if let Some(hasher) = self.hasher.as_mut() {
-                hasher.update(&bytes);
-            }
             return Poll::Ready(Some(Ok(bytes)));
         }
-        match self.inner.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(bytes))) => {
-                let nanos = (bytes.len() as u128)
-                    .saturating_mul(1_000_000_000)
-                    .checked_div(u128::from(self.bytes_per_second.max(1)))
-                    .unwrap_or(0)
-                    .min(u128::from(u64::MAX));
-                self.pending_chunk = Some((
-                    bytes,
-                    Box::pin(tokio::time::sleep(Duration::from_nanos(nanos as u64))),
-                ));
-                self.poll_next(cx)
-            }
+        let bytes = match self.source.as_mut().poll_next(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Some(Ok(bytes))) if bytes.is_empty() => return self.poll_next(cx),
+            Poll::Ready(Some(Ok(bytes))) => bytes,
             Poll::Ready(Some(Err(error))) => {
                 self.ended = true;
                 self.finalize_reservation();
-                Poll::Ready(Some(Err(std::io::Error::other(error))))
+                return Poll::Ready(Some(Err(std::io::Error::other(error))));
             }
             Poll::Ready(None) => {
                 self.ended = true;
-                let digest = self.hasher.take().map(|hasher| hasher.finalize());
-                let valid = self.delivered == self.expected_size
-                    && digest
-                        .as_ref()
-                        .is_some_and(|value| value.as_slice() == self.expected_hash);
+                let integrity_ok = self.observed == self.expected_size
+                    && self.hasher.clone().finalize().as_slice() == self.expected_hash;
                 self.finalize_reservation();
-                if valid {
-                    Poll::Ready(None)
-                } else {
-                    tracing::error!(blob_id = %self.blob_id, delivered = self.delivered, expected = self.expected_size, "ciphertext object failed streaming integrity verification");
-                    Poll::Ready(Some(Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "stored ciphertext failed integrity verification",
-                    ))))
+                if integrity_ok {
+                    return Poll::Ready(None);
                 }
+                return Poll::Ready(Some(Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "stored ciphertext failed streaming integrity verification",
+                ))));
             }
-            Poll::Pending => Poll::Pending,
+        };
+        self.observed = self.observed.saturating_add(bytes.len() as u64);
+        if self.observed > self.expected_size {
+            self.ended = true;
+            self.finalize_reservation();
+            return Poll::Ready(Some(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stored ciphertext exceeds its declared size",
+            ))));
         }
+        self.hasher.update(&bytes);
+        let nanos = (bytes.len() as u128)
+            .saturating_mul(1_000_000_000)
+            .checked_div(u128::from(self.bytes_per_second.max(1)))
+            .unwrap_or(0)
+            .min(u128::from(u64::MAX));
+        self.pending_chunk = Some((
+            bytes,
+            Box::pin(tokio::time::sleep(Duration::from_nanos(nanos as u64))),
+        ));
+        self.poll_next(cx)
     }
 }
 
@@ -344,6 +404,13 @@ impl Drop for MeteredObjectStream {
 
 fn i64_limit(value: u64) -> Result<i64, ApiError> {
     i64::try_from(value).map_err(|_| internal_error("configured quota exceeds database range"))
+}
+
+fn runtime_limit(values: &HashMap<String, u64>, key: &str) -> Result<u64, ApiError> {
+    values
+        .get(key)
+        .copied()
+        .ok_or_else(|| internal_error(format!("effective runtime setting {key} is missing")))
 }
 
 #[cfg(test)]

@@ -9,9 +9,13 @@ It signs users in to `cloud-server`, runs the localhost DAV bridge, and exposes 
 
 Main responsibilities:
 - OPAQUE password sign-in and passkey sign-in entrypoints.
-- Passkey sign-in uses discoverable WebAuthn flow (without username input).
+- Passkey sign-in opens the trusted web origin for discoverable WebAuthn and
+  returns through the short-lived device-authorization flow; the Tauri WebView
+  never claims the `kamori.app` WebAuthn origin.
 - Local bridge lifecycle control (`start`, `stop`, `status`, manual and periodic sync).
 - Copy-safe DAV setup details and dedicated credential rotation.
+- Strict conditional DAV mutations: existing resources require a matching
+  strong ETag and concurrent writes cannot silently overwrite each other.
 - Local collection management (`create`, `list`).
 - Desktop window/tray behavior preferences.
 
@@ -45,8 +49,14 @@ Security/behavior notes:
 - `access_token` is used for authenticated cloud API calls.
 - `refresh_token` is used only to refresh expired access tokens (`POST /auth/refresh`), with rotation on every refresh.
 - Desktop runtime keeps `access_token` in Tauri in-memory state and passes it to `crypto-core-lib::local_bridge_runner`.
-- Desktop stores `refresh_token` in OS secure storage (keychain via `keyring`) and also keeps runtime copy in memory while app is running.
+- Desktop stores the `refresh_token` and its random per-generation refresh
+  attempt id together in OS secure storage (keychain via `keyring`) and keeps a
+  runtime copy in memory while the app is running. A legacy token-only keychain
+  entry is upgraded before the next network refresh.
 - Rotated `refresh_token` from local runtime is synced back into keychain/state during sync/status/stop command paths.
+- Space provisioning uses the current recovery package and starts sync at the
+  later of the membership-history boundary and current-epoch snapshot cursor,
+  so a new desktop never needs superseded epoch keys.
 - Changing backend URL clears in-memory tokens and removes old backend refresh token from keychain.
 
 Server-side token TTL policy is configured in `cloud-server`:

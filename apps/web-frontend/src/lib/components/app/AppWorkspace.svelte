@@ -1,7 +1,8 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { cloudApi } from "$lib/api/cloud";
+    import { cloudApi, type SpaceMemberSummary } from "$lib/api/cloud";
     import { decode, encode } from "@msgpack/msgpack";
+    import { normalizeByteArray } from "$lib/binary";
     import { tokenStore } from "$lib/auth/tokenStore";
     import { runWithAccessRefreshRetry } from "$lib/auth/session-flow.js";
     import {
@@ -17,8 +18,11 @@
         getActiveWebDevice,
         listQueuedOperationEnvelopes,
         loadMaterializedPimState,
+        listQuarantinedOperationRecords,
         loadSpaceKey,
         queueOperationEnvelope,
+        quarantineOperationEnvelope,
+        removeQuarantinedOperationEnvelope,
         removeQueuedOperationEnvelope,
         storeSpaceKey,
         storeMaterializedPimState,
@@ -26,23 +30,33 @@
     } from "$lib/cryptoVault";
     import {
         decryptVaultBytes,
+        encryptAccountMasterKeyForDevice,
         encryptVaultBytes,
+        assignPimBranchGraph,
         openOperationEnvelope,
+        materializePimOperation,
         sealOperationEnvelope,
+        unwrapSpaceKeyFromAccountRecovery,
         unwrapSpaceKeyForDevice,
         verifyOperationEnvelope,
         wrapSpaceKeyForDevice,
+        wrapSpaceKeyForAccountRecovery,
     } from "$lib/opaqueClient";
     import {
         decodePimOperation,
         decodePimSnapshot,
+        dateToIcalendarUtc,
         encodePimOperation,
+        encodePimSnapshot,
+        localDateTimeToIcalendarUtc,
+        projectionFields,
         type MaterializedPimItem,
         type MaterializedOperationState,
         type PimOperationV1,
         type PimResourceKind,
         type PimValue,
-        type PimSnapshotV1,
+        type PimSnapshotBranchV2,
+        type PimSnapshotV2,
     } from "$lib/pim";
     import Button from "$lib/components/ui/Button.svelte";
     import Card from "$lib/components/ui/Card.svelte";
@@ -54,7 +68,7 @@
         "Confirm this code in your desktop app": "Сверьте этот код с кодом в приложении для компьютера",
         "Approve Desktop": "Подтвердить компьютер",
         "Dashboard": "Обзор", "Current user": "Текущий пользователь", "Not signed in": "Вход не выполнен",
-        "Collections": "Пространства", "Synced events total": "Всего синхронизировано", "Last synced seq": "Последняя операция",
+        "Collections": "Пространства", "Operation states on device": "Состояний операций на устройстве", "Last synced seq": "Последняя операция",
         "Syncing...": "Синхронизация…", "Sync Now": "Синхронизировать", "Collection name": "Название пространства",
         "Create Collection": "Создать пространство", "No collections yet.": "Пространств пока нет.", "Approval required on another device": "Нужно подтверждение на другом устройстве",
         "Delete": "Удалить", "Trash · retained for 30 days": "Корзина · хранение 30 дней", "Restore": "Восстановить",
@@ -68,6 +82,8 @@
         "Delete Collection": "Удалить пространство", "Cancel": "Отмена", "Move to Trash": "Переместить в корзину",
     };
     const t = (english: string) => $locale === "ru" ? (ruCopy[english] ?? english) : english;
+    const localized = (english: string, russian: string) =>
+        $locale === "ru" ? russian : english;
 
     /**
      * Authenticated workspace:
@@ -85,6 +101,8 @@
     let contactPhone = "";
     let pimItems: MaterializedPimItem[] = [];
     let operationStates: MaterializedOperationState[] = [];
+    let spaceMembers: Record<string, SpaceMemberSummary[]> = {};
+    let syncCursors: Record<string, number> = {};
     let trashedCollections: CollectionEntry[] = [];
 
     let inviteTtlMinutes = "60";
@@ -96,6 +114,7 @@
 
     let loadingAction = "";
     let deviceAuthorizationCode = "";
+    let dataPlaneTail: Promise<void> = Promise.resolve();
 
     let deleteModalOpen = false;
     let pendingDeleteCollectionId = "";
@@ -131,6 +150,28 @@
         loadingAction = "";
     };
 
+    async function runDataPlaneExclusive<T>(
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        const previous = dataPlaneTail;
+        let release = () => {};
+        dataPlaneTail = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            if (navigator.locks) {
+                return await navigator.locks.request(
+                    "kamori-web-data-plane-v1",
+                    operation,
+                );
+            }
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
     const setNotice = (notice: string) => {
         appState.update((state) => ({ ...state, notice }));
     };
@@ -146,18 +187,42 @@
         if (!deviceAuthorizationCode) return;
         setLoading("device-authorization");
         try {
-            await withAccessRetry((accessToken) =>
-                cloudApi.approveDeviceAuthorization(
+            const challenge = await withAccessRetry((accessToken) =>
+                cloudApi.inspectDeviceAuthorization(
                     $appState.cloudBaseUrl,
                     deviceAuthorizationCode,
                     accessToken,
                 ),
             );
-            setNotice("Desktop sign-in approved. You may return to Kamori Desktop.");
+            const recipientKey = normalizeByteArray(
+                challenge.hpke_public_key,
+                32,
+                "Desktop authorization public key",
+            );
+            const encryptedMasterKeyPackage = await withActiveMasterKey(
+                (masterKey) =>
+                    encryptAccountMasterKeyForDevice(
+                        masterKey,
+                        recipientKey,
+                        challenge.flow_id,
+                    ),
+            );
+            await withAccessRetry((accessToken) =>
+                cloudApi.approveDeviceAuthorization(
+                    $appState.cloudBaseUrl,
+                    deviceAuthorizationCode,
+                    encryptedMasterKeyPackage,
+                    accessToken,
+                ),
+            );
+            setNotice(localized(
+                "Desktop sign-in approved. You may return to Kamori Desktop.",
+                "Вход на компьютере подтверждён. Вернитесь в Kamori Desktop.",
+            ));
             clearDeviceAuthorizationQuery();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Desktop authorization failed: ${message}`);
+            setNotice(`${localized("Desktop authorization failed", "Не удалось подтвердить вход на компьютере")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -166,7 +231,7 @@
     const withAccessToken = (): string => {
         const token = tokenStore.getAccessToken();
         if (!token) {
-            throw new Error("Sign in first.");
+            throw new Error(localized("Sign in first.", "Сначала войдите."));
         }
         return token;
     };
@@ -192,7 +257,7 @@
                 appState.update((state) => ({
                     ...state,
                     accessToken: null,
-                    preauthToken: null,
+                    totpContinuationToken: null,
                 }));
             },
         });
@@ -204,7 +269,7 @@
     const createCollection = async () => {
         const name = collectionName.trim();
         if (!name) {
-            setNotice("Collection name is required.");
+            setNotice(localized("Collection name is required.", "Введите название пространства."));
             return;
         }
 
@@ -224,7 +289,8 @@
                 encode({ version: 1, kind: "pim", name }),
             );
             const encryptedRecoveryKeyPackage = await withActiveMasterKey(
-                (masterKey) => encryptVaultBytes(masterKey, spaceKey),
+                async (masterKey) =>
+                    encode(await wrapSpaceKeyForAccountRecovery(masterKey, spaceKey)),
             );
             await withAccessRetry((accessToken) =>
                 cloudApi.createSpace(
@@ -258,192 +324,335 @@
             appState.update((state) => ({
                 ...state,
                 collections: [...state.collections, entry],
-                notice: `Collection "${name}" created.`,
+                notice: localized(
+                    `Collection "${name}" created.`,
+                    `Пространство «${name}» создано.`,
+                ),
             }));
 
             selectedCollectionId = entry.id;
             collectionName = "";
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Space creation failed: ${message}`);
+            setNotice(`${localized("Space creation failed", "Не удалось создать пространство")}: ${message}`);
         } finally {
             clearLoading();
         }
     };
 
-    const applyPimOperation = (
+    const reconcilePimStream = async (
         spaceId: string,
+        logicalResourceId: string,
+        kind: PimResourceKind,
+    ): Promise<void> => {
+        const streamStates = operationStates.filter(
+            (state) =>
+                state.spaceId === spaceId &&
+                state.logicalResourceId === logicalResourceId &&
+                state.kind === kind,
+        );
+        const assignments = await assignPimBranchGraph(
+            logicalResourceId,
+            streamStates.map((state) => ({
+                operation_id: state.clientOpId,
+                parent_operation_id: state.parentOperationId ?? null,
+                seed_projection_resource_id: state.seedProjectionId ?? null,
+            })),
+        );
+        const byId = new Map(
+            assignments.map((assignment) => [assignment.operation_id, assignment]),
+        );
+        const hasConflict = assignments.filter((assignment) => assignment.head).length > 1;
+        operationStates = operationStates.map((state) => {
+            if (
+                state.spaceId !== spaceId ||
+                state.logicalResourceId !== logicalResourceId ||
+                state.kind !== kind
+            ) {
+                return state;
+            }
+            const assignment = byId.get(state.clientOpId);
+            if (!assignment) throw new Error("PIM branch assignment is incomplete.");
+            return { ...state, projectionId: assignment.projection_resource_id };
+        });
+        pimItems = pimItems.filter(
+            (item) =>
+                item.spaceId !== spaceId ||
+                item.resourceId !== logicalResourceId ||
+                item.kind !== kind,
+        );
+        for (const state of operationStates) {
+            const assignment = byId.get(state.clientOpId);
+            if (
+                state.spaceId !== spaceId ||
+                state.logicalResourceId !== logicalResourceId ||
+                state.kind !== kind ||
+                !assignment?.head ||
+                state.deleted
+            ) {
+                continue;
+            }
+            pimItems = [
+                ...pimItems,
+                {
+                    spaceId,
+                    resourceId: logicalResourceId,
+                    projectionId: assignment.projection_resource_id,
+                    kind,
+                    title: state.title,
+                    completed: state.completed,
+                    fields: state.fields,
+                    headOperationId: state.clientOpId,
+                    conflict: hasConflict,
+                },
+            ];
+        }
+    };
+
+    const applyPimOperation = async (
+        spaceId: string,
+        streamId: string,
         clientOpId: string,
         operation: PimOperationV1,
-    ) => {
-        if (operationStates.some((state) => state.clientOpId === clientOpId)) return;
-        const parent = operation.dependencies
-            .map((dependency) =>
-                operationStates.find(
-                    (state) =>
-                        state.clientOpId === dependency &&
-                        state.spaceId === spaceId &&
-                        state.logicalResourceId === operation.resource_id &&
-                        state.kind === operation.resource_kind,
-                ),
-            )
-            .find((state) => state !== undefined);
-        const canonical = pimItems.find(
-            (item) =>
-                item.spaceId === spaceId &&
-                item.resourceId === operation.resource_id &&
-                (item.projectionId ?? item.resourceId) === operation.resource_id,
+        spaceSeq = 0,
+    ): Promise<void> => {
+        if (operation.resource_id !== streamId) {
+            throw new Error("PIM operation stream does not match its resource.");
+        }
+        const existingOperation = operationStates.find(
+            (state) =>
+                state.spaceId === spaceId && state.clientOpId === clientOpId,
         );
-        const isSequential = Boolean(
-            canonical && operation.dependencies.includes(canonical.headOperationId),
-        );
-        const projectionId =
-            parent?.projectionId ??
-            (isSequential || !canonical
-                ? operation.resource_id
-                : `${operation.resource_id}~conflict-${clientOpId.slice(0, 8)}`);
-        const index = pimItems.findIndex(
-            (item) =>
-                item.spaceId === spaceId &&
-                (item.projectionId ?? item.resourceId) === projectionId,
-        );
-        if (operation.operation === "delete") {
-            if (index >= 0) {
-                pimItems = pimItems.filter((_, itemIndex) => itemIndex !== index);
+        if (existingOperation) {
+            if (spaceSeq > existingOperation.spaceSeq) {
+                operationStates = operationStates.map((state) =>
+                    state.spaceId === spaceId && state.clientOpId === clientOpId
+                        ? { ...state, spaceSeq }
+                        : state,
+                );
             }
+            return;
+        }
+        const parent = operation.dependencies.length === 0
+            ? undefined
+            : operationStates.find(
+                  (state) =>
+                      state.clientOpId === operation.dependencies[0] &&
+                      state.spaceId === spaceId &&
+                      state.logicalResourceId === operation.resource_id &&
+                      state.kind === operation.resource_kind,
+              );
+        if (operation.dependencies.length > 0 && !parent) {
+            throw new Error("PIM operation dependency is missing.");
+        }
+        if (operation.operation === "delete") {
             operationStates = [
                 ...operationStates,
                 {
                     spaceId,
                     clientOpId,
+                    spaceSeq,
                     logicalResourceId: operation.resource_id,
-                    projectionId,
+                    projectionId: operation.resource_id,
+                    parentOperationId: operation.dependencies[0],
                     kind: operation.resource_kind,
                     title: parent?.title ?? "",
                     completed: parent?.completed ?? false,
                     fields: parent?.fields ?? {},
                     deleted: true,
+                    materializedProjection: "",
                 },
             ];
+            await reconcilePimStream(
+                spaceId,
+                operation.resource_id,
+                operation.resource_kind,
+            );
             return;
         }
-        const existing = index >= 0 ? pimItems[index] : undefined;
+        const materializedProjection = await materializePimOperation(
+            operation,
+            parent?.materializedProjection || undefined,
+        );
         const titleValue = operation.fields.title;
         const completedValue = operation.fields.completed;
-        const fields = { ...(parent?.fields ?? {}), ...operation.fields };
-        const next: MaterializedPimItem = {
-            spaceId,
-            resourceId: operation.resource_id,
-            projectionId,
-            kind: operation.resource_kind,
-            title:
+        const projectedFields = projectionFields(
+            materializedProjection,
+            operation.resource_kind,
+        );
+        const fields = {
+            ...(parent?.fields ?? {}),
+            ...projectedFields,
+            ...operation.fields,
+        };
+        const projectedTitle = projectedFields.title;
+        const projectedCompleted = projectedFields.completed;
+        const title =
                 titleValue?.type === "text"
                     ? titleValue.value
-                    : (parent?.title ?? "Untitled"),
-            completed:
+                    : projectedTitle?.type === "text"
+                      ? projectedTitle.value
+                      : (parent?.title ?? "Untitled");
+        const completed =
                 completedValue?.type === "boolean"
                     ? completedValue.value
-                    : (parent?.completed ?? false),
-            fields,
-            headOperationId: clientOpId,
-            conflict: projectionId !== operation.resource_id,
-        };
-        if (index >= 0) {
-            pimItems = pimItems.map((item, itemIndex) =>
-                itemIndex === index ? next : item,
-            );
-        } else {
-            pimItems = [...pimItems, next];
-        }
+                    : projectedCompleted?.type === "boolean"
+                      ? projectedCompleted.value
+                      : (parent?.completed ?? false);
         operationStates = [
             ...operationStates,
             {
                 spaceId,
                 clientOpId,
+                spaceSeq,
                 logicalResourceId: operation.resource_id,
-                projectionId,
+                projectionId: operation.resource_id,
+                parentOperationId: operation.dependencies[0],
                 kind: operation.resource_kind,
-                title: next.title,
-                completed: next.completed,
+                title,
+                completed,
                 fields,
                 deleted: false,
+                materializedProjection,
             },
         ];
+        await reconcilePimStream(
+            spaceId,
+            operation.resource_id,
+            operation.resource_kind,
+        );
     };
 
-    const applyPimSnapshot = (spaceId: string, snapshot: PimSnapshotV1) => {
-        pimItems = pimItems.filter(
-            (item) =>
-                !(
-                    item.spaceId === spaceId &&
-                    item.resourceId === snapshot.resource_id
-                ),
-        );
-        operationStates = operationStates.filter(
-            (state) =>
-                !(
-                    state.spaceId === spaceId &&
-                    state.logicalResourceId === snapshot.resource_id
-                ),
-        );
-        if (snapshot.deleted) return;
-
-        const projection = new TextDecoder().decode(
-            snapshot.materialized_projection,
-        );
-        const lineValue = (names: string[]): string => {
-            for (const line of projection.split(/\r?\n/)) {
-                const separator = line.indexOf(":");
-                if (separator < 0) continue;
-                const property = line
-                    .slice(0, separator)
-                    .split(";", 1)[0]
-                    .toUpperCase();
-                if (names.includes(property)) return line.slice(separator + 1);
-            }
-            return "";
-        };
-        const title =
-            lineValue(
-                snapshot.resource_kind === "contact"
-                    ? ["FN", "N"]
-                    : ["SUMMARY"],
-            ) || "Untitled";
-        const completed = lineValue(["STATUS"]).toUpperCase() === "COMPLETED";
-        const fields: Record<string, PimValue> = {
-            title: { type: "text", value: title },
-        };
-        if (snapshot.resource_kind === "task") {
-            fields.completed = { type: "boolean", value: completed };
+    const applyPimSnapshot = async (
+        spaceId: string,
+        streamId: string,
+        snapshot: PimSnapshotV2,
+        transportSeq?: number,
+    ): Promise<void> => {
+        if (snapshot.resource_id !== streamId) {
+            throw new Error("PIM snapshot stream does not match its resource.");
         }
-        pimItems = [
-            ...pimItems,
-            {
-                spaceId,
-                resourceId: snapshot.resource_id,
-                projectionId: snapshot.projection_resource_id,
-                kind: snapshot.resource_kind,
-                title,
-                completed,
-                fields,
-                headOperationId: snapshot.head_operation_id,
-                conflict: false,
-            },
-        ];
-        operationStates = [
-            ...operationStates,
-            {
-                spaceId,
-                clientOpId: snapshot.head_operation_id,
-                logicalResourceId: snapshot.resource_id,
-                projectionId: snapshot.projection_resource_id,
-                kind: snapshot.resource_kind,
-                title,
-                completed,
-                fields,
-                deleted: false,
-            },
-        ];
+        if (
+            transportSeq !== undefined &&
+            snapshot.covers_through_space_seq > transportSeq
+        ) {
+            throw new Error("PIM snapshot claims data beyond its transport position.");
+        }
+        for (const branch of snapshot.branches) {
+            const existingIndex = operationStates.findIndex(
+                (state) =>
+                    state.spaceId === spaceId &&
+                    state.clientOpId === branch.head_operation_id,
+            );
+            if (existingIndex >= 0) {
+                operationStates = operationStates.map((state, index) =>
+                    index === existingIndex
+                        ? {
+                              ...state,
+                              spaceSeq: Math.max(
+                                  state.spaceSeq,
+                                  snapshot.covers_through_space_seq,
+                              ),
+                          }
+                        : state,
+                );
+                continue;
+            }
+            const hasNewerProjection = operationStates.some(
+                (state) =>
+                    state.spaceId === spaceId &&
+                    state.logicalResourceId === snapshot.resource_id &&
+                    state.projectionId === branch.projection_resource_id &&
+                    (state.spaceSeq === 0 ||
+                        state.spaceSeq > snapshot.covers_through_space_seq),
+            );
+            if (hasNewerProjection) continue;
+
+            const projection = branch.deleted
+                ? ""
+                : new TextDecoder("utf-8", { fatal: true }).decode(
+                      branch.materialized_projection,
+                  );
+            const fields = branch.deleted
+                ? {}
+                : projectionFields(projection, snapshot.resource_kind);
+            const title =
+                fields.title?.type === "text"
+                    ? fields.title.value
+                    : "Untitled";
+            const completed =
+                fields.completed?.type === "boolean"
+                    ? fields.completed.value
+                    : false;
+            operationStates = [
+                ...operationStates,
+                {
+                    spaceId,
+                    clientOpId: branch.head_operation_id,
+                    spaceSeq: snapshot.covers_through_space_seq,
+                    logicalResourceId: snapshot.resource_id,
+                    projectionId: branch.projection_resource_id,
+                    seedProjectionId: branch.projection_resource_id,
+                    kind: snapshot.resource_kind,
+                    title: branch.deleted ? "" : title,
+                    completed: branch.deleted ? false : completed,
+                    fields: branch.deleted ? {} : fields,
+                    deleted: branch.deleted,
+                    materializedProjection: projection,
+                },
+            ];
+        }
+        await reconcilePimStream(
+            spaceId,
+            snapshot.resource_id,
+            snapshot.resource_kind,
+        );
+    };
+
+    const retryUnresolvedPimOperations = async (
+        spaceId: string,
+        signingKeys: Map<string, Uint8Array>,
+    ): Promise<number> => {
+        let applied = 0;
+        while (true) {
+            const pending = (await listQuarantinedOperationRecords(spaceId))
+                .filter((record) => record.reason_code === "unresolved_pim_graph")
+                .sort((left, right) => left.space_seq - right.space_seq);
+            if (pending.length === 0) return applied;
+            let madeProgress = false;
+            for (const record of pending) {
+                const envelope = record.envelope;
+                const signingKey = signingKeys.get(envelope.author_device_id);
+                const operationKey = await loadSpaceKey(spaceId, envelope.key_epoch);
+                if (!signingKey || !operationKey || envelope.envelope_kind !== "operation") {
+                    continue;
+                }
+                try {
+                    await verifyOperationEnvelope(envelope, signingKey);
+                    const operation = decodePimOperation(
+                        await openOperationEnvelope(envelope, operationKey),
+                    );
+                    if (operation.resource_id !== envelope.stream_id) continue;
+                    await applyPimOperation(
+                        spaceId,
+                        envelope.stream_id,
+                        envelope.client_op_id,
+                        operation,
+                        record.space_seq,
+                    );
+                    await removeQuarantinedOperationEnvelope(
+                        spaceId,
+                        envelope.client_op_id,
+                    );
+                    applied += 1;
+                    madeProgress = true;
+                } catch {
+                    // The graph may still be incomplete. A future page or sync
+                    // retries the encrypted, authenticated envelope.
+                }
+            }
+            if (!madeProgress) return applied;
+        }
     };
 
     const textField = (item: MaterializedPimItem, name: string): string => {
@@ -456,14 +665,34 @@
         let flushed = 0;
         for (const envelope of queued) {
             try {
-                await withAccessRetry((accessToken) =>
+                const appended = await withAccessRetry((accessToken) =>
                     cloudApi.appendOperation(
                         $appState.cloudBaseUrl,
                         envelope,
                         accessToken,
                     ),
                 );
-                await removeQueuedOperationEnvelope(envelope.client_op_id);
+                operationStates = operationStates.map((state) =>
+                    state.spaceId === envelope.space_id &&
+                    state.clientOpId === envelope.client_op_id
+                        ? {
+                              ...state,
+                              spaceSeq: Math.max(
+                                  state.spaceSeq,
+                                  appended.space_seq,
+                              ),
+                          }
+                        : state,
+                );
+                await storeMaterializedPimState(
+                    pimItems,
+                    operationStates,
+                    syncCursors,
+                );
+                await removeQueuedOperationEnvelope(
+                    envelope.space_id,
+                    envelope.client_op_id,
+                );
                 flushed += 1;
             } catch {
                 break;
@@ -474,15 +703,18 @@
 
     const commitPimOperation = async (
         operation: PimOperationV1,
-    ): Promise<boolean> => {
+    ): Promise<boolean> => runDataPlaneExclusive(async () => {
         const collection = $appState.collections.find(
             (item) => item.id === selectedCollectionId,
         );
         if (!collection) {
-            throw new Error("Choose a collection first.");
+            throw new Error(localized("Choose a collection first.", "Сначала выберите пространство."));
         }
         if (collection.role === "reader") {
-            throw new Error("Reader access does not allow changes.");
+            throw new Error(localized(
+                "Reader access does not allow changes.",
+                "Доступ только для чтения не разрешает изменения.",
+            ));
         }
         const spaceKey = await loadSpaceKey(collection.id, collection.keyEpoch);
         if (!spaceKey) {
@@ -504,10 +736,15 @@
             signingPrivateKey: device.identity.signing_private_key,
         });
         await queueOperationEnvelope(envelope);
-        applyPimOperation(collection.id, clientOpId, operation);
-        await storeMaterializedPimState(pimItems, operationStates);
+        await applyPimOperation(
+            collection.id,
+            operation.resource_id,
+            clientOpId,
+            operation,
+        );
+        await storeMaterializedPimState(pimItems, operationStates, syncCursors);
         return (await flushOutbox()) > 0;
-    };
+    });
 
     const makeUpsert = (
         kind: PimResourceKind,
@@ -526,7 +763,7 @@
     const createTask = async () => {
         const title = taskTitle.trim();
         if (!title) {
-            setNotice("Enter a task title.");
+            setNotice(localized("Enter a task title.", "Введите название задачи."));
             return;
         }
         setLoading("task-create");
@@ -535,17 +772,18 @@
                 makeUpsert("task", crypto.randomUUID(), {
                     title: { type: "text", value: title },
                     completed: { type: "boolean", value: false },
+                    dtstamp: { type: "text", value: dateToIcalendarUtc(new Date()) },
                 }),
             );
             taskTitle = "";
             setNotice(
                 flushed
-                    ? "Task encrypted and synced."
-                    : "Task saved to the encrypted offline outbox.",
+                    ? localized("Task encrypted and synced.", "Задача зашифрована и синхронизирована.")
+                    : localized("Task saved to the encrypted offline outbox.", "Задача сохранена в зашифрованной офлайн-очереди."),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Task creation failed: ${message}`);
+            setNotice(`${localized("Task creation failed", "Не удалось создать задачу")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -566,10 +804,12 @@
                     [item.headOperationId],
                 ),
             );
-            setNotice(completed ? "Task completed." : "Task reopened.");
+            setNotice(completed
+                ? localized("Task completed.", "Задача выполнена.")
+                : localized("Task reopened.", "Задача снова открыта."));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Task update failed: ${message}`);
+            setNotice(`${localized("Task update failed", "Не удалось обновить задачу")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -586,10 +826,13 @@
                 dependencies: [item.headOperationId],
                 projection_resource_id: null,
             });
-            setNotice("Item moved to encrypted tombstone history.");
+            setNotice(localized(
+                "Item moved to encrypted tombstone history.",
+                "Элемент перемещён в зашифрованную историю удалений.",
+            ));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Delete failed: ${message}`);
+            setNotice(`${localized("Delete failed", "Не удалось удалить")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -598,21 +841,38 @@
     const createCalendarEvent = async () => {
         const title = eventTitle.trim();
         if (!title || !eventStart) {
-            setNotice("Event title and start time are required.");
+            setNotice(localized(
+                "Event title and start time are required.",
+                "Введите название и время начала события.",
+            ));
             return;
         }
         if (eventEnd && eventEnd < eventStart) {
-            setNotice("Event end must not be earlier than its start.");
+            setNotice(localized(
+                "Event end must not be earlier than its start.",
+                "Время окончания события не может быть раньше начала.",
+            ));
             return;
         }
         setLoading("event-create");
         try {
+            const startsAt = localDateTimeToIcalendarUtc(eventStart);
+            const endsAt = eventEnd
+                ? localDateTimeToIcalendarUtc(eventEnd)
+                : undefined;
+            if (endsAt && endsAt < startsAt) {
+                throw new Error(localized(
+                    "Event end must not be earlier than its start.",
+                    "Время окончания события не может быть раньше начала.",
+                ));
+            }
             const fields: Record<string, PimValue> = {
                 title: { type: "text", value: title },
-                starts_at: { type: "text", value: eventStart },
+                dtstamp: { type: "text", value: dateToIcalendarUtc(new Date()) },
+                starts_at: { type: "text", value: startsAt },
             };
-            if (eventEnd) {
-                fields.ends_at = { type: "text", value: eventEnd };
+            if (endsAt) {
+                fields.ends_at = { type: "text", value: endsAt };
             }
             const flushed = await commitPimOperation(
                 makeUpsert("calendar_event", crypto.randomUUID(), fields),
@@ -622,12 +882,12 @@
             eventEnd = "";
             setNotice(
                 flushed
-                    ? "Event encrypted and synced."
-                    : "Event saved to the encrypted offline outbox.",
+                    ? localized("Event encrypted and synced.", "Событие зашифровано и синхронизировано.")
+                    : localized("Event saved to the encrypted offline outbox.", "Событие сохранено в зашифрованной офлайн-очереди."),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Event creation failed: ${message}`);
+            setNotice(`${localized("Event creation failed", "Не удалось создать событие")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -638,7 +898,10 @@
         const email = contactEmail.trim();
         const phone = contactPhone.trim();
         if (!name || (!email && !phone)) {
-            setNotice("Contact name and an email or phone number are required.");
+            setNotice(localized(
+                "Contact name and an email or phone number are required.",
+                "Введите имя контакта и email или номер телефона.",
+            ));
             return;
         }
         setLoading("contact-create");
@@ -660,12 +923,12 @@
             contactPhone = "";
             setNotice(
                 flushed
-                    ? "Contact encrypted and synced."
-                    : "Contact saved to the encrypted offline outbox.",
+                    ? localized("Contact encrypted and synced.", "Контакт зашифрован и синхронизирован.")
+                    : localized("Contact saved to the encrypted offline outbox.", "Контакт сохранён в зашифрованной офлайн-очереди."),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Contact creation failed: ${message}`);
+            setNotice(`${localized("Contact creation failed", "Не удалось создать контакт")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -698,13 +961,26 @@
                 collections: state.collections.filter(
                     (item) => item.id !== collectionId,
                 ),
-                notice: "Collection moved to trash for 30 days.",
+                notice: localized(
+                    "Collection moved to trash for 30 days.",
+                    "Пространство перемещено в корзину на 30 дней.",
+                ),
             }));
             if (removed) {
                 trashedCollections = [removed, ...trashedCollections];
             }
             pimItems = pimItems.filter((item) => item.spaceId !== collectionId);
-            await storeMaterializedPimState(pimItems, operationStates);
+            operationStates = operationStates.filter(
+                (state) => state.spaceId !== collectionId,
+            );
+            const remainingCursors = { ...syncCursors };
+            delete remainingCursors[collectionId];
+            syncCursors = remainingCursors;
+            await storeMaterializedPimState(
+                pimItems,
+                operationStates,
+                syncCursors,
+            );
             if (selectedCollectionId === collectionId) {
                 selectedCollectionId = "";
             }
@@ -712,7 +988,7 @@
             deleteModalOpen = false;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Collection deletion failed: ${message}`);
+            setNotice(`${localized("Collection deletion failed", "Не удалось удалить пространство")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -731,24 +1007,37 @@
             trashedCollections = trashedCollections.filter(
                 (item) => item.id !== collectionId,
             );
-            setNotice("Collection restored. Syncing its encrypted history...");
+            setNotice(localized(
+                "Collection restored. Syncing its encrypted history...",
+                "Пространство восстановлено. Синхронизируем зашифрованную историю…",
+            ));
             await syncNow();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Collection restore failed: ${message}`);
+            setNotice(`${localized("Collection restore failed", "Не удалось восстановить пространство")}: ${message}`);
         } finally {
             clearLoading();
         }
     };
 
     /** Pulls accessible security spaces and unlocks packages for this device. */
-    const syncNow = async () => {
+    const syncNowUnlocked = async (): Promise<boolean> => {
         setLoading("sync-now");
-        const previousPimItems = pimItems;
-        const previousOperationStates = operationStates;
         try {
             const response = await withAccessRetry((accessToken) =>
                 cloudApi.listSpaces($appState.cloudBaseUrl, accessToken),
+            );
+            const recoveryResponse = await withAccessRetry((accessToken) =>
+                cloudApi.listRecoveryKeyPackages(
+                    $appState.cloudBaseUrl,
+                    accessToken,
+                ),
+            );
+            const recoveryPackages = new Map(
+                recoveryResponse.packages.map((item) => [
+                    `${item.space_id}:${item.key_epoch}`,
+                    item.encrypted_key_package,
+                ]),
             );
             const trashResponse = await withAccessRetry((accessToken) =>
                 cloudApi.listTrashedSpaces(
@@ -758,11 +1047,53 @@
             );
             const device = getActiveWebDevice();
             const collections: CollectionEntry[] = [];
+            const nextSpaceMembers: Record<string, SpaceMemberSummary[]> = {};
             let syncedOperationCount = 0;
-            pimItems = [];
-            operationStates = [];
+            const accessibleSpaceIds = new Set(
+                response.spaces.map((space) => space.space_id),
+            );
+            pimItems = pimItems.filter((item) =>
+                accessibleSpaceIds.has(item.spaceId),
+            );
+            operationStates = operationStates.filter((state) =>
+                accessibleSpaceIds.has(state.spaceId),
+            );
+            syncCursors = Object.fromEntries(
+                Object.entries(syncCursors).filter(([spaceId]) =>
+                    accessibleSpaceIds.has(spaceId),
+                ),
+            );
             for (const space of response.spaces) {
+                if (space.role === "owner") {
+                    const memberDirectory = await withAccessRetry((accessToken) =>
+                        cloudApi.listSpaceMembers(
+                            $appState.cloudBaseUrl,
+                            space.space_id,
+                            accessToken,
+                        ),
+                    );
+                    nextSpaceMembers[space.space_id] = memberDirectory.members;
+                }
                 let key = await loadSpaceKey(space.space_id, space.key_epoch);
+                if (!key) {
+                    const recoveryPackage = recoveryPackages.get(
+                        `${space.space_id}:${space.key_epoch}`,
+                    );
+                    if (recoveryPackage) {
+                        key = await withActiveMasterKey((masterKey) =>
+                            unwrapSpaceKeyFromAccountRecovery(
+                                masterKey,
+                                decode(recoveryPackage),
+                            ),
+                        );
+                        if (key.length !== 32) {
+                            throw new Error(
+                                `Invalid recovery key package for space ${space.space_id}`,
+                            );
+                        }
+                        await storeSpaceKey(space.space_id, space.key_epoch, key);
+                    }
+                }
                 if (!key) {
                     const packageForDevice = space.device_key_packages.find(
                         (item) =>
@@ -804,7 +1135,8 @@
                 }
                 if (key) {
                     const recoveryPackage = await withActiveMasterKey(
-                        (masterKey) => encryptVaultBytes(masterKey, key),
+                        async (masterKey) =>
+                            encode(await wrapSpaceKeyForAccountRecovery(masterKey, key)),
                     );
                     await withAccessRetry((accessToken) =>
                         cloudApi.putRecoveryKeyPackage(
@@ -849,8 +1181,22 @@
                             item.signing_public_key,
                         ]),
                     );
-                    let cursor = 0;
                     let spaceOperationCount = 0;
+                    await retryUnresolvedPimOperations(
+                        space.space_id,
+                        signingKeys,
+                    );
+                    let cursor = Math.max(
+                        syncCursors[space.space_id] ?? 0,
+                        space.history_start_seq,
+                        space.current_state_start_seq,
+                    );
+                    if ((syncCursors[space.space_id] ?? 0) < cursor) {
+                        syncCursors = {
+                            ...syncCursors,
+                            [space.space_id]: cursor,
+                        };
+                    }
                     while (true) {
                         const page = await withAccessRetry((accessToken) =>
                             cloudApi.listOperations(
@@ -878,24 +1224,85 @@
                                 stored.envelope.key_epoch,
                             );
                             if (!operationKey) {
+                                throw new Error(
+                                    `Missing key epoch ${stored.envelope.key_epoch} for operation ${stored.envelope.client_op_id}`,
+                                );
+                            }
+                            let plaintext: Uint8Array;
+                            try {
+                                plaintext = await openOperationEnvelope(
+                                    stored.envelope,
+                                    operationKey,
+                                );
+                            } catch {
+                                await quarantineOperationEnvelope(
+                                    stored.envelope,
+                                    stored.space_seq,
+                                    "invalid_ciphertext",
+                                );
                                 continue;
                             }
-                            const plaintext = await openOperationEnvelope(
-                                stored.envelope,
-                                operationKey,
-                            );
                             if (stored.envelope.envelope_kind === "operation") {
-                                applyPimOperation(
-                                    space.space_id,
-                                    stored.envelope.client_op_id,
-                                    decodePimOperation(plaintext),
-                                );
+                                let operation: PimOperationV1;
+                                try {
+                                    operation = decodePimOperation(plaintext);
+                                    if (
+                                        operation.resource_id !==
+                                        stored.envelope.stream_id
+                                    ) {
+                                        throw new Error("stream mismatch");
+                                    }
+                                } catch {
+                                    await quarantineOperationEnvelope(
+                                        stored.envelope,
+                                        stored.space_seq,
+                                        "invalid_operation",
+                                    );
+                                    continue;
+                                }
+                                try {
+                                    await applyPimOperation(
+                                        space.space_id,
+                                        stored.envelope.stream_id,
+                                        stored.envelope.client_op_id,
+                                        operation,
+                                        stored.space_seq,
+                                    );
+                                } catch {
+                                    await quarantineOperationEnvelope(
+                                        stored.envelope,
+                                        stored.space_seq,
+                                        "unresolved_pim_graph",
+                                    );
+                                    continue;
+                                }
                             } else if (
                                 stored.envelope.envelope_kind === "snapshot"
                             ) {
-                                applyPimSnapshot(
+                                let snapshot: PimSnapshotV2;
+                                try {
+                                    snapshot = decodePimSnapshot(plaintext);
+                                    if (
+                                        snapshot.resource_id !==
+                                            stored.envelope.stream_id ||
+                                        snapshot.covers_through_space_seq >
+                                            stored.space_seq
+                                    ) {
+                                        throw new Error("snapshot context mismatch");
+                                    }
+                                } catch {
+                                    await quarantineOperationEnvelope(
+                                        stored.envelope,
+                                        stored.space_seq,
+                                        "invalid_snapshot",
+                                    );
+                                    continue;
+                                }
+                                await applyPimSnapshot(
                                     space.space_id,
-                                    decodePimSnapshot(plaintext),
+                                    stored.envelope.stream_id,
+                                    snapshot,
+                                    stored.space_seq,
                                 );
                             } else {
                                 throw new Error(
@@ -903,18 +1310,29 @@
                                 );
                             }
                         }
+                        await retryUnresolvedPimOperations(
+                            space.space_id,
+                            signingKeys,
+                        );
                         spaceOperationCount += page.operations.length;
-                        if (
-                            page.operations.length === 0 ||
-                            page.next_cursor <= cursor
-                        ) {
+                        if (page.next_cursor <= cursor) {
                             break;
                         }
                         cursor = page.next_cursor;
+                        syncCursors = {
+                            ...syncCursors,
+                            [space.space_id]: cursor,
+                        };
+                        await storeMaterializedPimState(
+                            pimItems,
+                            operationStates,
+                            syncCursors,
+                        );
+                        if (page.operations.length === 0) {
+                            break;
+                        }
                     }
                     syncedOperationCount += spaceOperationCount;
-                    collections[collections.length - 1].syncedItems =
-                        spaceOperationCount;
                 }
             }
 
@@ -924,20 +1342,26 @@
                 if (!key) continue;
                 const plaintext = await openOperationEnvelope(envelope, key);
                 if (envelope.envelope_kind === "operation") {
-                    applyPimOperation(
+                    await applyPimOperation(
                         envelope.space_id,
+                        envelope.stream_id,
                         envelope.client_op_id,
                         decodePimOperation(plaintext),
                     );
                 } else if (envelope.envelope_kind === "snapshot") {
-                    applyPimSnapshot(
+                    await applyPimSnapshot(
                         envelope.space_id,
+                        envelope.stream_id,
                         decodePimSnapshot(plaintext),
                     );
                 }
             }
             const flushed = await flushOutbox();
-            await storeMaterializedPimState(pimItems, operationStates);
+            await storeMaterializedPimState(
+                pimItems,
+                operationStates,
+                syncCursors,
+            );
 
             const trash: CollectionEntry[] = [];
             for (const space of trashResponse.spaces) {
@@ -963,19 +1387,302 @@
                 });
             }
             trashedCollections = trash;
+            spaceMembers = nextSpaceMembers;
+            for (const collection of collections) {
+                collection.syncedItems = operationStates.filter(
+                    (operation) => operation.spaceId === collection.id,
+                ).length;
+            }
 
             appState.update((state) => ({
                 ...state,
                 collections,
-                syncedItemsTotal: syncedOperationCount,
-                notice: `Sync completed: ${syncedOperationCount} operations, ${flushed} outbox items uploaded.`,
+                syncedItemsTotal: operationStates.length,
+                lastSyncedSeq: Math.max(0, ...Object.values(syncCursors)),
+                notice: localized(
+                    `Sync completed: ${syncedOperationCount} operations, ${flushed} outbox items uploaded.`,
+                    `Синхронизация завершена: операций — ${syncedOperationCount}, отправлено из очереди — ${flushed}.`,
+                ),
             }));
+            return true;
         } catch (error) {
-            pimItems = previousPimItems;
-            operationStates = previousOperationStates;
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Sync failed: ${message}`);
+            setNotice(`${localized("Sync failed", "Ошибка синхронизации")}: ${message}`);
+            return false;
+        } finally {
+            clearLoading();
+        }
+    };
+
+    const syncNow = (): Promise<boolean> =>
+        runDataPlaneExclusive(syncNowUnlocked);
+
+    const accountRecoveryPublicKey = (
+        member: SpaceMemberSummary,
+    ): Uint8Array => {
+        const bundle = decode(member.public_key_bundle) as {
+            version?: number;
+            account_recovery_public_key?: unknown;
+        };
+        if (bundle.version !== 2) {
+            throw new Error(
+                `Member ${member.username} has an invalid recovery public key.`,
+            );
+        }
+        try {
+            return normalizeByteArray(
+                bundle.account_recovery_public_key,
+                32,
+                `Member ${member.username} recovery public key`,
+            );
+        } catch {
+            throw new Error(
+                `Member ${member.username} has an invalid recovery public key.`,
+            );
+        }
+    };
+
+    const buildRotationSnapshots = async (
+        spaceId: string,
+        newKeyEpoch: number,
+        newSpaceKey: Uint8Array,
+        baseSpaceSeq: number,
+    ) => {
+        const latestBranches = new Map<string, MaterializedOperationState>();
+        for (const state of operationStates.filter(
+            (candidate) => candidate.spaceId === spaceId,
+        )) {
+            if (state.spaceSeq === 0) {
+                throw new Error(
+                    "Every local operation must be uploaded before access can be revoked.",
+                );
+            }
+            const branchKey = `${state.logicalResourceId}:${state.projectionId}`;
+            const previous = latestBranches.get(branchKey);
+            if (
+                !previous ||
+                state.spaceSeq > previous.spaceSeq ||
+                (state.spaceSeq === previous.spaceSeq &&
+                    state.clientOpId > previous.clientOpId)
+            ) {
+                latestBranches.set(branchKey, state);
+            }
+        }
+        const streams = new Map<string, MaterializedOperationState[]>();
+        for (const state of latestBranches.values()) {
+            const branches = streams.get(state.logicalResourceId) ?? [];
+            branches.push(state);
+            streams.set(state.logicalResourceId, branches);
+        }
+        const device = getActiveWebDevice();
+        return Promise.all(
+            [...streams.entries()]
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(async ([streamId, states]) => {
+                    states.sort((left, right) =>
+                        left.projectionId.localeCompare(right.projectionId),
+                    );
+                    const resourceKind = states[0].kind;
+                    if (states.some((state) => state.kind !== resourceKind)) {
+                        throw new Error("A PIM stream contains mixed resource kinds.");
+                    }
+                    const branches: PimSnapshotBranchV2[] = states.map((state) => ({
+                        projection_resource_id: state.projectionId,
+                        head_operation_id: state.clientOpId,
+                        deleted: state.deleted,
+                        materialized_projection: state.deleted
+                            ? new Uint8Array()
+                            : textEncoder.encode(state.materializedProjection),
+                    }));
+                    const snapshot: PimSnapshotV2 = {
+                        schema_version: 2,
+                        covers_through_space_seq: baseSpaceSeq,
+                        resource_kind: resourceKind,
+                        resource_id: streamId,
+                        branches,
+                    };
+                    return sealOperationEnvelope({
+                        spaceId,
+                        streamId,
+                        clientOpId: crypto.randomUUID(),
+                        authorDeviceId: device.deviceId,
+                        keyEpoch: newKeyEpoch,
+                        envelopeKind: "snapshot",
+                        plaintext: encodePimSnapshot(snapshot),
+                        spaceKey: newSpaceKey,
+                        signingPrivateKey: device.identity.signing_private_key,
+                    });
+                }),
+        );
+    };
+
+    const rotateSpaceKeyForMembershipChange = async (
+        collection: CollectionEntry,
+        target?: SpaceMemberSummary,
+    ): Promise<{ keyEpoch: number; rotationId: string; spaceKey: Uint8Array }> =>
+    runDataPlaneExclusive(async () => {
+        if (!(await syncNowUnlocked())) {
+            throw new Error("A complete sync is required before key rotation.");
+        }
+        const refreshedCollection = $appState.collections.find(
+            (item) => item.id === collection.id,
+        );
+        if (!refreshedCollection || refreshedCollection.role !== "owner") {
+            throw new Error("Only the current space owner can rotate membership keys.");
+        }
+        const queued = (await listQueuedOperationEnvelopes()).filter(
+            (envelope) => envelope.space_id === collection.id,
+        );
+        if (queued.length > 0) {
+            throw new Error("The encrypted outbox must be empty before key rotation.");
+        }
+        const baseSpaceSeq = syncCursors[collection.id] ?? 0;
+        const [membersResponse, devicesResponse] = await Promise.all([
+            withAccessRetry((accessToken) =>
+                cloudApi.listSpaceMembers(
+                    $appState.cloudBaseUrl,
+                    collection.id,
+                    accessToken,
+                ),
+            ),
+            withAccessRetry((accessToken) =>
+                cloudApi.listSpaceDevices(
+                    $appState.cloudBaseUrl,
+                    collection.id,
+                    accessToken,
+                ),
+            ),
+        ]);
+        if (
+            target &&
+            !membersResponse.members.some(
+                (member) =>
+                    member.user_id === target.user_id && member.role !== "owner",
+            )
+        ) {
+            throw new Error("The member is no longer active in this space.");
+        }
+        const newKeyEpoch = refreshedCollection.keyEpoch + 1;
+        const newSpaceKey = crypto.getRandomValues(new Uint8Array(32));
+        const remainingMembers = membersResponse.members.filter(
+            (member) => !target || member.user_id !== target.user_id,
+        );
+        const remainingDevices = devicesResponse.devices.filter(
+            (device) =>
+                device.active && (!target || device.user_id !== target.user_id),
+        );
+        const remainingDevicePackages = await Promise.all(
+            remainingDevices.map(async (device) => ({
+                device_id: device.device_id,
+                key_epoch: newKeyEpoch,
+                encrypted_key_package: encode(
+                    await wrapSpaceKeyForDevice(
+                        newSpaceKey,
+                        device.hpke_public_key,
+                    ),
+                ),
+            })),
+        );
+        const remainingRecoveryPackages = await Promise.all(
+            remainingMembers.map(async (member) => ({
+                user_id: member.user_id,
+                key_epoch: newKeyEpoch,
+                encrypted_key_package: encode(
+                    await wrapSpaceKeyForDevice(
+                        newSpaceKey,
+                        accountRecoveryPublicKey(member),
+                    ),
+                ),
+            })),
+        );
+        const snapshots = await buildRotationSnapshots(
+            collection.id,
+            newKeyEpoch,
+            newSpaceKey,
+            baseSpaceSeq,
+        );
+        const snapshotStreams = new Set(
+            snapshots.map((snapshot) => snapshot.stream_id),
+        );
+        const quarantinedStreams = [
+            ...new Set(
+                (await listQuarantinedOperationRecords(collection.id))
+                    .filter((record) => record.space_seq <= baseSpaceSeq)
+                    .map((record) => record.envelope.stream_id)
+                    .filter((streamId) => !snapshotStreams.has(streamId)),
+            ),
+        ].sort();
+        const rotationId = crypto.randomUUID();
+        const payload = {
+            rotation_id: rotationId,
+            expected_key_epoch: refreshedCollection.keyEpoch,
+            new_key_epoch: newKeyEpoch,
+            base_space_seq: baseSpaceSeq,
+            new_encrypted_metadata: await encryptVaultBytes(
+                newSpaceKey,
+                encode({ name: refreshedCollection.name }),
+            ),
+            remaining_device_packages: remainingDevicePackages,
+            remaining_recovery_packages: remainingRecoveryPackages,
+            snapshots,
+            quarantined_streams: quarantinedStreams,
+        };
+        if (target) {
+            await withAccessRetry((accessToken) =>
+                cloudApi.revokeSpaceMember(
+                    $appState.cloudBaseUrl,
+                    collection.id,
+                    target.user_id,
+                    payload,
+                    accessToken,
+                ),
+            );
+        } else {
+            await withAccessRetry((accessToken) =>
+                cloudApi.rotateSpaceKey(
+                    $appState.cloudBaseUrl,
+                    collection.id,
+                    payload,
+                    accessToken,
+                ),
+            );
+        }
+        await storeSpaceKey(collection.id, newKeyEpoch, newSpaceKey);
+        if (!(await syncNowUnlocked())) {
+            throw new Error(
+                "The key rotated successfully, but refreshing local state failed. Sync again to recover it.",
+            );
+        }
+        return { keyEpoch: newKeyEpoch, rotationId, spaceKey: newSpaceKey };
+    });
+
+    const revokeSpaceMember = async (
+        collection: CollectionEntry,
+        target: SpaceMemberSummary,
+    ) => {
+        if (
+            !window.confirm(
+                localized(
+                    `Remove ${target.username} from ${collection.name}? Their future access will be revoked and the space key will rotate.`,
+                    `Удалить ${target.username} из «${collection.name}»? Доступ к будущим изменениям будет отозван, а ключ пространства — сменён.`,
+                ),
+            )
+        ) {
+            return;
+        }
+        setLoading(`member-revoke-${collection.id}-${target.user_id}`);
+        try {
+            await rotateSpaceKeyForMembershipChange(collection, target);
+            setNotice(
+                localized(
+                    `${target.username} was removed and the space key was rotated.`,
+                    `${target.username} удалён, ключ пространства сменён.`,
+                ),
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice(`${localized("Member removal failed", "Не удалось удалить участника")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -988,7 +1695,10 @@
         const collectionId =
             selectedCollectionId || $appState.collections[0]?.id;
         if (!collectionId) {
-            setNotice("Create at least one collection first.");
+            setNotice(localized(
+                "Create at least one collection first.",
+                "Сначала создайте хотя бы одно пространство.",
+            ));
             return;
         }
 
@@ -996,7 +1706,14 @@
             (item) => item.id === collectionId,
         );
         if (!collection) {
-            setNotice("Selected collection not found.");
+            setNotice(localized("Selected collection not found.", "Выбранное пространство не найдено."));
+            return;
+        }
+        if (collection.role !== "owner") {
+            setNotice(localized(
+                "Only the space owner can create membership invites.",
+                "Только владелец пространства может создавать приглашения.",
+            ));
             return;
         }
 
@@ -1004,11 +1721,12 @@
         try {
             inviteRedeemedNote = "";
             const inviteCode = generateInviteCode();
-            const collectionKey = await loadSpaceKey(collection.id, collection.keyEpoch);
-            if (!collectionKey) {
-                throw new Error("This device has no key package for the selected space.");
-            }
-            const encryptedGroupKey = await wrapCollectionKeyWithInviteCode(collectionKey, inviteCode);
+            const rotated = await rotateSpaceKeyForMembershipChange(collection);
+            setLoading("invite-generate");
+            const encryptedGroupKey = await wrapCollectionKeyWithInviteCode(
+                rotated.spaceKey,
+                inviteCode,
+            );
             const encryptedNote = inviteNotePlaintext.trim()
                 ? await wrapBytesWithInviteCode(
                       textEncoder.encode(inviteNotePlaintext.trim()),
@@ -1022,6 +1740,7 @@
                     $appState.cloudBaseUrl,
                     {
                         space_id: collection.id,
+                        rotation_id: rotated.rotationId,
                         role: inviteRole,
                         invite_code_hash: inviteCodeHash,
                         encrypted_key_package: encryptedGroupKey,
@@ -1034,11 +1753,11 @@
 
             inviteCodeIssued = inviteCode;
             inviteNotePlaintext = "";
-            setNotice("Invite code generated.");
+            setNotice(localized("Invite code generated.", "Код приглашения создан."));
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Invite generation failed: ${message}`);
+            setNotice(`${localized("Invite generation failed", "Не удалось создать приглашение")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -1050,7 +1769,7 @@
     const redeemInviteCode = async () => {
         const code = inviteCodeToRedeem.trim();
         if (!code) {
-            setNotice("Invite code is required.");
+            setNotice(localized("Invite code is required.", "Введите код приглашения."));
             return;
         }
 
@@ -1090,7 +1809,13 @@
                 ),
             );
             const recoveryPackage = await withActiveMasterKey(
-                (masterKey) => encryptVaultBytes(masterKey, collectionKey),
+                async (masterKey) =>
+                    encode(
+                        await wrapSpaceKeyForAccountRecovery(
+                            masterKey,
+                            collectionKey,
+                        ),
+                    ),
             );
             await withAccessRetry((accessToken) =>
                 cloudApi.putRecoveryKeyPackage(
@@ -1125,7 +1850,10 @@
                     return {
                         ...state,
                         collections: updated,
-                        notice: `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
+                        notice: localized(
+                            `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
+                            `Приглашение в пространство ${redeemed.space_id.slice(0, 8)} принято.`,
+                        ),
                     };
                 }
 
@@ -1142,7 +1870,10 @@
                             syncedItems: 0,
                         },
                     ],
-                    notice: `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
+                    notice: localized(
+                        `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
+                        `Приглашение в пространство ${redeemed.space_id.slice(0, 8)} принято.`,
+                    ),
                 };
             });
 
@@ -1151,7 +1882,7 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Invite redemption failed: ${message}`);
+            setNotice(`${localized("Invite redemption failed", "Не удалось принять приглашение")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -1172,10 +1903,11 @@
                 const materialized = await loadMaterializedPimState();
                 pimItems = materialized.items;
                 operationStates = materialized.operations;
+                syncCursors = materialized.cursors;
             } catch (error) {
                 const message =
                     error instanceof Error ? error.message : String(error);
-                setNotice(`Encrypted offline state could not be opened: ${message}`);
+                setNotice(`${localized("Encrypted offline state could not be opened", "Не удалось открыть зашифрованные офлайн-данные")}: ${message}`);
             }
         })();
     });
@@ -1212,7 +1944,7 @@
         <div class="mt-3 space-y-2 text-sm text-slate/80">
             <p>{t("Current user")}: {$appState.currentUsername || t("Not signed in")}</p>
             <p>{t("Collections")}: {$appState.collections.length}</p>
-            <p>{t("Synced events total")}: {$appState.syncedItemsTotal}</p>
+            <p>{t("Operation states on device")}: {$appState.syncedItemsTotal}</p>
             <p>{t("Last synced seq")}: {$appState.lastSyncedSeq}</p>
         </div>
         <div class="mt-3">
@@ -1238,6 +1970,7 @@
                 {#each $appState.collections as collection}
                     <div
                         class="rounded-xl border border-slate/15 bg-white/70 p-3"
+                        data-space-id={collection.id}
                     >
                         <p class="font-semibold text-slate">
                             {collection.name}
@@ -1512,6 +2245,33 @@
                 >
                     {inviteCodeIssued}
                 </p>
+            {/if}
+
+            {#if selectedCollectionId && (spaceMembers[selectedCollectionId] ?? []).some((member) => member.role !== "owner")}
+                <div class="border-t border-slate/15 pt-3">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
+                        {localized("Current access", "Текущий доступ")}
+                    </p>
+                    <div class="mt-2 space-y-2">
+                        {#each (spaceMembers[selectedCollectionId] ?? []).filter((member) => member.role !== "owner") as member}
+                            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sand/50 p-2">
+                                <span class="text-xs text-slate">
+                                    {member.username} · {t(member.role === "editor" ? "Editor" : "Reader")}
+                                </span>
+                                <Button
+                                    variant="danger"
+                                    on:click={() => {
+                                        const collection = $appState.collections.find((item) => item.id === selectedCollectionId);
+                                        if (collection) void revokeSpaceMember(collection, member);
+                                    }}
+                                    disabled={loadingAction === `member-revoke-${selectedCollectionId}-${member.user_id}`}
+                                >
+                                    {localized("Remove access", "Отозвать доступ")}
+                                </Button>
+                            </div>
+                        {/each}
+                    </div>
+                </div>
             {/if}
 
             <p

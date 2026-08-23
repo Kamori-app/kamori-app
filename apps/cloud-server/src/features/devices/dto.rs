@@ -25,6 +25,7 @@ impl DevicePlatform {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RegisterDeviceRequest {
+    pub enrollment_token: String,
     pub device_id: Uuid,
     #[serde(with = "serde_bytes")]
     pub signing_public_key: Vec<u8>,
@@ -62,4 +63,9 @@ pub struct ListDevicesResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RevokeDeviceResponse {
     pub revoked: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RevokeDeviceRequest {
+    pub reauth_token: String,
 }

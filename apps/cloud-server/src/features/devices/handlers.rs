@@ -13,7 +13,8 @@ use crate::{
 
 use super::{
     dto::{
-        ListDevicesResponse, RegisterDeviceRequest, RegisterDeviceResponse, RevokeDeviceResponse,
+        ListDevicesResponse, RegisterDeviceRequest, RegisterDeviceResponse, RevokeDeviceRequest,
+        RevokeDeviceResponse,
     },
     services,
 };
@@ -39,8 +40,9 @@ pub async fn revoke(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(device_id): Path<Uuid>,
+    MsgPack(request): MsgPack<RevokeDeviceRequest>,
 ) -> Result<MsgPack<RevokeDeviceResponse>, ApiError> {
     Ok(MsgPack(
-        services::revoke(&state, &headers, device_id).await?,
+        services::revoke(&state, &headers, device_id, request).await?,
     ))
 }

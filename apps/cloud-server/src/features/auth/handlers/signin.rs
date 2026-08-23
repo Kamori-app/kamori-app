@@ -3,7 +3,9 @@
 use axum::{extract::State, http::HeaderMap, response::Response};
 
 use crate::{
-    features::auth::dto::{SigninFinishRequest, SigninStartRequest, SigninStartResponse},
+    features::auth::dto::{
+        SigninFinishRequest, SigninStartRequest, SigninStartResponse, SigninTotpRequest,
+    },
     features::auth::services as auth_services,
     features::common::{ApiError, MsgPack},
     platform::state::AppState,
@@ -22,4 +24,12 @@ pub async fn signin_finish(
     MsgPack(payload): MsgPack<SigninFinishRequest>,
 ) -> Result<Response, ApiError> {
     auth_services::signin_finish(&state, &headers, payload).await
+}
+
+pub async fn signin_totp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    MsgPack(payload): MsgPack<SigninTotpRequest>,
+) -> Result<Response, ApiError> {
+    auth_services::signin_totp(&state, &headers, payload).await
 }

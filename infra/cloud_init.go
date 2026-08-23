@@ -1,14 +1,17 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +29,7 @@ type commonHostMaterial struct {
 	hostPrivateKey  string
 	hostPublicKey   string
 	hostCertificate string
+	configPublicKey string
 }
 
 type appCloudInitMaterial struct {
@@ -107,7 +111,71 @@ func compressedBase64(value string) (string, error) {
 	return base64.StdEncoding.EncodeToString(compressed.Bytes()), nil
 }
 
+func renderHostConfiguration(role string, files []cloudInitFile) (string, error) {
+	var compressed bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressed)
+	tarWriter := tar.NewWriter(gzipWriter)
+	writeEntry := func(name string, mode int64, contents string) error {
+		header := &tar.Header{
+			Name: name,
+			Mode: mode,
+			Size: int64(len(contents)),
+		}
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return err
+		}
+		_, err := io.WriteString(tarWriter, contents)
+		return err
+	}
+	if err := writeEntry(".kamori-role", 0o600, role+"\n"); err != nil {
+		return "", err
+	}
+	for _, file := range files {
+		mode, err := strconv.ParseInt(file.permissions, 8, 64)
+		if err != nil {
+			return "", fmt.Errorf("parse mode for %s: %w", file.path, err)
+		}
+		name := "root/" + strings.TrimPrefix(filepath.Clean(file.path), "/")
+		if err := writeEntry(name, mode, file.content); err != nil {
+			return "", fmt.Errorf("archive host configuration file %s: %w", file.path, err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		return "", err
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(compressed.Bytes()), nil
+}
+
+func configAuthorizedKey(role, publicKey string) string {
+	options := fmt.Sprintf(`command="/usr/local/sbin/kamori-config-dispatch %s",restrict`, role)
+	if role == "ops" {
+		options += `,port-forwarding,permitopen="10.42.0.11:2022",permitopen="10.42.0.12:2022",permitopen="10.42.0.21:2022"`
+	}
+	return options + " " + strings.TrimSpace(publicKey) + "\n"
+}
+
+func releaseAuthorizedKey(role, publicKey string) string {
+	if strings.TrimSpace(publicKey) == "" {
+		return ""
+	}
+	if role == "ops" {
+		return `command="/bin/false",restrict,port-forwarding,permitopen="10.42.0.11:2022",permitopen="10.42.0.12:2022" ` + strings.TrimSpace(publicKey) + "\n"
+	}
+	return "restrict " + strings.TrimSpace(publicKey) + "\n"
+}
+
 func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFile, firstBootScript string) (string, error) {
+	applyHostConfig, err := deploymentAsset("host-config/kamori-apply-host-config")
+	if err != nil {
+		return "", err
+	}
+	configDispatch, err := deploymentAsset("host-config/kamori-config-dispatch")
+	if err != nil {
+		return "", err
+	}
 	commonFiles := []cloudInitFile{
 		{path: "/etc/kamori/node-role", owner: "root:root", permissions: "0644", content: role + "\n"},
 		// Cloud-init runs its cc_ssh module after write_files and may replace files
@@ -115,15 +183,16 @@ func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFi
 		// runcmd installs it after every config module has completed.
 		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key", owner: "root:root", permissions: "0600", content: common.hostPrivateKey},
 		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub", owner: "root:root", permissions: "0644", content: common.hostPublicKey},
-		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: common.hostCertificate},
+		{path: "/etc/kamori/config-authorized-key", owner: "root:root", permissions: "0600", content: configAuthorizedKey(role, common.configPublicKey)},
+		{path: "/usr/local/sbin/kamori-apply-host-config", owner: "root:root", permissions: "0755", content: applyHostConfig},
+		{path: "/usr/local/sbin/kamori-config-dispatch", owner: "root:root", permissions: "0755", content: configDispatch},
+		{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: fmt.Sprintf("deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s\n", role)},
 		{path: "/etc/ssh/sshd_config.d/60-kamori-hardening.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`Port %s
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 X11Forwarding no
 HostKey /etc/ssh/ssh_host_ed25519_key
-HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
-HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com
 `, sshPort)},
 		{path: "/etc/systemd/system/ssh.socket.d/60-kamori-listen.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`[Socket]
 ListenStream=
@@ -208,18 +277,24 @@ cat >/etc/apt/apt.conf.d/99kamori-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 Acquire::Retries "10";
 EOF
-install -d -o root -g root -m 0700 /var/lib/kamori/bootstrap
-install -o root -g root -m 0600 /var/lib/kamori/bootstrap/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
-install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub
-install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub /etc/ssh/ssh_host_ed25519_key-cert.pub
-rm -f /etc/ssh/ssh_host_rsa_key* /etc/ssh/ssh_host_ecdsa_key*
-install -d -o root -g root -m 0755 /run/sshd
+	install -d -o root -g root -m 0700 /var/lib/kamori/bootstrap
+	install -o root -g root -m 0600 /var/lib/kamori/bootstrap/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+	install -o root -g root -m 0644 /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub
+	rm -f /etc/ssh/ssh_host_rsa_key* /etc/ssh/ssh_host_ecdsa_key*
+	if ! id deploy >/dev/null 2>&1; then
+	  useradd --create-home --shell /bin/bash deploy
+	fi
+	passwd --lock deploy >/dev/null
+	install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
+	install -o deploy -g deploy -m 0600 /etc/kamori/config-authorized-key /home/deploy/.ssh/authorized_keys
+	visudo -cf /etc/sudoers.d/kamori-configure
+	install -d -o root -g root -m 0755 /run/sshd
 sshd -t
 systemctl stop ssh.service
 systemctl daemon-reload
 systemctl enable ssh.socket
 systemctl restart ssh.socket
-rm -f /var/lib/kamori/bootstrap/ssh_host_ed25519_key /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub /var/lib/kamori/bootstrap/ssh_host_ed25519_key-cert.pub
+	rm -f /var/lib/kamori/bootstrap/ssh_host_ed25519_key /var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub
 for attempt in $(seq 1 120); do
   if apt-get update && apt-get install -y --no-install-recommends %s; then
     break
@@ -248,7 +323,24 @@ systemctl reset-failed cloud-init-hotplugd.service || true
 `
 }
 
-func renderAppCloudInit(material appCloudInitMaterial) (string, error) {
+func commonHostConfigurationFiles(role string, material commonHostMaterial, releasePublicKey string) ([]cloudInitFile, error) {
+	files, err := deploymentFiles(map[string]string{
+		"/usr/local/sbin/kamori-apply-host-config": "host-config/kamori-apply-host-config",
+		"/usr/local/sbin/kamori-config-dispatch":   "host-config/kamori-config-dispatch",
+	})
+	if err != nil {
+		return nil, err
+	}
+	files = append(files,
+		cloudInitFile{path: "/etc/ssh/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: material.hostCertificate},
+		cloudInitFile{path: "/etc/ssh/sshd_config.d/61-kamori-host-certificate.conf", owner: "root:root", permissions: "0644", content: "HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub\n"},
+		cloudInitFile{path: "/home/deploy/.ssh/authorized_keys", owner: "deploy:deploy", permissions: "0600", content: configAuthorizedKey(role, material.configPublicKey) + releaseAuthorizedKey(role, releasePublicKey)},
+		cloudInitFile{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: fmt.Sprintf("deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s\n", role)},
+	)
+	return files, nil
+}
+
+func appConfigurationFiles(material appCloudInitMaterial) ([]cloudInitFile, error) {
 	files, err := deploymentFiles(map[string]string{
 		"/opt/kamori/release/compose.yaml":          "cloud-server/compose.yaml",
 		"/usr/local/lib/kamori/deploy-cloud-server": "cloud-server/deploy-cloud-server",
@@ -258,10 +350,9 @@ func renderAppCloudInit(material appCloudInitMaterial) (string, error) {
 		"/etc/systemd/system/kamori-cloud.service":  "cloud-server/kamori-cloud.service",
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	files = append(files,
-		cloudInitFile{path: "/etc/kamori/deploy.pub", owner: "root:root", permissions: "0444", content: material.deployPublicKey},
 		cloudInitFile{path: "/etc/kamori/cloud.env", owner: "root:root", permissions: "0400", content: material.cloudEnvironment},
 		cloudInitFile{path: "/etc/kamori/secrets/opaque-server-setup", owner: "root:root", permissions: "0400", content: material.opaqueServerSetup},
 		cloudInitFile{path: "/etc/kamori/secrets/refresh-rotation-key", owner: "root:root", permissions: "0400", content: material.refreshRotationKey},
@@ -273,31 +364,30 @@ deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-deploy-migrate *
 deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-registry-login *
 `},
 	)
-	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo docker.io docker-compose-v2", true) + disableCloudInitNetworkHotplug() + `
-if ! id deploy >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash deploy
-fi
-passwd --lock deploy >/dev/null
-install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
-{ printf 'restrict '; cat /etc/kamori/deploy.pub; } > /home/deploy/.ssh/authorized_keys
-chown deploy:deploy /home/deploy/.ssh/authorized_keys
-chmod 0600 /home/deploy/.ssh/authorized_keys
-visudo -cf /etc/sudoers.d/kamori-deploy
-chown 10001:10001 \
-  /etc/kamori/cloud.env \
-  /etc/kamori/secrets/opaque-server-setup \
-  /etc/kamori/secrets/refresh-rotation-key \
-  /etc/kamori/postgres-ca.crt \
-  /etc/kamori/postgres-client.crt \
-  /etc/kamori/postgres-client.key
-systemctl daemon-reload
-systemctl enable --now docker.service
-systemctl enable kamori-cloud.service
-`
-	return renderCloudInit("app", material.commonHostMaterial, files, firstBoot)
+	common, err := commonHostConfigurationFiles("app", material.commonHostMaterial, material.deployPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	return append(common, files...), nil
 }
 
-func renderOpsCloudInit(material opsCloudInitMaterial) (string, error) {
+func renderAppHostConfiguration(material appCloudInitMaterial) (string, error) {
+	files, err := appConfigurationFiles(material)
+	if err != nil {
+		return "", err
+	}
+	return renderHostConfiguration("app", files)
+}
+
+func renderAppCloudInit(material appCloudInitMaterial) (string, error) {
+	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo docker.io docker-compose-v2", true) + disableCloudInitNetworkHotplug() + `
+systemctl daemon-reload
+systemctl enable --now docker.service
+`
+	return renderCloudInit("app", material.commonHostMaterial, nil, firstBoot)
+}
+
+func opsConfigurationFiles(material opsCloudInitMaterial) ([]cloudInitFile, error) {
 	files, err := deploymentFiles(map[string]string{
 		"/opt/kamori/ops/compose.yaml":                        "ops/compose.yaml",
 		"/opt/kamori/ops/prometheus.yml":                      "ops/prometheus.yml",
@@ -309,11 +399,10 @@ func renderOpsCloudInit(material opsCloudInitMaterial) (string, error) {
 		"/etc/systemd/system/kamori-blob-replication.timer":   "backup/kamori-blob-replication.timer",
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	opsEnvironment := envLine("VALKEY_PASSWORD", material.valkeyPassword) + envLine("GRAFANA_ADMIN_PASSWORD", material.grafanaAdminPassword)
 	files = append(files,
-		cloudInitFile{path: "/etc/kamori/deploy.pub", owner: "root:root", permissions: "0444", content: material.deployPublicKey},
 		cloudInitFile{path: "/etc/kamori/ops.env", owner: "root:root", permissions: "0600", content: opsEnvironment},
 		cloudInitFile{path: "/etc/kamori/backup.env", owner: "root:root", permissions: "0600", content: material.backupEnvironment},
 		cloudInitFile{path: "/etc/kamori/secrets/metrics_token", owner: "root:root", permissions: "0400", content: material.metricsBearerToken},
@@ -348,32 +437,29 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 `},
 	)
-	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo iptables docker.io docker-compose-v2 postgresql-client rclone", false) + disableCloudInitNetworkHotplug() + `
-if ! id deploy >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash deploy
-fi
-passwd --lock deploy >/dev/null
-install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
-	{
-	  printf 'command="/bin/false",restrict,port-forwarding,permitopen="10.42.0.11:2022",permitopen="10.42.0.12:2022" '
-  cat /etc/kamori/deploy.pub
-} > /home/deploy/.ssh/authorized_keys
-chown deploy:deploy /home/deploy/.ssh/authorized_keys
-chmod 0600 /home/deploy/.ssh/authorized_keys
-systemctl enable --now docker.service
-systemctl daemon-reload
-systemctl enable --now kamori-nat-gateway.service
-cd /opt/kamori/ops
-docker compose --env-file /etc/kamori/ops.env config --quiet
-docker compose --env-file /etc/kamori/ops.env pull
-docker compose --env-file /etc/kamori/ops.env up -d --remove-orphans
-systemctl daemon-reload
-systemctl enable --now kamori-blob-replication.timer
-`
-	return renderCloudInit("ops", material.commonHostMaterial, files, firstBoot)
+	common, err := commonHostConfigurationFiles("ops", material.commonHostMaterial, material.deployPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	return append(common, files...), nil
 }
 
-func renderDatabaseCloudInit(material databaseCloudInitMaterial) (string, error) {
+func renderOpsHostConfiguration(material opsCloudInitMaterial) (string, error) {
+	files, err := opsConfigurationFiles(material)
+	if err != nil {
+		return "", err
+	}
+	return renderHostConfiguration("ops", files)
+}
+
+func renderOpsCloudInit(material opsCloudInitMaterial) (string, error) {
+	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo iptables docker.io docker-compose-v2 postgresql-client rclone", false) + disableCloudInitNetworkHotplug() + `
+systemctl enable --now docker.service
+`
+	return renderCloudInit("ops", material.commonHostMaterial, nil, firstBoot)
+}
+
+func databaseConfigurationFiles(material databaseCloudInitMaterial) ([]cloudInitFile, error) {
 	files, err := deploymentFiles(map[string]string{
 		"/usr/local/lib/kamori/postgres-lib":                     "postgres/postgres-lib",
 		"/usr/local/lib/kamori/bootstrap-primary":                "postgres/bootstrap-primary",
@@ -382,7 +468,7 @@ func renderDatabaseCloudInit(material databaseCloudInitMaterial) (string, error)
 		"/usr/local/lib/kamori/kamori-pgbackrest-backup.timer":   "postgres/kamori-pgbackrest-backup.timer",
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	files = append(files,
 		cloudInitFile{path: "/etc/kamori/postgres.env", owner: "root:root", permissions: "0600", content: material.postgresEnvironment},
@@ -390,6 +476,22 @@ func renderDatabaseCloudInit(material databaseCloudInitMaterial) (string, error)
 		cloudInitFile{path: "/etc/kamori/tls/postgres.crt", owner: "root:root", permissions: "0644", content: material.postgresServerCertificate},
 		cloudInitFile{path: "/etc/kamori/tls/postgres.key", owner: "root:root", permissions: "0600", content: material.postgresServerPrivateKey},
 	)
+	common, err := commonHostConfigurationFiles("db-primary", material.commonHostMaterial, "")
+	if err != nil {
+		return nil, err
+	}
+	return append(common, files...), nil
+}
+
+func renderDatabaseHostConfiguration(material databaseCloudInitMaterial) (string, error) {
+	files, err := databaseConfigurationFiles(material)
+	if err != nil {
+		return "", err
+	}
+	return renderHostConfiguration("db-primary", files)
+}
+
+func renderDatabaseCloudInit(material databaseCloudInitMaterial) (string, error) {
 	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter postgresql postgresql-client pgbackrest rsync", true) + fmt.Sprintf(`
 device=/dev/disk/by-id/scsi-0HC_Volume_%s
 for attempt in $(seq 1 120); do
@@ -405,9 +507,8 @@ if ! grep -Fq "$device /srv/kamori-postgres " /etc/fstab; then
   printf '%%s /srv/kamori-postgres ext4 defaults,nofail 0 2\n' "$device" >> /etc/fstab
 fi
 mountpoint -q /srv/kamori-postgres || mount /srv/kamori-postgres
-/usr/local/lib/kamori/bootstrap-primary
 `, material.volumeID)
-	return renderCloudInit("db-primary", material.commonHostMaterial, files, firstBoot)
+	return renderCloudInit("db-primary", material.commonHostMaterial, nil, firstBoot)
 }
 
 func renderPostgresEnvironment(appPassword, jobsPassword, backupKeyID, backupApplicationKey, cipherPass string) string {

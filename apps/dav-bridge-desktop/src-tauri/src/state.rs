@@ -2,11 +2,12 @@ use crate::models::{CollectionSummary, DashboardSnapshot, LocalServerStatus};
 use anyhow::{Result, anyhow};
 use crypto_core_lib::local_bridge_runner::{LocalBridgeRunner, LocalDeviceIdentity};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, RwLock as StdRwLock},
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+use zeroize::{Zeroize, Zeroizing};
 
 pub const FIXED_SQLITE_CACHE_PATH: &str = ".kamori/local-cache.sqlite3";
 
@@ -40,8 +41,21 @@ pub struct DesktopState {
     pub collections: Arc<RwLock<HashMap<String, CollectionRecord>>>,
     pub device_identity: Arc<RwLock<Option<LocalDeviceIdentity>>>,
     pub dav_credentials: Arc<RwLock<Option<(String, String)>>>,
+    pub pending_totp_login: Arc<Mutex<Option<PendingTotpLogin>>>,
+    pub pending_browser_login: Arc<Mutex<Option<PendingBrowserLogin>>>,
     close_behavior: Arc<StdRwLock<CloseBehavior>>,
-    tray_icon_enabled: Arc<StdRwLock<bool>>,
+}
+
+#[derive(Clone)]
+pub struct PendingTotpLogin {
+    pub username: String,
+    pub continuation_token: String,
+    pub export_key: Vec<u8>,
+}
+
+pub struct PendingBrowserLogin {
+    pub flow_id: uuid::Uuid,
+    pub hpke_private_key: Zeroizing<[u8; 32]>,
 }
 
 #[derive(Clone)]
@@ -50,6 +64,7 @@ pub struct CollectionRecord {
     pub name: String,
     pub cmk: [u8; 32],
     pub key_epoch: u32,
+    pub sync_start_seq: u64,
     pub synced_items: u64,
 }
 
@@ -69,8 +84,9 @@ impl DesktopState {
             collections: Arc::new(RwLock::new(HashMap::new())),
             device_identity: Arc::new(RwLock::new(None)),
             dav_credentials: Arc::new(RwLock::new(None)),
+            pending_totp_login: Arc::new(Mutex::new(None)),
+            pending_browser_login: Arc::new(Mutex::new(None)),
             close_behavior: Arc::new(StdRwLock::new(CloseBehavior::Quit)),
-            tray_icon_enabled: Arc::new(StdRwLock::new(false)),
         }
     }
 
@@ -91,7 +107,11 @@ impl DesktopState {
     }
 
     pub async fn set_access_token(&self, token: Option<String>) {
-        *self.access_token.write().await = token;
+        let mut stored = self.access_token.write().await;
+        if let Some(current) = stored.as_mut() {
+            current.zeroize();
+        }
+        *stored = token;
     }
 
     pub async fn refresh_token(&self) -> Option<String> {
@@ -99,7 +119,11 @@ impl DesktopState {
     }
 
     pub async fn set_refresh_token(&self, token: Option<String>) {
-        *self.refresh_token.write().await = token;
+        let mut stored = self.refresh_token.write().await;
+        if let Some(current) = stored.as_mut() {
+            current.zeroize();
+        }
+        *stored = token;
     }
 
     pub async fn username(&self) -> Option<String> {
@@ -115,16 +139,12 @@ impl DesktopState {
         *self.sqlite_cache_path.write().await = FIXED_SQLITE_CACHE_PATH.to_string();
     }
 
-    /// Updates close behavior and tray icon preferences atomically for window handling.
-    pub fn set_window_preferences(&self, close_behavior: CloseBehavior, tray_icon_enabled: bool) {
+    /// Updates close behavior used by the synchronous window event callback.
+    pub fn set_close_behavior(&self, close_behavior: CloseBehavior) {
         *self
             .close_behavior
             .write()
-            .expect("window close behavior lock poisoned") = close_behavior;
-        *self
-            .tray_icon_enabled
-            .write()
-            .expect("tray icon preference lock poisoned") = tray_icon_enabled;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = close_behavior;
     }
 
     /// Returns the active window close behavior used by the main window event handler.
@@ -132,7 +152,7 @@ impl DesktopState {
         *self
             .close_behavior
             .read()
-            .expect("window close behavior lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub async fn upsert_collection(&self, record: CollectionRecord) {
@@ -155,13 +175,15 @@ impl DesktopState {
             .collect()
     }
 
-    pub async fn increment_synced_items(&self, amount: u64) {
-        if amount == 0 {
-            return;
-        }
+    pub async fn record_sync_results(&self, applied_by_space: &BTreeMap<uuid::Uuid, u64>) {
         let mut collections = self.collections.write().await;
-        if let Some(first) = collections.values_mut().next() {
-            first.synced_items = first.synced_items.saturating_add(amount);
+        for (space_id, amount) in applied_by_space {
+            if *amount == 0 {
+                continue;
+            }
+            if let Some(collection) = collections.get_mut(&space_id.to_string()) {
+                collection.synced_items = collection.synced_items.saturating_add(*amount);
+            }
         }
     }
 
@@ -183,5 +205,51 @@ impl DesktopState {
             collections_total: collections.len(),
             synced_items_total,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_counts_are_recorded_for_the_matching_collection() {
+        let state = DesktopState::new("https://api.kamori.app", FIXED_SQLITE_CACHE_PATH);
+        let first_id = uuid::Uuid::new_v4();
+        let second_id = uuid::Uuid::new_v4();
+        for (id, name) in [(first_id, "First"), (second_id, "Second")] {
+            state
+                .upsert_collection(CollectionRecord {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    cmk: [0_u8; 32],
+                    key_epoch: 1,
+                    sync_start_seq: 0,
+                    synced_items: 0,
+                })
+                .await;
+        }
+
+        state
+            .record_sync_results(&BTreeMap::from([(second_id, 4)]))
+            .await;
+
+        let collections = state.list_collections().await;
+        assert_eq!(
+            collections
+                .iter()
+                .find(|collection| collection.id == first_id.to_string())
+                .expect("first collection")
+                .synced_items,
+            0
+        );
+        assert_eq!(
+            collections
+                .iter()
+                .find(|collection| collection.id == second_id.to_string())
+                .expect("second collection")
+                .synced_items,
+            4
+        );
     }
 }

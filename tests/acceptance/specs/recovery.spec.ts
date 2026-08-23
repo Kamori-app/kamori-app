@@ -25,7 +25,7 @@ test("@full recovery kit rotates credentials and restores encrypted data", async
   await dialog.getByPlaceholder("New password", { exact: true }).fill(newPassword);
   await dialog.getByPlaceholder("Confirm new password").fill(newPassword);
   await dialog.getByRole("button", { name: "Recover account" }).click();
-  await expect(page.getByText(/Account recovery completed:/)).toBeVisible();
+  await expect(page.getByText(/Account recovery completed\./)).toBeVisible();
 
   await signIn(page, { username: account.username, password: newPassword });
   await page.getByRole("button", { name: "Sync Now" }).click();

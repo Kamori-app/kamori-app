@@ -3,14 +3,16 @@ class LoginResult {
   const LoginResult({
     this.username,
     this.accessToken,
-    this.preauthToken,
+    this.totpContinuationToken,
+    this.deviceEnrollmentToken,
     required this.totpVerified,
     this.accountMasterKey,
   });
 
   final String? username;
   final String? accessToken;
-  final String? preauthToken;
+  final String? totpContinuationToken;
+  final String? deviceEnrollmentToken;
   final bool totpVerified;
   final List<int>? accountMasterKey;
 }
@@ -43,10 +45,19 @@ class ProvisionResult {
 
 /// Result of issuing a short-lived collection invite code.
 class IssuedInviteCode {
-  const IssuedInviteCode({required this.code, required this.ttlMinutes});
+  const IssuedInviteCode({
+    required this.code,
+    required this.ttlMinutes,
+    required this.keyEpoch,
+    required this.currentStateStartSeq,
+    required this.collectionKey,
+  });
 
   final String code;
   final int ttlMinutes;
+  final int keyEpoch;
+  final int currentStateStartSeq;
+  final List<int> collectionKey;
 }
 
 /// Result of redeeming an invite code.
@@ -55,12 +66,16 @@ class RedeemedInvite {
     required this.collectionId,
     required this.role,
     required this.keyEpoch,
+    this.historyStartSeq = 0,
+    this.currentStateStartSeq = 0,
     required this.collectionKey,
   });
 
   final String collectionId;
   final String role;
   final int keyEpoch;
+  final int historyStartSeq;
+  final int currentStateStartSeq;
   final List<int> collectionKey;
 }
 
@@ -71,6 +86,8 @@ class CollectionEntry {
     required this.name,
     required this.cmk,
     this.keyEpoch = 1,
+    this.historyStartSeq = 0,
+    this.currentStateStartSeq = 0,
     this.role = 'owner',
   });
 
@@ -78,6 +95,8 @@ class CollectionEntry {
   final String name;
   final List<int> cmk;
   final int keyEpoch;
+  final int historyStartSeq;
+  final int currentStateStartSeq;
   final String role;
 }
 
@@ -102,6 +121,8 @@ class PimItem {
   const PimItem({
     required this.spaceId,
     required this.resourceId,
+    required this.projectionId,
+    required this.headOperationId,
     required this.kind,
     required this.title,
     required this.completed,
@@ -114,6 +135,8 @@ class PimItem {
 
   final String spaceId;
   final String resourceId;
+  final String projectionId;
+  final String headOperationId;
   final PimItemKind kind;
   final String title;
   final bool completed;

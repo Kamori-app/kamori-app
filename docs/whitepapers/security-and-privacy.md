@@ -29,7 +29,17 @@ lets other clients reject operations that were not admitted from an authorized
 writer. Removing a device prevents future writes and future key delivery; it
 cannot erase plaintext that the device already saw.
 
-The web vault encrypts keys and offline content in IndexedDB. Desktop and
+After a successful sign-in, a short-lived enrollment grant is bound to one
+exact device request. It cannot be reused to substitute different device keys.
+The new device obtains current space keys only by decrypting account-recovery
+packages locally; the service never turns authentication into plaintext-key
+access.
+
+The web vault encrypts keys and offline content in IndexedDB; account lookup
+keys are pseudonymous hashes rather than usernames. Local browser unlock is
+off by default and requires explicit consent. Its non-exportable WebCrypto key
+protects copied storage, but does not make a hardware-binding claim: any code
+executing under that origin in the browser profile can request decryption. Desktop and
 mobile caches use SQLCipher, with the database key protected by the operating
 system. These controls reduce exposure from copied application files, but they
 cannot protect an unlocked device that is already controlled by malware or an
@@ -42,10 +52,10 @@ from the device and password manager used for daily access. Kamori support
 cannot reconstruct it and cannot decrypt your data without it.
 
 Recovery replaces the password record, disables TOTP, revokes existing
-sessions, passkeys, and devices, and creates a clean device identity. A current
-recovery-wrapped copy of each space key makes the data readable again. If the
-kit and every approved device are lost, encrypted data is intentionally
-unrecoverable.
+sessions, passkeys, and devices, and creates a clean device identity. The kit
+derives a separate recovery encryption identity; a current HPKE-wrapped copy of
+each space key makes the data readable again. If the kit and every approved
+device are lost, encrypted data is intentionally unrecoverable.
 
 TOTP backup codes are different: they help complete a normal sign-in but do not
 contain data keys and cannot replace the 24-word recovery kit.
@@ -53,9 +63,11 @@ contain data keys and cannot replace the 24-word recovery kit.
 ## Sharing
 
 Sharing uses a single-use code that expires after a user-selected period from
-15 minutes to 7 days. The code delivers a space key and reader/editor role. A
-reader can decrypt and copy content; “read only” means the server will not
-accept that member's writes, not that plaintext can be made impossible to copy.
+15 minutes to 7 days. The owner first rotates the space key and checkpoints
+current state, so the code delivers the new key, current state, and a
+reader/editor role—not earlier epoch history. A reader can decrypt and copy
+content; “read only” means the server will not accept that member's writes, not
+that plaintext can be made impossible to copy.
 
 Removing a member rotates the key for future operations. It does not make
 previously decrypted information disappear from that person's devices or

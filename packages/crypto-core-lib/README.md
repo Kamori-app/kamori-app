@@ -20,7 +20,11 @@ Token contract implemented in core runtime:
 - `access_token` is used for authenticated cloud operations.
 - `refresh_token` is opaque and used only for `POST /auth/refresh`.
 - Local bridge client retries once on `401`, rotates refresh token, then retries original request with new access token.
-- Mobile FRB exposes refresh-token runtime controls: import/export/clear for secure client-side persistence wiring.
+- The SQLCipher runtime commits a random token-scoped rotation request id before
+  network I/O and commits the replacement credentials before retrying the
+  protected request.
+- Mobile FRB exposes refresh-token and rotation-id runtime controls for atomic
+  platform secure-storage wiring, plus explicit clear behavior.
 - Local bridge runtime supports optional workspace scope via `LocalBridgeConfig::with_workspace_id(...)`.
   - When omitted, sync/push uses personal workspace behavior on server.
 
@@ -36,12 +40,17 @@ Main areas:
   - SHA-256 code hashing
   - collection-key wrap/unwrap with invite-derived key
 - `operation_envelope.rs` and `pim.rs`
-  - canonical signatures, authenticated encryption, and versioned PIM operations
+  - canonical signatures, authenticated encryption, single-parent PIM v1
+    operations, and multi-branch PIM snapshot v2 checkpoints
 - `local_bridge_runner/`
   - local SQLite cache and DAV handlers
-  - cloud sync via MessagePack transport
+  - durable causally ordered outbox, monotonic recovery cursors,
+    authenticated-operation quarantine, serialized materialization/sync, and
+    cloud sync via MessagePack transport
 - FRB API (`feature = "frb"`)
   - source API in `src/lib.rs` (`mod frb_api`)
+  - safe owner-only invite preparation with full sync, epoch rotation, current-
+    state snapshots, device/recovery key packages, and invite creation
   - generated glue in `src/frb_generated.rs`
 
 ## Cargo Features
@@ -83,8 +92,11 @@ The default test run includes `tests/dav_conformance.rs`, a black-box suite
 that starts the embedded listener on an operating-system-assigned loopback
 port and exercises it through HTTP. It covers dedicated Basic Auth, discovery,
 CalDAV/CardDAV resource lifecycle, conditional writes and deletes, query and
-multiget reports, and RFC 6578 sync tokens/tombstones. It does not replace the
-release compatibility matrix against real third-party DAV clients.
+multiget reports, RFC 6578 sync tokens/tombstones, request-size limits, and
+same-ETag concurrent-write exclusion. Existing resources require a matching
+strong `If-Match`; creation is guarded by `If-None-Match: *`. The suite does
+not replace the release compatibility matrix against real third-party DAV
+clients.
 
 Run only that suite:
 
@@ -98,8 +110,9 @@ Run FRB-enabled tests:
 cargo test -p crypto-core-lib --features frb
 ```
 
-Passkey enrollment/login uses platform credential-provider wiring in each client;
-the shared core owns protocol payload handling only.
+Passkey enrollment/login uses the trusted web origin; desktop delegates through
+external-browser device authorization. Native mobile passkey plumbing is
+post-MVP, so the FRB client currently exposes password plus optional TOTP.
 
 Lint:
 
@@ -145,7 +158,7 @@ WASM build path:
 
 ```bash
 CARGO_TARGET_DIR=/tmp/kamori-wasm-target \
-  cargo build -p crypto-core-lib --target wasm32-unknown-unknown --features wasm --no-default-features
+  cargo build -p crypto-core-lib --release --target wasm32-unknown-unknown --features wasm --no-default-features
 ```
 
 Generate web bindings:
@@ -154,8 +167,12 @@ Generate web bindings:
 wasm-bindgen \
   --target web \
   --out-dir apps/web-frontend/src/lib/wasm/crypto-core-lib \
-  /tmp/kamori-wasm-target/wasm32-unknown-unknown/debug/crypto_core_lib.wasm
+  /tmp/kamori-wasm-target/wasm32-unknown-unknown/release/crypto_core_lib.wasm
 ```
+
+Use the `wasm-bindgen-cli` version resolved for `wasm-bindgen` in
+`Cargo.lock`. The schema versions must match exactly. Generated web artifacts
+must come from the release profile to avoid shipping debug-size WASM.
 
 ## Production / Deployment Notes
 

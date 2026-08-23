@@ -13,8 +13,8 @@ use webauthn_rs::prelude::{
 
 use crate::{
     features::auth::dto::{
-        PasskeyAddFinishRequest, PasskeyAddFinishResponse, PasskeyAddStartResponse,
-        PasskeyDeleteRequest, PasskeyDeleteResponse, PasskeyListResponse,
+        PasskeyAddFinishRequest, PasskeyAddFinishResponse, PasskeyAddStartRequest,
+        PasskeyAddStartResponse, PasskeyDeleteRequest, PasskeyDeleteResponse, PasskeyListResponse,
         PasskeyLoginFinishRequest, PasskeyLoginFinishResponse, PasskeyLoginStartResponse,
         PasskeyUpdateRequest, PasskeyUpdateResponse,
     },
@@ -40,8 +40,17 @@ use crate::{
 pub(crate) async fn passkey_add_start(
     state: &AppState,
     headers: &HeaderMap,
+    payload: PasskeyAddStartRequest,
 ) -> Result<PasskeyAddStartResponse, ApiError> {
     let principal = authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        crate::features::auth::dto::ReauthAction::SecuritySettings,
+    )
+    .await?;
     let user_id = principal.user_id;
     let username = principal.username;
 
@@ -67,13 +76,13 @@ pub(crate) async fn passkey_add_finish(
     let user_id = authorize_session(state, headers).await?;
     validate_encrypted_passkey_name(&payload.encrypted_name)?;
 
-    let credential: RegisterPublicKeyCredential =
-        serde_json::from_slice(&payload.credential).map_err(internal_error)?;
+    let credential: RegisterPublicKeyCredential = serde_json::from_slice(&payload.credential)
+        .map_err(|_| bad_request("invalid credential"))?;
     let passkey = state
         .passkeys
-        .finish_registration(payload.flow_id, credential)
+        .finish_registration(payload.flow_id, user_id, credential)
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| bad_request("passkey registration failed"))?;
 
     let credential_id = passkey.cred_id().as_ref().to_vec();
     let passkey_data = encode_passkey(&passkey).map_err(internal_error)?;
@@ -126,7 +135,16 @@ pub(crate) async fn passkey_delete(
     headers: &HeaderMap,
     payload: PasskeyDeleteRequest,
 ) -> Result<PasskeyDeleteResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        crate::features::auth::dto::ReauthAction::SecuritySettings,
+    )
+    .await?;
+    let user_id = principal.user_id;
 
     let deleted = delete_passkey_for_user(&state.pool, user_id, payload.passkey_id)
         .await
@@ -160,11 +178,13 @@ pub(crate) async fn passkey_login_finish(
     headers: &HeaderMap,
     payload: PasskeyLoginFinishRequest,
 ) -> Result<Response, ApiError> {
-    let credential: PublicKeyCredential =
-        serde_json::from_slice(&payload.credential).map_err(internal_error)?;
+    let credential: PublicKeyCredential = serde_json::from_slice(&payload.credential)
+        .map_err(|_| bad_request("invalid credential"))?;
 
     let refresh_transport = refresh_transport_from_headers(headers)?;
     let credential_id = credential.get_credential_id().to_vec();
+    crate::platform::rate_limit::enforce_credential_attempt(state, "passkey-login", &credential_id)
+        .await?;
 
     let (user, passkey) =
         get_user_and_passkey_by_credential_id(&state.pool, &credential_id).await?;
@@ -174,7 +194,7 @@ pub(crate) async fn passkey_login_finish(
         .passkeys
         .finish_discoverable_authentication(payload.flow_id, credential, &discoverable_keys)
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| unauthenticated("passkey authentication failed"))?;
 
     persist_passkey_auth_result(&state.pool, user.id, &auth_result).await?;
 
@@ -189,25 +209,35 @@ pub(crate) async fn passkey_login_finish(
     .await?;
 
     let access_token = state
-        .issue_access_token(user.id, &user.username)
+        .issue_access_token(user.id, &user.username, refresh.token_id)
         .map_err(internal_error)?;
+    let device_enrollment_token = super::device_enrollment::issue(state, user.id).await?;
     let refresh_token = match refresh_transport {
         RefreshTransport::Body => Some(refresh.token.clone()),
         RefreshTransport::Cookie => None,
     };
 
+    let csrf_token =
+        matches!(refresh_transport, RefreshTransport::Cookie).then(generate_csrf_token);
     let mut response = MsgPack(PasskeyLoginFinishResponse {
         username: user.username,
         access_token,
         refresh_token,
         refresh_token_id: Some(refresh.token_id),
+        device_enrollment_token,
+        csrf_token: csrf_token.clone(),
     })
     .into_response();
 
     if matches!(refresh_transport, RefreshTransport::Cookie) {
         set_refresh_cookie(&state.config, &mut response, &refresh.token)?;
-        let csrf_token = generate_csrf_token();
-        set_csrf_cookie(&state.config, &mut response, &csrf_token)?;
+        set_csrf_cookie(
+            &state.config,
+            &mut response,
+            csrf_token
+                .as_deref()
+                .ok_or_else(|| internal_error("missing CSRF token"))?,
+        )?;
     }
 
     Ok(response)

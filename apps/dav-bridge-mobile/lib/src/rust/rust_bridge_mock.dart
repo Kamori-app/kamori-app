@@ -21,12 +21,24 @@ class _MockInviteCodeEntry {
 class MockRustBridgeApi implements RustBridgeApi {
   String? _accessToken;
   String? _refreshToken;
+  String? _refreshRotationRequestId;
   String? _cloudBaseUrl;
   String? _sqlitePath;
   final Map<String, List<int>> _collectionKeys = <String, List<int>>{};
   final List<PimItem> _pimItems = <PimItem>[];
   final Map<String, _MockInviteCodeEntry> _inviteCodes =
       <String, _MockInviteCodeEntry>{};
+
+  @override
+  Future<DeviceSecrets> generateDeviceSecrets() async => DeviceSecrets(
+        deviceId: const Uuid().v4(),
+        signingPrivateKey:
+            List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+        hpkePrivateKey:
+            List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+        hpkePublicKey:
+            List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+      );
 
   @override
   Future<LoginResult> passwordLogin({
@@ -38,7 +50,8 @@ class MockRustBridgeApi implements RustBridgeApi {
     if (username.trim().isEmpty || password.isEmpty) {
       return const LoginResult(
         accessToken: null,
-        preauthToken: null,
+        totpContinuationToken: null,
+        deviceEnrollmentToken: null,
         totpVerified: false,
       );
     }
@@ -46,17 +59,20 @@ class MockRustBridgeApi implements RustBridgeApi {
     if ((totpCode ?? '').trim().isEmpty) {
       return const LoginResult(
         accessToken: null,
-        preauthToken: 'mock-preauth-token',
+        totpContinuationToken: 'mock-totp-continuation',
+        deviceEnrollmentToken: null,
         totpVerified: false,
       );
     }
 
     _accessToken = 'mock-access-token';
     _refreshToken = 'mock-refresh-token';
+    _refreshRotationRequestId = const Uuid().v4();
     return const LoginResult(
       username: 'mock-user',
       accessToken: 'mock-access-token',
-      preauthToken: null,
+      totpContinuationToken: null,
+      deviceEnrollmentToken: 'mock-device-enrollment',
       totpVerified: true,
       accountMasterKey: <int>[
         1,
@@ -101,6 +117,7 @@ class MockRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> accountMasterKey,
     required String platform,
+    String? deviceEnrollmentToken,
     DeviceSecrets? existingDevice,
   }) async {
     if (accountMasterKey.length != 32) {
@@ -121,12 +138,16 @@ class MockRustBridgeApi implements RustBridgeApi {
   }
 
   @override
-  Future<void> importRefreshToken({required String refreshToken}) async {
+  Future<void> importRefreshToken({
+    required String refreshToken,
+    required String rotationRequestId,
+  }) async {
     final value = refreshToken.trim();
     if (value.isEmpty) {
       throw ArgumentError('Refresh token is required');
     }
     _refreshToken = value;
+    _refreshRotationRequestId = rotationRequestId;
   }
 
   @override
@@ -135,8 +156,14 @@ class MockRustBridgeApi implements RustBridgeApi {
   }
 
   @override
+  Future<String?> exportRefreshRotationRequestId() async {
+    return _refreshRotationRequestId;
+  }
+
+  @override
   Future<void> clearRefreshToken() async {
     _refreshToken = null;
+    _refreshRotationRequestId = null;
   }
 
   @override
@@ -178,6 +205,8 @@ class MockRustBridgeApi implements RustBridgeApi {
   Future<PimItem> upsertPimItem({
     required String spaceId,
     String? resourceId,
+    String? projectionId,
+    String? headOperationId,
     required PimItemKind kind,
     required String title,
     bool completed = false,
@@ -189,9 +218,13 @@ class MockRustBridgeApi implements RustBridgeApi {
     if (!_collectionKeys.containsKey(spaceId) || title.trim().isEmpty) {
       throw ArgumentError('Invalid PIM item');
     }
+    final logicalId = resourceId ?? const Uuid().v4();
     final item = PimItem(
       spaceId: spaceId,
-      resourceId: resourceId ?? const Uuid().v4(),
+      resourceId: logicalId,
+      projectionId: projectionId ??
+          '$logicalId.${kind == PimItemKind.contact ? 'vcf' : 'ics'}',
+      headOperationId: const Uuid().v4(),
       kind: kind,
       title: title.trim(),
       completed: completed,
@@ -203,7 +236,7 @@ class MockRustBridgeApi implements RustBridgeApi {
     _pimItems.removeWhere(
       (existing) =>
           existing.spaceId == item.spaceId &&
-          existing.resourceId == item.resourceId,
+          existing.projectionId == item.projectionId,
     );
     _pimItems.add(item);
     return item;
@@ -214,7 +247,7 @@ class MockRustBridgeApi implements RustBridgeApi {
     _pimItems.removeWhere(
       (existing) =>
           existing.spaceId == item.spaceId &&
-          existing.resourceId == item.resourceId,
+          existing.projectionId == item.projectionId,
     );
   }
 
@@ -246,6 +279,7 @@ class MockRustBridgeApi implements RustBridgeApi {
   Future<void> registerCollectionKey({
     required String collectionId,
     required int keyEpoch,
+    required int syncStartSeq,
     required List<int> cmk,
   }) async {
     if (collectionId.isEmpty || keyEpoch < 1 || cmk.length != 32) {
@@ -275,14 +309,24 @@ class MockRustBridgeApi implements RustBridgeApi {
       throw ArgumentError('ttlMinutes must be between 15 and 10080');
     }
 
+    final rotatedKey = List<int>.generate(
+      32,
+      (index) => collectionKey[index] ^ 0x5a,
+      growable: false,
+    );
     final code = _generateInviteCode();
     _inviteCodes[code] = _MockInviteCodeEntry(
       collectionId: collectionId,
-      collectionKey: List<int>.from(collectionKey),
+      collectionKey: rotatedKey,
       expiresAt: DateTime.now().add(Duration(minutes: ttlMinutes)),
     );
-
-    return IssuedInviteCode(code: code, ttlMinutes: ttlMinutes);
+    return IssuedInviteCode(
+      code: code,
+      ttlMinutes: ttlMinutes,
+      keyEpoch: 2,
+      currentStateStartSeq: 0,
+      collectionKey: rotatedKey,
+    );
   }
 
   @override
@@ -307,7 +351,7 @@ class MockRustBridgeApi implements RustBridgeApi {
     return RedeemedInvite(
       collectionId: entry.collectionId,
       role: 'editor',
-      keyEpoch: 1,
+      keyEpoch: 2,
       collectionKey: List<int>.from(entry.collectionKey),
     );
   }

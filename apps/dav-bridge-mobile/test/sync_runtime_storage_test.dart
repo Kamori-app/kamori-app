@@ -9,13 +9,17 @@ void main() {
   test('mobile sync snapshot round-trips collection keys', () {
     final snapshot = MobileSyncRuntimeSnapshot(
       cloudBaseUrl: 'https://api.kamori.app',
+      username: 'alice',
       sqlitePath: '.kamori/mobile-cache.sqlite3',
       accessToken: 'access-token',
+      backgroundSyncEnabled: false,
       collections: <CollectionEntry>[
         CollectionEntry(
           id: 'space-1',
           name: 'Personal',
           cmk: List<int>.generate(32, (index) => index),
+          historyStartSeq: 3,
+          currentStateStartSeq: 8,
         ),
       ],
     );
@@ -26,10 +30,14 @@ void main() {
     );
 
     expect(restored.cloudBaseUrl, snapshot.cloudBaseUrl);
+    expect(restored.username, 'alice');
     expect(restored.sqlitePath, snapshot.sqlitePath);
     expect(restored.accessToken, snapshot.accessToken);
+    expect(restored.backgroundSyncEnabled, isFalse);
     expect(restored.collections.single.id, 'space-1');
     expect(restored.collections.single.cmk, snapshot.collections.single.cmk);
+    expect(restored.collections.single.historyStartSeq, 3);
+    expect(restored.collections.single.currentStateStartSeq, 8);
   });
 
   test('mobile sync snapshot rejects invalid key length', () {

@@ -8,7 +8,6 @@ pub struct OpaqueSigninStartResponse {
     #[serde(with = "serde_bytes")]
     pub opaque_server_message: Vec<u8>,
     pub next_step: String,
-    pub preauth_token: Option<String>,
 }
 
 /// OPAQUE signin finish response from cloud-server.
@@ -22,7 +21,8 @@ pub struct OpaqueSigninFinishResponse {
     pub encrypted_master_key: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub public_key_bundle: Vec<u8>,
-    pub preauth_token: Option<String>,
+    pub totp_continuation_token: Option<String>,
+    pub device_enrollment_token: Option<String>,
 }
 
 /// External-browser device authorization response from cloud-server.
@@ -43,6 +43,9 @@ pub struct BrowserLoginPollResponse {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub refresh_token_id: Option<Uuid>,
+    pub device_enrollment_token: Option<String>,
+    #[serde(with = "serde_bytes")]
+    pub encrypted_master_key_package: Vec<u8>,
 }
 
 /// Local server runtime status for dashboard UI.

@@ -17,9 +17,8 @@ use crate::{
             },
             repositories::{
                 create_team_workspace_for_owner, ensure_personal_workspace_for_user,
-                get_active_workspace_member_role, is_active_workspace_member,
-                list_active_workspace_members, list_workspaces_for_user, revoke_workspace_member,
-                update_workspace_member_role,
+                get_active_workspace_member_role, list_active_workspace_members,
+                list_workspaces_for_user, revoke_workspace_member, update_workspace_member_role,
             },
         },
     },
@@ -61,12 +60,14 @@ pub(crate) async fn list_workspace_members(
     actor_id: Uuid,
     payload: ListWorkspaceMembersRequest,
 ) -> Result<ListWorkspaceMembersResponse, ApiError> {
-    let is_member = is_active_workspace_member(&state.pool, payload.workspace_id, actor_id).await?;
-    if !is_member {
+    if payload.workspace_id.is_nil() {
+        return Err(bad_request("workspace_id must be a non-nil UUID"));
+    }
+    let members =
+        list_active_workspace_members(&state.pool, payload.workspace_id, actor_id).await?;
+    if members.is_empty() {
         return Err(unauthorized("workspace access denied"));
     }
-
-    let members = list_active_workspace_members(&state.pool, payload.workspace_id).await?;
     Ok(ListWorkspaceMembersResponse { members })
 }
 
@@ -75,6 +76,11 @@ pub(crate) async fn update_member_role(
     actor_id: Uuid,
     payload: UpdateWorkspaceMemberRoleRequest,
 ) -> Result<UpdateWorkspaceMemberRoleResponse, ApiError> {
+    if payload.workspace_id.is_nil() || payload.user_id.is_nil() {
+        return Err(bad_request(
+            "workspace_id and user_id must be non-nil UUIDs",
+        ));
+    }
     let actor_role = get_active_workspace_member_role(&state.pool, payload.workspace_id, actor_id)
         .await?
         .ok_or_else(|| unauthorized("workspace access denied"))?;
@@ -90,6 +96,7 @@ pub(crate) async fn update_member_role(
         &state.pool,
         payload.workspace_id,
         payload.user_id,
+        actor_id,
         payload.role,
     )
     .await?;
@@ -101,6 +108,11 @@ pub(crate) async fn revoke_member(
     actor_id: Uuid,
     payload: RevokeWorkspaceMemberRequest,
 ) -> Result<RevokeWorkspaceMemberResponse, ApiError> {
+    if payload.workspace_id.is_nil() || payload.user_id.is_nil() {
+        return Err(bad_request(
+            "workspace_id and user_id must be non-nil UUIDs",
+        ));
+    }
     let actor_role = get_active_workspace_member_role(&state.pool, payload.workspace_id, actor_id)
         .await?
         .ok_or_else(|| unauthorized("workspace access denied"))?;
@@ -110,10 +122,11 @@ pub(crate) async fn revoke_member(
         get_active_workspace_member_role(&state.pool, payload.workspace_id, payload.user_id)
             .await?
             .ok_or_else(|| unauthorized("workspace member not found"))?;
-    ensure_revoke_allowed(target_role)?;
+    ensure_revoke_allowed(actor_role, target_role)?;
 
     let revoked =
-        revoke_workspace_member(&state.pool, payload.workspace_id, payload.user_id).await?;
+        revoke_workspace_member(&state.pool, payload.workspace_id, payload.user_id, actor_id)
+            .await?;
     Ok(RevokeWorkspaceMemberResponse { revoked })
 }
 

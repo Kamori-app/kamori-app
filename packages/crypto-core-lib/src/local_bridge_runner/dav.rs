@@ -1,6 +1,6 @@
 use super::{
-    DavResourceKind, LocalBridgeState, LocalResource, PutResult, UpsertOutcome, now_unix_ms,
-    types::DavChange,
+    DavIfMatch, DavPutRequest, DavResourceKind, DavWriteError, LocalBridgeState, LocalResource,
+    PutResult, UpsertOutcome, now_unix_ms, types::DavChange,
 };
 use anyhow::{Context, Result, anyhow};
 use axum::{
@@ -16,12 +16,26 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use quick_xml::{Reader, events::Event};
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::error;
 
 const MAX_REPORT_BYTES: usize = 1024 * 1024;
+const MAX_MULTIGET_RESOURCES: usize = 1000;
 const PRINCIPAL_PATH: &str = "/principals/kamori/";
+const DAV_PATH_SEGMENT: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'/')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}');
 
 #[derive(Clone, Debug)]
 struct ParsedDavPath {
@@ -68,7 +82,7 @@ fn parse_dav_target(path: &str) -> Result<DavTarget> {
                 .ok_or_else(|| anyhow!("unsupported DAV scope"))?;
             Ok(DavTarget::Collection(ParsedDavPath {
                 kind,
-                collection_id: (*collection_id).to_string(),
+                collection_id: decode_path_segment(collection_id)?,
                 resource_id: None,
             }))
         }
@@ -78,8 +92,8 @@ fn parse_dav_target(path: &str) -> Result<DavTarget> {
                 .ok_or_else(|| anyhow!("unsupported DAV scope"))?;
             Ok(DavTarget::Resource(ParsedDavPath {
                 kind,
-                collection_id: (*collection_id).to_string(),
-                resource_id: Some((*resource_id).to_string()),
+                collection_id: decode_path_segment(collection_id)?,
+                resource_id: Some(decode_path_segment(resource_id)?),
             }))
         }
         _ => Err(anyhow!("unsupported DAV path")),
@@ -221,19 +235,18 @@ async fn handle_propfind(
             if !collection_exists(&state, &parsed.collection_id).await {
                 return Ok(StatusCode::NOT_FOUND.into_response());
             }
+            let Some(resource_id) = parsed.resource_id.clone() else {
+                return Ok(StatusCode::BAD_REQUEST.into_response());
+            };
             let resource = state
-                .get_resource(
-                    parsed.kind,
-                    parsed.collection_id.clone(),
-                    parsed.resource_id.clone().expect("resource target"),
-                )
+                .get_resource(parsed.kind, parsed.collection_id.clone(), resource_id)
                 .await?;
             let Some(resource) = resource else {
                 return Ok(StatusCode::NOT_FOUND.into_response());
             };
             resource_multistatus(&resource, false)
         }
-        DavTarget::WellKnown(_) => unreachable!(),
+        DavTarget::WellKnown(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
     Ok(xml_response(StatusCode::MULTI_STATUS, xml))
 }
@@ -320,12 +333,11 @@ async fn handle_get(
     if !collection_exists(&state, &parsed.collection_id).await {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
+    let Some(resource_id) = parsed.resource_id else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    };
     let maybe = state
-        .get_resource(
-            parsed.kind,
-            parsed.collection_id,
-            parsed.resource_id.expect("resource target"),
-        )
+        .get_resource(parsed.kind, parsed.collection_id, resource_id)
         .await?;
     let Some(resource) = maybe else {
         return Ok((StatusCode::NOT_FOUND, "resource not found").into_response());
@@ -355,8 +367,19 @@ async fn handle_put(
     if !collection_exists(&state, &parsed.collection_id).await {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let resource_id = parsed.resource_id.expect("resource target");
-    let payload = String::from_utf8(body.to_vec()).context("PUT payload must be UTF-8")?;
+    let Some(resource_id) = parsed.resource_id else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
+    };
+    let payload = match String::from_utf8(body.to_vec()) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return Ok((
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "DAV payload must be valid UTF-8",
+            )
+                .into_response());
+        }
+    };
     if validate_payload(parsed.kind, &payload).is_err() {
         return Ok((
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -364,44 +387,59 @@ async fn handle_put(
         )
             .into_response());
     }
-    let existing = state
-        .get_resource(
-            parsed.kind,
-            parsed.collection_id.clone(),
-            resource_id.clone(),
-        )
-        .await?;
-    let requires_absence = headers
-        .get(IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.trim() == "*");
-    if let Some(existing) = existing {
-        if requires_absence {
-            return Ok((StatusCode::PRECONDITION_FAILED, "resource already exists").into_response());
+    let if_match = match parse_if_match(&headers) {
+        Ok(value) => value,
+        Err(_) => return Ok((StatusCode::BAD_REQUEST, "invalid If-Match header").into_response()),
+    };
+    let requires_absence = match parse_if_none_match(&headers) {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok((StatusCode::BAD_REQUEST, "invalid If-None-Match header").into_response());
         }
-        let Some(expected) = parse_etag_header(&headers) else {
+    };
+    if if_match.is_some() && requires_absence {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            "If-Match and If-None-Match cannot be combined",
+        )
+            .into_response());
+    }
+
+    let put = match state
+        .put_resource_and_push(DavPutRequest {
+            kind: parsed.kind,
+            collection_id: parsed.collection_id,
+            resource_id,
+            payload,
+            updated_at_ms: now_unix_ms(),
+            if_match,
+            require_absence: requires_absence,
+        })
+        .await
+    {
+        Ok(put) => put,
+        Err(error)
+            if matches!(
+                error.downcast_ref(),
+                Some(DavWriteError::PreconditionRequired)
+            ) =>
+        {
             return Ok((
                 StatusCode::PRECONDITION_REQUIRED,
                 "If-Match is required when replacing a DAV resource",
             )
                 .into_response());
-        };
-        if expected != "*" && expected != existing.etag {
-            return Ok((StatusCode::PRECONDITION_FAILED, "ETag changed").into_response());
         }
-    } else if parse_etag_header(&headers).as_deref() == Some("*") {
-        return Ok((StatusCode::PRECONDITION_FAILED, "resource does not exist").into_response());
-    }
-
-    let put = state
-        .put_resource_and_push(
-            parsed.kind,
-            parsed.collection_id,
-            resource_id,
-            payload,
-            now_unix_ms(),
-        )
-        .await?;
+        Err(error)
+            if matches!(
+                error.downcast_ref(),
+                Some(DavWriteError::PreconditionFailed)
+            ) =>
+        {
+            return Ok((StatusCode::PRECONDITION_FAILED, "DAV precondition failed").into_response());
+        }
+        Err(error) => return Err(error),
+    };
     let status = match put.outcome {
         UpsertOutcome::Inserted => StatusCode::CREATED,
         UpsertOutcome::Updated => StatusCode::NO_CONTENT,
@@ -427,30 +465,45 @@ async fn handle_delete(
     if !collection_exists(&state, &parsed.collection_id).await {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let resource_id = parsed.resource_id.expect("resource target");
-    let Some(existing) = state
-        .get_resource(
-            parsed.kind,
-            parsed.collection_id.clone(),
-            resource_id.clone(),
-        )
-        .await?
-    else {
-        return Ok((StatusCode::NOT_FOUND, "resource not found").into_response());
+    let Some(resource_id) = parsed.resource_id else {
+        return Ok(StatusCode::BAD_REQUEST.into_response());
     };
-    let Some(expected) = parse_etag_header(&headers) else {
+    let expected = match parse_if_match(&headers) {
+        Ok(Some(expected)) => expected,
+        Ok(None) => {
+            return Ok((
+                StatusCode::PRECONDITION_REQUIRED,
+                "If-Match is required when deleting a DAV resource",
+            )
+                .into_response());
+        }
+        Err(_) => return Ok((StatusCode::BAD_REQUEST, "invalid If-Match header").into_response()),
+    };
+    if headers.contains_key(IF_NONE_MATCH) {
         return Ok((
-            StatusCode::PRECONDITION_REQUIRED,
-            "If-Match is required when deleting a DAV resource",
+            StatusCode::BAD_REQUEST,
+            "If-None-Match is not valid for DAV DELETE",
         )
             .into_response());
-    };
-    if expected != "*" && expected != existing.etag {
-        return Ok((StatusCode::PRECONDITION_FAILED, "ETag changed").into_response());
     }
-    state
-        .delete_resource_and_push(parsed.kind, parsed.collection_id, resource_id)
-        .await?;
+    match state
+        .delete_resource_and_push(parsed.kind, parsed.collection_id, resource_id, expected)
+        .await
+    {
+        Ok(_) => {}
+        Err(error) if matches!(error.downcast_ref(), Some(DavWriteError::NotFound)) => {
+            return Ok((StatusCode::NOT_FOUND, "resource not found").into_response());
+        }
+        Err(error)
+            if matches!(
+                error.downcast_ref(),
+                Some(DavWriteError::PreconditionFailed)
+            ) =>
+        {
+            return Ok((StatusCode::PRECONDITION_FAILED, "ETag changed").into_response());
+        }
+        Err(error) => return Err(error),
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -513,6 +566,11 @@ fn parse_report(body: &[u8]) -> Result<DavReport> {
                 if capture.as_deref() == Some(local.as_str()) {
                     let value = captured.trim().to_string();
                     if local == "href" && !value.is_empty() {
+                        if hrefs.len() >= MAX_MULTIGET_RESOURCES {
+                            return Err(anyhow!(
+                                "DAV multiget exceeds {MAX_MULTIGET_RESOURCES} resources"
+                            ));
+                        }
                         hrefs.push(value);
                     } else if local == "sync-token" && !value.is_empty() {
                         sync_token = Some(value);
@@ -602,21 +660,12 @@ async fn collection_exists(state: &LocalBridgeState, collection_id: &str) -> boo
 }
 
 fn validate_payload(kind: DavResourceKind, payload: &str) -> Result<()> {
-    let valid = match kind {
-        DavResourceKind::Contact => {
-            payload.contains("BEGIN:VCARD") && payload.contains("END:VCARD")
-        }
+    match kind {
+        DavResourceKind::Contact => crate::pim::validate_dav_projection(true, payload).map(|_| ()),
         DavResourceKind::Calendar => {
-            payload.contains("BEGIN:VCALENDAR") && payload.contains("END:VCALENDAR")
+            crate::pim::validate_dav_projection(false, payload).map(|_| ())
         }
-        DavResourceKind::Note => false,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "payload is not a complete vCard/iCalendar resource"
-        ))
+        DavResourceKind::Note => Err(anyhow!("DAV notes are unsupported")),
     }
 }
 
@@ -625,13 +674,43 @@ fn resource_id_from_href(path: &ParsedDavPath, href: &str) -> Option<String> {
         .ok()
         .map(|url| url.path().to_string())
         .unwrap_or_else(|| href.split(['?', '#']).next().unwrap_or(href).to_string());
-    let prefix = format!("/{}/{}/", path.kind.route_prefix(), path.collection_id);
-    let resource_id = href_path.strip_prefix(&prefix)?;
-    if resource_id.is_empty() || resource_id.contains('/') {
-        None
-    } else {
-        Some(resource_id.to_string())
+    match parse_dav_target(&href_path).ok()? {
+        DavTarget::Resource(candidate)
+            if candidate.kind == path.kind && candidate.collection_id == path.collection_id =>
+        {
+            candidate.resource_id
+        }
+        _ => None,
     }
+}
+
+fn decode_path_segment(segment: &str) -> Result<String> {
+    let bytes = segment.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'%'
+            && (index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit())
+        {
+            return Err(anyhow!("invalid percent-encoding in DAV path"));
+        }
+    }
+    let decoded = percent_decode_str(segment)
+        .decode_utf8()
+        .context("DAV path segment is not UTF-8")?
+        .into_owned();
+    if decoded.is_empty()
+        || decoded == "."
+        || decoded == ".."
+        || decoded.chars().any(char::is_control)
+    {
+        return Err(anyhow!("invalid DAV path segment"));
+    }
+    Ok(decoded)
+}
+
+fn encode_path_segment(segment: &str) -> String {
+    utf8_percent_encode(segment, DAV_PATH_SEGMENT).to_string()
 }
 
 fn root_multistatus() -> String {
@@ -749,10 +828,11 @@ fn push_collection_response(xml: &mut String, path: &ParsedDavPath, revision: u6
     let href = format!(
         "/{}/{}/",
         path.kind.route_prefix(),
-        xml_escape(&path.collection_id)
+        encode_path_segment(&path.collection_id)
     );
     xml.push_str(&format!(
-        "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:displayname>{}</d:displayname>",
+        "<d:response><d:href>{}</d:href><d:propstat><d:prop><d:displayname>{}</d:displayname>",
+        xml_escape(&href),
         xml_escape(&path.collection_id)
     ));
     match path.kind {
@@ -806,12 +886,12 @@ fn push_resource_response(xml: &mut String, resource: &LocalResource, include_pa
 }
 
 fn resource_href(kind: DavResourceKind, collection_id: &str, resource_id: &str) -> String {
-    format!(
+    xml_escape(&format!(
         "/{}/{}/{}",
         kind.route_prefix(),
-        xml_escape(collection_id),
-        xml_escape(resource_id)
-    )
+        encode_path_segment(collection_id),
+        encode_path_segment(resource_id)
+    ))
 }
 
 fn xml_open() -> String {
@@ -872,12 +952,105 @@ fn render_put_message(put: &PutResult) -> String {
     }
 }
 
-fn parse_etag_header(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(IF_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .map(|value| value.trim_start_matches("W/").trim_matches('"').to_string())
+fn parse_if_match(headers: &HeaderMap) -> Result<Option<DavIfMatch>> {
+    let mut values = headers.get_all(IF_MATCH).iter().peekable();
+    if values.peek().is_none() {
+        return Ok(None);
+    }
+
+    let mut strong_tags = Vec::new();
+    let mut saw_any = false;
+    let mut saw_entity_tag = false;
+    for value in values {
+        parse_if_match_value(
+            value.to_str()?,
+            &mut strong_tags,
+            &mut saw_any,
+            &mut saw_entity_tag,
+        )?;
+    }
+    if saw_any && saw_entity_tag {
+        return Err(anyhow!(
+            "If-Match wildcard cannot be combined with entity tags"
+        ));
+    }
+    Ok(Some(if saw_any {
+        DavIfMatch::Any
+    } else {
+        // Weak entity tags are valid header syntax but can never satisfy the
+        // strong comparison required by If-Match.
+        DavIfMatch::StrongTags(strong_tags)
+    }))
+}
+
+fn parse_if_match_value(
+    value: &str,
+    strong_tags: &mut Vec<String>,
+    saw_any: &mut bool,
+    saw_entity_tag: &mut bool,
+) -> Result<()> {
+    let mut in_quotes = false;
+    let mut token_start = 0;
+    for (index, character) in value.char_indices() {
+        match character {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                parse_if_match_token(
+                    &value[token_start..index],
+                    strong_tags,
+                    saw_any,
+                    saw_entity_tag,
+                )?;
+                token_start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if in_quotes {
+        return Err(anyhow!("unterminated entity tag"));
+    }
+    parse_if_match_token(&value[token_start..], strong_tags, saw_any, saw_entity_tag)
+}
+
+fn parse_if_match_token(
+    token: &str,
+    strong_tags: &mut Vec<String>,
+    saw_any: &mut bool,
+    saw_entity_tag: &mut bool,
+) -> Result<()> {
+    let token = token.trim();
+    if token == "*" {
+        *saw_any = true;
+        return Ok(());
+    }
+    let (weak, quoted) = token
+        .strip_prefix("W/")
+        .map_or((false, token), |value| (true, value));
+    if quoted.len() < 2 || !quoted.starts_with('"') || !quoted.ends_with('"') {
+        return Err(anyhow!("invalid entity tag"));
+    }
+    let opaque = &quoted[1..quoted.len() - 1];
+    if opaque
+        .bytes()
+        .any(|byte| byte == b'"' || byte <= 0x20 || byte == 0x7f)
+    {
+        return Err(anyhow!("invalid entity tag"));
+    }
+    *saw_entity_tag = true;
+    if !weak {
+        strong_tags.push(opaque.to_string());
+    }
+    Ok(())
+}
+
+fn parse_if_none_match(headers: &HeaderMap) -> Result<bool> {
+    let Some(value) = headers.get(IF_NONE_MATCH) else {
+        return Ok(false);
+    };
+    if value.to_str()?.trim() != "*" {
+        return Err(anyhow!("only If-None-Match: * is supported"));
+    }
+    Ok(true)
 }
 
 fn xml_escape(input: &str) -> String {
@@ -948,17 +1121,68 @@ mod tests {
     }
 
     #[test]
-    fn etag_parser_accepts_quoted_weak_and_wildcard_values() {
+    fn if_match_parser_uses_strong_comparison_and_supports_lists() {
         let mut headers = HeaderMap::new();
         headers.insert(IF_MATCH, HeaderValue::from_static("W/\"abc\""));
-        assert_eq!(parse_etag_header(&headers).as_deref(), Some("abc"));
+        assert!(matches!(
+            parse_if_match(&headers).expect("valid weak tag"),
+            Some(DavIfMatch::StrongTags(tags)) if tags.is_empty()
+        ));
+        headers.insert(IF_MATCH, HeaderValue::from_static("\"old\", \"current\""));
+        assert!(matches!(
+            parse_if_match(&headers).expect("valid tag list"),
+            Some(DavIfMatch::StrongTags(tags)) if tags == ["old", "current"]
+        ));
         headers.insert(IF_MATCH, HeaderValue::from_static("*"));
-        assert_eq!(parse_etag_header(&headers).as_deref(), Some("*"));
+        assert!(matches!(
+            parse_if_match(&headers).expect("valid wildcard"),
+            Some(DavIfMatch::Any)
+        ));
     }
 
     #[test]
     fn rejects_doctype_and_oversized_reports() {
         assert!(parse_report(b"<!DOCTYPE x><x/>").is_err());
         assert!(parse_report(&vec![b'x'; MAX_REPORT_BYTES + 1]).is_err());
+    }
+
+    #[test]
+    fn resource_hrefs_round_trip_reserved_and_unicode_characters() {
+        let path = ParsedDavPath {
+            kind: DavResourceKind::Contact,
+            collection_id: "team space".to_string(),
+            resource_id: None,
+        };
+        let href = resource_href(path.kind, &path.collection_id, "Miyuki/美雪 & team.vcf");
+        assert_eq!(
+            href,
+            "/carddav/team%20space/Miyuki%2F%E7%BE%8E%E9%9B%AA%20&amp;%20team.vcf"
+        );
+        assert_eq!(
+            resource_id_from_href(
+                &path,
+                "/carddav/team%20space/Miyuki%2F%E7%BE%8E%E9%9B%AA%20%26%20team.vcf"
+            )
+            .as_deref(),
+            Some("Miyuki/美雪 & team.vcf")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_encoded_path_segments() {
+        assert!(parse_dav_target("/caldav/space/bad%2.ics").is_err());
+        assert!(parse_dav_target("/caldav/space/%00.ics").is_err());
+        assert!(parse_dav_target("/caldav/space/..").is_err());
+    }
+
+    #[test]
+    fn limits_multiget_fanout() {
+        let hrefs = (0..=MAX_MULTIGET_RESOURCES)
+            .map(|index| format!("<d:href>/carddav/a/{index}.vcf</d:href>"))
+            .collect::<String>();
+        let xml = format!(
+            "<card:addressbook-multiget xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">{hrefs}</card:addressbook-multiget>"
+        );
+        assert!(parse_report(xml.as_bytes()).is_err());
     }
 }

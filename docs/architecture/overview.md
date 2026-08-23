@@ -29,4 +29,13 @@ secure storage, networking, lifecycle integration, system PIM adapters, and UI.
 Rich recurrence and a CRDT document codec are roadmap work, not implicit core
 capabilities.
 
+PIM operation v1 is intentionally single-parent. Snapshot v2 checkpoints all
+materialized branches in a stream. A key epoch exposes both a membership
+history boundary and a current-state recovery cursor, so a new device can load
+verified current snapshots without receiving superseded epoch keys. Rotation
+persists that cursor with the space, so catch-up cost does not grow with the
+operation-log history. It is an idempotent atomic server transaction over the
+base cursor, remaining key packages, encrypted metadata, snapshot coverage,
+and any deliberately quarantined streams.
+
 See the ADR index for accepted boundaries and consequences.

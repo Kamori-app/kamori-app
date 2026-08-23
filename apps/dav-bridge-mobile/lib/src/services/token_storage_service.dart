@@ -2,15 +2,19 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:uuid/uuid.dart';
 
 /// Secure persistence contract for refresh tokens on mobile.
 abstract class RefreshTokenStorage {
   Future<void> write({
     required String cloudBaseUrl,
     required String refreshToken,
+    required String rotationRequestId,
   });
 
   Future<String?> read({required String cloudBaseUrl});
+
+  Future<RefreshCredential?> readCredential({required String cloudBaseUrl});
 
   Future<void> delete({required String cloudBaseUrl});
 
@@ -31,6 +35,16 @@ class PendingRefreshRevocation {
   final String refreshToken;
 }
 
+class RefreshCredential {
+  const RefreshCredential({
+    required this.refreshToken,
+    required this.rotationRequestId,
+  });
+
+  final String refreshToken;
+  final String rotationRequestId;
+}
+
 /// Android Keystore / iOS Keychain-backed refresh token storage.
 class SecureRefreshTokenStorage implements RefreshTokenStorage {
   SecureRefreshTokenStorage({FlutterSecureStorage? storage})
@@ -49,14 +63,23 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
   Future<void> write({
     required String cloudBaseUrl,
     required String refreshToken,
+    required String rotationRequestId,
   }) async {
     final normalizedToken = refreshToken.trim();
     if (normalizedToken.isEmpty) {
       throw ArgumentError('Refresh token is required');
     }
+    final normalizedRequestId = rotationRequestId.trim();
+    if (normalizedRequestId.isEmpty) {
+      throw ArgumentError('Refresh rotation request id is required');
+    }
     await _storage.write(
       key: _storageKey(cloudBaseUrl),
-      value: normalizedToken,
+      value: jsonEncode(<String, Object>{
+        'version': 1,
+        'refreshToken': normalizedToken,
+        'rotationRequestId': normalizedRequestId,
+      }),
       aOptions: _androidOptions,
       iOptions: _iosOptions,
     );
@@ -64,16 +87,46 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
 
   @override
   Future<String?> read({required String cloudBaseUrl}) async {
-    final token = await _storage.read(
+    return (await readCredential(cloudBaseUrl: cloudBaseUrl))?.refreshToken;
+  }
+
+  @override
+  Future<RefreshCredential?> readCredential({required String cloudBaseUrl}) async {
+    final encoded = await _storage.read(
       key: _storageKey(cloudBaseUrl),
       aOptions: _androidOptions,
       iOptions: _iosOptions,
     );
-    final normalized = token?.trim();
+    final normalized = encoded?.trim();
     if (normalized == null || normalized.isEmpty) {
       return null;
     }
-    return normalized;
+    if (!normalized.startsWith('{')) {
+      final migrated = RefreshCredential(
+        refreshToken: normalized,
+        rotationRequestId: const Uuid().v4(),
+      );
+      await write(
+        cloudBaseUrl: cloudBaseUrl,
+        refreshToken: migrated.refreshToken,
+        rotationRequestId: migrated.rotationRequestId,
+      );
+      return migrated;
+    }
+    final value = jsonDecode(normalized) as Map<String, dynamic>;
+    if (value['version'] != 1 ||
+        value['refreshToken'] is! String ||
+        value['rotationRequestId'] is! String) {
+      throw const FormatException('Stored refresh credential is invalid');
+    }
+    final credential = RefreshCredential(
+      refreshToken: (value['refreshToken'] as String).trim(),
+      rotationRequestId: (value['rotationRequestId'] as String).trim(),
+    );
+    if (credential.refreshToken.isEmpty || credential.rotationRequestId.isEmpty) {
+      throw const FormatException('Stored refresh credential is incomplete');
+    }
+    return credential;
   }
 
   @override

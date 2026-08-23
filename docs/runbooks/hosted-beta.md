@@ -33,9 +33,11 @@ updates:
 3. Set `hostProvisioningPhase=protect`, preview protection-only changes and run
    `up` again.
 
-The `replace` update performs the complete bootstrap through role-specific
-cloud-init. Pulumi generates PostgreSQL PKI, complete matching SSH host
-keypairs and certificates, the deploy identity, jobs/backup/Grafana secrets, a
+The `replace` update creates the immutable machine baseline with cloud-init,
+then the same infrastructure job applies encrypted role configuration through
+a separate forced-command identity. Pulumi generates PostgreSQL PKI, complete
+matching SSH host keypairs and finite-lived certificates, the configuration
+and deploy identities, jobs/backup/Grafana secrets, a
 stable ops public IPv4, role-specific firewalls, and the private-network egress
 route. App and database nodes receive no public IP addresses. `ops` provides
 NAT and is the only SSH bastion. The private-host egress service configures the
@@ -46,10 +48,11 @@ DHCP.
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the
 `RuntimeDirectory=sshd` service setting, but the explicit validation runs
-before the socket-activated service has started for the first time. Host key
-material is staged outside `/etc/ssh` and installed by `runcmd`, after
+before the socket-activated service has started for the first time. Raw host
+key material is staged outside `/etc/ssh` and installed by `runcmd`, after
 cloud-init's standard `cc_ssh` module, so image key regeneration cannot replace
-the private key underneath the Pulumi-signed host certificate. The bootstrap
+the Pulumi-managed private key. The finite-lived certificate is added later
+through the trusted configuration channel. The bootstrap
 then stops any image-started SSH daemon before restarting the configured socket,
 which prevents a process from retaining the replaced key in memory.
 
@@ -58,6 +61,13 @@ a self-hosted runner, learns host keys from the network, or supplies a local PKI
 path. If first boot fails, use the authenticated Hetzner Console and inspect
 `/var/log/cloud-init-output.log`; do not expose port `22` or patch the machine.
 Correct cloud-init and replace the empty node instead.
+
+The first configuration connection pins the raw host keys exported by Pulumi
+and explicitly requests `ssh-ed25519`; it never trusts a key learned from the
+network. The role archive is read from encrypted Pulumi state, bounded to 8 MiB,
+checked for path traversal and special files, and accepted only when its role
+matches `/etc/kamori/node-role`. Subsequent release deployments trust the SSH
+host CA. Configuration transfer is provisioning, not an availability probe.
 
 Public TLS remains separate: Pulumi manages Porkbun records and ACME
 delegations, while Hetzner issues, attaches, and renews the load-balancer
@@ -72,15 +82,28 @@ the stable ops IPv4 as a variable. Use the exact `pulumi stack output | gh`
 commands in `SECRETS.md`. App private addresses remain `10.42.0.11` and
 `10.42.0.12`.
 
-The `Deploy cloud server` workflow uses a GitHub-hosted runner. It reaches the
-app nodes through the certificate-authenticated ops bastion, uses the job-scoped
-`GITHUB_TOKEN` to pull immutable GHCR digests, applies migrations once, and
-rolls app node 1 followed by app node 2. The deployment identity cannot open an
+The `Deploy cloud server` workflow is intentionally three separate, manually
+approved actions. First run `publish` for the selected Git ref. Then run
+`deploy-app-1` against that same ref, enabling `run_migrations` only for
+backward-compatible expand migrations. The dedicated external monitoring
+service and an operator evaluate the canary. Only after that evidence is green
+run `deploy-app-2` against the same ref with migrations disabled. Each deploy
+resolves the already-published tag back to immutable GHCR digests; it never
+silently rebuilds a promoted release. The deployment identity cannot open an
 ops shell and app sudo is limited to fixed root-owned entrypoints installed by
-cloud-init.
+the infrastructure configuration phase.
 
-CI/CD performs no endpoint, readiness, or uptime probe. Container health checks
-only coordinate local runtime dependencies, Hetzner load-balancer checks own
+The workflow rejects `run_migrations` for `deploy-app-2`. To roll back one
+application node, dispatch the workflow from the older Git commit whose four
+images were already published, select only that node, and leave migrations
+disabled. Database migrations are expand-only and are not reversed by an
+application rollback; a release is promotable only while both the previous and
+new application versions can use the expanded schema.
+
+Infrastructure and release deployment workflows perform no application
+endpoint, readiness, or uptime probe. CI acceptance tests wait only for their
+own disposable local stack; they never inspect the hosted service. Container
+health checks coordinate runtime dependencies, Hetzner load-balancer checks own
 backend routing, and the dedicated monitoring service owns public availability
 and alerting.
 

@@ -24,10 +24,10 @@ pub async fn totp_status(
 pub async fn totp_setup_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    MsgPack(_payload): MsgPack<TotpSetupStartRequest>,
+    MsgPack(payload): MsgPack<TotpSetupStartRequest>,
 ) -> Result<MsgPack<TotpSetupStartResponse>, ApiError> {
     Ok(MsgPack(
-        auth_services::totp_setup_start(&state, &headers).await?,
+        auth_services::totp_setup_start(&state, &headers, payload).await?,
     ))
 }
 
@@ -54,9 +54,9 @@ pub async fn totp_disable(
 pub async fn account_recovery_codes_regenerate(
     State(state): State<AppState>,
     headers: HeaderMap,
-    MsgPack(_payload): MsgPack<AccountRecoveryCodesRegenerateRequest>,
+    MsgPack(payload): MsgPack<AccountRecoveryCodesRegenerateRequest>,
 ) -> Result<MsgPack<AccountRecoveryCodesRegenerateResponse>, ApiError> {
     Ok(MsgPack(
-        auth_services::account_recovery_codes_regenerate(&state, &headers).await?,
+        auth_services::account_recovery_codes_regenerate(&state, &headers, payload).await?,
     ))
 }

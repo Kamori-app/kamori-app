@@ -122,8 +122,10 @@ class _PimScreenState extends ConsumerState<PimScreen> {
 
   Future<void> _toggleTask(PimItem item, bool completed) {
     return ref.read(bridgeControllerProvider.notifier).savePimItem(
-          spaceId: item.spaceId,
-          resourceId: item.resourceId,
+      spaceId: item.spaceId,
+      resourceId: item.resourceId,
+      projectionId: item.projectionId,
+      headOperationId: item.headOperationId,
           kind: item.kind,
           title: item.title,
           completed: completed,
@@ -271,8 +273,10 @@ class _PimScreenState extends ConsumerState<PimScreen> {
               onPressed: () async {
                 if (title.text.trim().isEmpty) return;
                 await ref.read(bridgeControllerProvider.notifier).savePimItem(
-                      spaceId: spaceId,
-                      resourceId: existing?.resourceId,
+                  spaceId: spaceId,
+                  resourceId: existing?.resourceId,
+                  projectionId: existing?.projectionId,
+                  headOperationId: existing?.headOperationId,
                       kind: kind,
                       title: title.text,
                       completed: completed,

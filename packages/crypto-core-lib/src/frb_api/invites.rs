@@ -7,14 +7,17 @@ use crate::{CipherAlgorithm, CryptoEngine, EncryptedPayload, secret_vault};
 use super::{
     state::{
         MOBILE_ACCOUNT_MASTER_KEY, MOBILE_BRIDGE_RUNTIME, MOBILE_COLLECTION_KEYS,
-        MOBILE_DEVICE_SECRETS, MOBILE_REFRESH_TOKEN, set_mobile_refresh_token,
+        MOBILE_DEVICE_SECRETS, MOBILE_REFRESH_TOKEN, MOBILE_SYNC_STARTS,
+        set_mobile_refresh_token,
     },
-    transport::{encode_msgpack, post_msgpack_with_auth_refresh},
+    transport::{encode_msgpack, get_msgpack_with_auth_refresh, post_msgpack_with_auth_refresh},
     types::{
-        MobileCreateInviteCodeRequest, MobileCreateInviteCodeResponse, MobileIssuedInviteCode,
-        MobileDeviceKeyPackage, MobilePutDeviceKeyPackageRequest,
+        MobileCreateInviteCodeRequest, MobileCreateInviteCodeResponse, MobileDeviceKeyPackage,
+        MobileIssuedInviteCode, MobileListSpaceDevicesResponse, MobileListSpaceMembersResponse,
+        MobileListSpacesResponse, MobileMemberRecoveryKeyPackage, MobilePutDeviceKeyPackageRequest,
         MobilePutRecoveryKeyPackageRequest, MobileRedeemInviteCodeRequest,
-        MobileRedeemInviteCodeResponse, MobileRedeemedInvite, MobileStoredResponse,
+        MobileRedeemInviteCodeResponse, MobileRedeemedInvite, MobileRotateSpaceKeyRequest,
+        MobileRotateSpaceKeyResponse, MobileStoredResponse,
     },
 };
 
@@ -47,10 +50,8 @@ fn generate_invite_code() -> String {
     let mut rng = OsRng;
     let mut raw = String::with_capacity(16);
     for _ in 0..16 {
-        let idx = (rng.next_u32() as usize) % ALPHABET.len();
-        raw.push(ALPHABET[idx] as char);
+        raw.push(ALPHABET[(rng.next_u32() as usize) % ALPHABET.len()] as char);
     }
-
     format!(
         "{}-{}-{}-{}",
         &raw[0..4],
@@ -92,7 +93,6 @@ fn wrap_collection_key_with_invite_code(
         None,
     )
     .map_err(|error| format!("failed to encrypt collection key for invite: {error}"))?;
-
     let mut payload = Vec::with_capacity(24 + encrypted.ciphertext.len());
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&encrypted.ciphertext);
@@ -129,58 +129,178 @@ pub(super) async fn mobile_create_invite_code_impl(
     collection_key: [u8; 32],
     ttl_minutes: u32,
 ) -> Result<MobileIssuedInviteCode, String> {
+    let _runtime_lease = super::state::MOBILE_RUNTIME_LEASE.lock().await;
     if !(15..=7 * 24 * 60).contains(&ttl_minutes) {
         return Err("ttl_minutes must be between 15 and 10080".to_string());
     }
 
-    let config = {
-        let runtime = MOBILE_BRIDGE_RUNTIME.lock().await;
-        runtime
-            .last_config
-            .clone()
-            .ok_or_else(|| "mobile sync runtime has not been configured yet".to_string())?
-    };
-
-    let collection_id = Uuid::parse_str(&collection_id)
+    let space_id = Uuid::parse_str(&collection_id)
         .map_err(|error| format!("invalid collection id: {error}"))?;
-    let invite_code = generate_invite_code();
-    let invite_code_hash = hash_invite_code(&invite_code)?;
-    let encrypted_group_key = wrap_collection_key_with_invite_code(collection_key, &invite_code)?;
-
-    let request = MobileCreateInviteCodeRequest {
-        space_id: collection_id,
-        role: "editor".to_string(),
-        invite_code_hash: invite_code_hash.to_vec(),
-        encrypted_key_package: encrypted_group_key,
-        encrypted_note: None,
-        ttl_minutes,
-    };
-    let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
-    let body = encode_msgpack(&request)?;
-    let (created, rotated_tokens): (MobileCreateInviteCodeResponse, Option<(String, String)>) =
-        post_msgpack_with_auth_refresh(
-            &config.cloud_base_url,
-            "/invite-codes",
-            body,
-            &config.access_token,
-            refresh_token.as_deref(),
-        )
-        .await?;
-    let _ = created.id;
-
-    if let Some((new_access_token, new_refresh_token)) = rotated_tokens {
-        {
-            let mut runtime = MOBILE_BRIDGE_RUNTIME.lock().await;
-            if let Some(last_config) = runtime.last_config.as_mut() {
-                last_config.access_token = new_access_token;
-            }
-        }
-        set_mobile_refresh_token(Some(new_refresh_token)).await;
+    let (expected_key_epoch, registered_key) = MOBILE_COLLECTION_KEYS
+        .lock()
+        .await
+        .get(&collection_id)
+        .copied()
+        .ok_or_else(|| "security-space key is not registered".to_string())?;
+    if registered_key != collection_key {
+        return Err("the supplied security-space key is stale".to_string());
     }
 
+    let runner = super::bridge::mobile_runner().await?;
+    runner.sync_once().await.map_err(|error| error.to_string())?;
+    set_mobile_refresh_token(runner.current_refresh_token().await).await;
+    let base_space_seq = runner
+        .space_cursor(space_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let spaces: MobileListSpacesResponse = get_current_session("/spaces").await?;
+    let space = spaces
+        .spaces
+        .into_iter()
+        .find(|space| space.space_id == space_id)
+        .ok_or_else(|| "security space is no longer accessible".to_string())?;
+    if space.role != "owner" {
+        return Err("only the space owner can create membership invites".to_string());
+    }
+    if space.key_epoch != expected_key_epoch {
+        return Err("security-space key epoch changed; provision keys again".to_string());
+    }
+
+    let members: MobileListSpaceMembersResponse =
+        get_current_session(&format!("/spaces/{space_id}/members")).await?;
+    let devices: MobileListSpaceDevicesResponse =
+        get_current_session(&format!("/spaces/{space_id}/devices")).await?;
+    let new_key_epoch = expected_key_epoch
+        .checked_add(1)
+        .ok_or_else(|| "security-space key epoch overflow".to_string())?;
+    let new_space_key = CryptoEngine::random_symmetric_key().0;
+    let remaining_device_packages = devices
+        .devices
+        .into_iter()
+        .filter(|device| device.active)
+        .map(|device| {
+            let public_key: [u8; 32] = device
+                .hpke_public_key
+                .try_into()
+                .map_err(|_| "member device HPKE public key is invalid".to_string())?;
+            let encrypted =
+                CryptoEngine::encrypt_group_key_for_peer(&new_space_key, &public_key)
+                    .map_err(|error| error.to_string())?;
+            Ok(MobileDeviceKeyPackage {
+                device_id: device.device_id,
+                key_epoch: new_key_epoch,
+                encrypted_key_package: rmp_serde::to_vec_named(&encrypted)
+                    .map_err(|error| error.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    #[derive(serde::Deserialize)]
+    struct AccountPublicKeyBundleV2 {
+        version: u8,
+        #[serde(with = "serde_bytes")]
+        account_recovery_public_key: Vec<u8>,
+    }
+    let remaining_recovery_packages = members
+        .members
+        .into_iter()
+        .map(|member| {
+            let bundle: AccountPublicKeyBundleV2 =
+                rmp_serde::from_slice(&member.public_key_bundle)
+                    .map_err(|_| format!("member {} has an invalid recovery key", member.username))?;
+            if bundle.version != 2 {
+                return Err(format!(
+                    "member {} has an unsupported recovery key",
+                    member.username
+                ));
+            }
+            let public_key: [u8; 32] = bundle
+                .account_recovery_public_key
+                .try_into()
+                .map_err(|_| format!("member {} has an invalid recovery key", member.username))?;
+            let encrypted =
+                CryptoEngine::encrypt_group_key_for_peer(&new_space_key, &public_key)
+                    .map_err(|error| error.to_string())?;
+            Ok(MobileMemberRecoveryKeyPackage {
+                user_id: member.user_id,
+                key_epoch: new_key_epoch,
+                encrypted_key_package: rmp_serde::to_vec_named(&encrypted)
+                    .map_err(|error| error.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let snapshots = runner
+        .build_rotation_snapshots(
+            space_id,
+            new_key_epoch,
+            new_space_key,
+            base_space_seq,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let snapshot_streams = snapshots
+        .iter()
+        .map(|snapshot| snapshot.stream_id)
+        .collect::<std::collections::HashSet<_>>();
+    let quarantined_streams = runner
+        .quarantined_stream_ids(space_id, base_space_seq)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|stream_id| !snapshot_streams.contains(stream_id))
+        .collect();
+    let metadata = secret_vault::decrypt(&collection_key, &space.encrypted_metadata)
+        .map_err(|error| format!("failed to decrypt space metadata: {error}"))?;
+    let rotation_id = Uuid::new_v4();
+    let rotated: MobileRotateSpaceKeyResponse = post_current_session(
+        &format!("/spaces/{space_id}/rotate-key"),
+        &MobileRotateSpaceKeyRequest {
+            rotation_id,
+            expected_key_epoch,
+            new_key_epoch,
+            base_space_seq,
+            new_encrypted_metadata: secret_vault::encrypt(&new_space_key, &metadata)
+                .map_err(|error| format!("failed to encrypt space metadata: {error}"))?,
+            remaining_device_packages,
+            remaining_recovery_packages,
+            snapshots,
+            quarantined_streams,
+        },
+    )
+    .await?;
+    if !rotated.rotated || rotated.key_epoch != new_key_epoch {
+        return Err("server returned an invalid key-rotation result".to_string());
+    }
+    MOBILE_COLLECTION_KEYS
+        .lock()
+        .await
+        .insert(collection_id, (new_key_epoch, new_space_key));
+
+    let invite_code = generate_invite_code();
+    let invite_code_hash = hash_invite_code(&invite_code)?;
+    let created: MobileCreateInviteCodeResponse = post_current_session(
+        "/invite-codes",
+        &MobileCreateInviteCodeRequest {
+            space_id,
+            rotation_id,
+            role: "editor".to_string(),
+            invite_code_hash: invite_code_hash.to_vec(),
+            encrypted_key_package: wrap_collection_key_with_invite_code(
+                new_space_key,
+                &invite_code,
+            )?,
+            encrypted_note: None,
+            ttl_minutes,
+        },
+    )
+    .await?;
+    let _ = created.id;
     Ok(MobileIssuedInviteCode {
         code: invite_code,
         ttl_minutes,
+        key_epoch: new_key_epoch,
+        current_state_start_seq: base_space_seq,
+        collection_key: new_space_key,
     })
 }
 
@@ -260,8 +380,10 @@ pub(super) async fn mobile_redeem_invite_code_impl(
     .await?;
     let recovery_request = MobilePutRecoveryKeyPackageRequest {
         key_epoch: redeemed.key_epoch,
-        encrypted_key_package: secret_vault::encrypt(&account_master_key, &collection_key)
-            .map_err(|error| error.to_string())?,
+        encrypted_key_package: super::devices::wrap_recovery_space_key(
+            &account_master_key,
+            &collection_key,
+        )?,
     };
     post_current_session::<_, MobileStoredResponse>(
         &format!("/spaces/{}/recovery-key-package", redeemed.space_id),
@@ -276,11 +398,22 @@ pub(super) async fn mobile_redeem_invite_code_impl(
             (redeemed.key_epoch, collection_key),
         );
     }
+    MOBILE_SYNC_STARTS
+        .lock()
+        .await
+        .insert(
+            collection_id.clone(),
+            redeemed
+                .history_start_seq
+                .max(redeemed.current_state_start_seq),
+        );
 
     Ok(MobileRedeemedInvite {
         collection_id,
         role: redeemed.role,
         key_epoch: redeemed.key_epoch,
+        history_start_seq: redeemed.history_start_seq,
+        current_state_start_seq: redeemed.current_state_start_seq,
         collection_key,
     })
 }
@@ -301,6 +434,33 @@ where
         &config.cloud_base_url,
         path,
         encode_msgpack(payload)?,
+        &config.access_token,
+        refresh_token.as_deref(),
+    )
+    .await?;
+    if let Some((new_access_token, new_refresh_token)) = rotated {
+        if let Some(last_config) = MOBILE_BRIDGE_RUNTIME.lock().await.last_config.as_mut() {
+            last_config.access_token = new_access_token;
+        }
+        set_mobile_refresh_token(Some(new_refresh_token)).await;
+    }
+    Ok(response)
+}
+
+async fn get_current_session<R>(path: &str) -> Result<R, String>
+where
+    R: serde::de::DeserializeOwned,
+{
+    let config = MOBILE_BRIDGE_RUNTIME
+        .lock()
+        .await
+        .last_config
+        .clone()
+        .ok_or_else(|| "mobile sync has not been configured yet".to_string())?;
+    let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
+    let (response, rotated) = get_msgpack_with_auth_refresh(
+        &config.cloud_base_url,
+        path,
         &config.access_token,
         refresh_token.as_deref(),
     )

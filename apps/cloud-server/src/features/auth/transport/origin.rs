@@ -10,13 +10,14 @@ use crate::{
 
 fn normalize_origin(value: &str) -> Option<String> {
     let url = Url::parse(value.trim()).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
-    let mut out = format!("{}://{}", url.scheme().to_ascii_lowercase(), host);
-    if let Some(port) = url.port() {
-        out.push(':');
-        out.push_str(&port.to_string());
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
     }
-    Some(out)
+    Some(url.origin().ascii_serialization())
 }
 
 fn request_origin_from_headers(headers: &HeaderMap) -> Result<String, ApiError> {
@@ -46,11 +47,8 @@ pub(crate) fn validate_cookie_request_origin(
 ) -> Result<(), ApiError> {
     let request_origin = request_origin_from_headers(headers)?;
 
-    let origin_allowed = config.cors_allow_origins.iter().any(|allowed_origin| {
+    let origin_allowed = config.web_cookie_origins.iter().any(|allowed_origin| {
         let trimmed = allowed_origin.trim();
-        if trimmed == "*" {
-            return true;
-        }
         normalize_origin(trimmed)
             .map(|normalized| normalized == request_origin)
             .unwrap_or(false)
@@ -60,4 +58,34 @@ pub(crate) fn validate_cookie_request_origin(
         return Err(unauthorized("origin mismatch"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_normalization_accepts_referer_paths_but_rejects_opaque_schemes() {
+        assert_eq!(
+            normalize_origin("https://App.Kamori.App/settings?tab=security"),
+            Some("https://app.kamori.app".to_string())
+        );
+        assert_eq!(
+            normalize_origin("http://[::1]:4173/app"),
+            Some("http://[::1]:4173".to_string())
+        );
+        assert!(normalize_origin("javascript://app.kamori.app").is_none());
+        assert!(normalize_origin("https://user@app.kamori.app").is_none());
+    }
+
+    #[test]
+    fn cookie_origin_wildcard_is_not_supported() {
+        let mut config = crate::platform::test_support::test_config();
+        config.web_cookie_origins = vec!["*".to_string()];
+        let headers = HeaderMap::from_iter([(
+            header::ORIGIN,
+            "https://attacker.example".parse().expect("origin header"),
+        )]);
+        assert!(validate_cookie_request_origin(&config, &headers).is_err());
+    }
 }

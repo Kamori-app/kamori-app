@@ -113,8 +113,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             _SystemIntegrationCard(
-              calendarEnabled: state.calendarProjectionEnabled,
-              contactsEnabled: state.contactsProjectionEnabled,
+              collections: state.collections,
+              calendarCollectionIds: state.calendarProjectionCollectionIds,
+              contactsCollectionIds: state.contactsProjectionCollectionIds,
               onCalendarChanged:
                   state.isBusy ? null : _changeCalendarProjection,
               onContactsChanged:
@@ -134,41 +135,55 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Future<void> _changeCalendarProjection(bool enabled) async {
+  Future<void> _changeCalendarProjection(
+    CollectionEntry collection,
+    bool enabled,
+  ) async {
     final controller = ref.read(bridgeControllerProvider.notifier);
     if (enabled) {
-      if (!await _confirmProjectionEnable(context.strings.text('events'))) {
+      if (!await _confirmProjectionEnable(
+        '${context.strings.text('events')} — ${collection.name}',
+      )) {
         return;
       }
-      await controller.setCalendarProjectionEnabled(true);
+      await controller.setCalendarProjectionEnabled(collection.id, true);
       return;
     }
-    final remove =
-        await _chooseProjectionRemoval(context.strings.text('events'));
+    final remove = await _chooseProjectionRemoval(
+      '${context.strings.text('events')} — ${collection.name}',
+    );
     if (remove == null) {
       return;
     }
     await controller.setCalendarProjectionEnabled(
+      collection.id,
       false,
       removeProjectedData: remove,
     );
   }
 
-  Future<void> _changeContactsProjection(bool enabled) async {
+  Future<void> _changeContactsProjection(
+    CollectionEntry collection,
+    bool enabled,
+  ) async {
     final controller = ref.read(bridgeControllerProvider.notifier);
     if (enabled) {
-      if (!await _confirmProjectionEnable(context.strings.text('contacts'))) {
+      if (!await _confirmProjectionEnable(
+        '${context.strings.text('contacts')} — ${collection.name}',
+      )) {
         return;
       }
-      await controller.setContactsProjectionEnabled(true);
+      await controller.setContactsProjectionEnabled(collection.id, true);
       return;
     }
-    final remove =
-        await _chooseProjectionRemoval(context.strings.text('contacts'));
+    final remove = await _chooseProjectionRemoval(
+      '${context.strings.text('contacts')} — ${collection.name}',
+    );
     if (remove == null) {
       return;
     }
     await controller.setContactsProjectionEnabled(
+      collection.id,
       false,
       removeProjectedData: remove,
     );
@@ -492,16 +507,18 @@ class _SettingsCard extends StatelessWidget {
 
 class _SystemIntegrationCard extends StatelessWidget {
   const _SystemIntegrationCard({
-    required this.calendarEnabled,
-    required this.contactsEnabled,
+    required this.collections,
+    required this.calendarCollectionIds,
+    required this.contactsCollectionIds,
     required this.onCalendarChanged,
     required this.onContactsChanged,
   });
 
-  final bool calendarEnabled;
-  final bool contactsEnabled;
-  final ValueChanged<bool>? onCalendarChanged;
-  final ValueChanged<bool>? onContactsChanged;
+  final List<CollectionEntry> collections;
+  final Set<String> calendarCollectionIds;
+  final Set<String> contactsCollectionIds;
+  final Future<void> Function(CollectionEntry, bool)? onCalendarChanged;
+  final Future<void> Function(CollectionEntry, bool)? onContactsChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -517,20 +534,48 @@ class _SystemIntegrationCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(context.strings.text('systemIntegrationBody')),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: calendarEnabled,
-              onChanged: onCalendarChanged,
-              title: Text(context.strings.text('calendarProjection')),
-              subtitle: Text(context.strings.text('calendarPermission')),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: contactsEnabled,
-              onChanged: onContactsChanged,
-              title: Text(context.strings.text('contactsProjection')),
-              subtitle: Text(context.strings.text('contactsPermission')),
-            ),
+            if (collections.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(context.strings.text('noSpaces')),
+              )
+            else
+              ...collections.map(
+                (collection) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Divider(),
+                    Text(
+                      collection.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: calendarCollectionIds.contains(collection.id),
+                      onChanged: onCalendarChanged == null
+                          ? null
+                          : (enabled) =>
+                              onCalendarChanged!(collection, enabled),
+                      title: Text(context.strings.text('calendarProjection')),
+                      subtitle: Text(
+                        context.strings.text('calendarPermission'),
+                      ),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: contactsCollectionIds.contains(collection.id),
+                      onChanged: onContactsChanged == null
+                          ? null
+                          : (enabled) =>
+                              onContactsChanged!(collection, enabled),
+                      title: Text(context.strings.text('contactsProjection')),
+                      subtitle: Text(
+                        context.strings.text('contactsPermission'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               context.strings.text('tasksStay'),
               style: TextStyle(fontSize: 12),

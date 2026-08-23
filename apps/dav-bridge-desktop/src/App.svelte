@@ -116,7 +116,7 @@
   const saveSettings = async () => {
     settingsSaveError = '';
     const backendNext = {
-      cloudBaseUrl: settingsCloudBaseUrl.trim() || 'http://127.0.0.1:3000',
+      cloudBaseUrl: settingsCloudBaseUrl.trim() || 'https://api.kamori.app',
     };
 
     const windowNext = {
@@ -155,6 +155,7 @@
   onMount(async () => {
     try {
       await api.configureBackend($backendSettings.cloudBaseUrl);
+      await api.restoreSession();
       await api.applyWindowPreferences(
         $windowPreferences.closeBehavior,
         $windowPreferences.showTrayIcon,

@@ -50,7 +50,7 @@ history. The backend needs a dedicated B2 Application Key restricted to the
 private `kamori-production-pulumi-state` bucket. Do not reuse the API runtime
 key or the PostgreSQL-backup key.
 
-Use Pulumi CLI `3.258.0`, which is pinned in `infra/Pulumi.yaml` and the
+Use Pulumi CLI `3.259.0`, which is pinned in `infra/Pulumi.yaml` and the
 infrastructure workflow. The pin, AWS SDK v2 URL and checksum settings below
 form one tested backend contract: this exact configuration has completed
 production previews and updates against the B2 bucket. The Go SDK dependency
@@ -73,7 +73,7 @@ binary if another package manager still exposes a newer release first in
 `PATH`:
 
 ```bash
-curl -fsSL https://get.pulumi.com | sh -s -- --version 3.258.0
+curl -fsSL https://get.pulumi.com | sh -s -- --version 3.259.0
 ~/.pulumi/bin/pulumi version
 ```
 
@@ -163,13 +163,15 @@ Paste the generated value at the hidden prompt. Do not pass it as a command-line
 argument: command-line values may be retained in shell history or process
 inspection logs.
 
-### `kamori:refreshRotationKey` — deterministic refresh retry key
+### `kamori:refreshRotationKey` — exact refresh-retry derivation key
 
 - **Classification:** 32-byte runtime HMAC key.
-- **Purpose:** derives the same replacement refresh token when an identical
-  rotation request is retried within the idempotency window. This prevents a
-  lost response from being misclassified as token reuse while retaining reuse
-  detection for genuinely replayed tokens.
+- **Purpose:** derives the same replacement refresh token from the old token
+  and the client's random, durably persisted rotation request id. An exact
+  retry remains recoverable for as long as the replacement session is active.
+  A different request id still triggers reuse detection. This prevents a lost
+  response or process crash from destroying a legitimate session without
+  storing plaintext refresh tokens on the server.
 - **Dependencies:** every API node must use the same key. Existing sessions and
   refresh rotation behavior depend on it.
 - **Loss or rotation:** replacing it requires revoking every refresh session in
@@ -231,7 +233,7 @@ pulumi config set kamori:sshKeys operator-key
 
 The stock image may briefly activate SSH through `ssh.socket` on `22`, but the
 Hetzner firewall never exposes that port. Before package installation,
-cloud-init's `runcmd` installs the staged Pulumi host keypair and certificate
+cloud-init's `runcmd` installs the staged Pulumi raw host keypair
 after Ubuntu's `cc_ssh` module has finished regenerating image keys. It then
 validates the hardened configuration with `sshd -t`, stops any image-started
 SSH daemon, reloads systemd, and restarts Ubuntu's native `ssh.socket`. Its
@@ -277,8 +279,9 @@ Before the automated host replacement, create a second key named
 `kamori-production-postgres`, **Read and Write** access, and **Allow List All
 Bucket Names** enabled for S3 SDK compatibility. Store its displayed `keyID`
 and one-time `applicationKey` in the two encrypted Pulumi settings documented
-below. Do not copy either value to a host; role-specific cloud-init writes the
-root-owned pgBackRest environment.
+below. Do not copy either value to a host; the infrastructure workflow writes
+the root-owned pgBackRest environment through the restricted configuration
+channel.
 
 Create a third key named `kamori-production-replication` with **Read Only**
 access only to `kamori-production-primary` and **Allow List All Bucket Names**
@@ -509,8 +512,9 @@ Pulumi generates and retains:
 - a 30-day early-renewal window for the 397-day leaf certificates.
 
 Private keys remain encrypted in the passphrase-protected Pulumi state and are
-written only into the role-specific cloud-init for the host that needs them.
-There is no local PKI path, certificate upload, or manual host distribution.
+written only into the role configuration for the host that needs them. Leaf
+renewal is applied in place after a successful infrastructure update. There is
+no local PKI path, certificate upload, or manual host distribution.
 Pulumi state and the passphrase are therefore part of the PKI trust boundary;
 compromise requires rotating the complete private trust domain. A managed CA
 or KMS/HSM is a post-beta hardening option, not a beta bootstrap dependency.
@@ -791,13 +795,14 @@ complete plan and run it again with `up`. App nodes must receive the same OPAQUE
 setup file. Sticky sessions are neither required nor accepted as an
 authentication correctness mechanism.
 
-Because cloud-init is creation-time configuration, changing a host-delivered
-secret is a node-replacement operation, not an in-place file edit. The initial
-`replace` phase intentionally recreates all empty beta hosts and is therefore a
-bootstrap maintenance window. After the first deployment, never use that phase
-as a routine secret-rotation mechanism: implement and exercise a per-node
-replacement procedure before rotating a host-delivered secret. Routine
-application CD does not rewrite `/etc/kamori/cloud.env` or replace a host.
+Cloud-init contains only the immutable machine baseline, raw host identity, and
+the public half of a dedicated configuration identity. Runtime secrets,
+PostgreSQL TLS leaves, SSH host certificates, and role assets are rendered as
+encrypted Pulumi outputs and applied after every successful infrastructure
+`up` by a root-owned, role-checking entrypoint. Changing those values updates
+the hosts in place and does not require copying a secret to GitHub or replacing
+a VM. The separate application deployment workflow still does not rewrite
+`/etc/kamori/cloud.env` and cannot use the infrastructure configuration key.
 
 After the application migration runs, each server records the SHA-256
 fingerprint of its setup in `server_security_config`. A node with a different
@@ -861,9 +866,10 @@ update. Do not generate or distribute host keys manually.
 
 - **Purpose:** authenticates a protected GitHub-hosted job through `ops` and
   then as `deploy` to the two private app nodes on TCP `2022`.
-- **Dependencies:** Pulumi cloud-init installs the public half, password-locks
-  the account, and installs root-owned deployment entrypoints. No SSH session
-  or copied repository checkout is used for bootstrap.
+- **Dependencies:** the Pulumi host-configuration phase installs the public
+  half and root-owned deployment entrypoints into the account created and
+  password-locked by cloud-init. No copied repository checkout is used for
+  bootstrap.
 - **Boundary:** the private key is materialized only under `RUNNER_TEMP` for the
   deployment step and deleted by a shell trap. The app account is not in the
   Docker group and sudo permits only three fixed root-owned wrappers. The ops
@@ -901,16 +907,18 @@ running containers and the next job refreshes it before pulling images.
 
 - **GitHub location:** `production` Environment variable, not a secret.
 - **Value:** `10.42.0.11`.
-- **Purpose:** tells the GitHub-hosted runner which private host receives the
-  migration-first rollout through the ops bastion.
-- **Dependencies:** do not append a port; the workflow supplies `2022`.
-  Swapping app one and app two changes which node runs database migrations.
+- **Purpose:** tells the GitHub-hosted runner where the explicit
+  `deploy-app-1` canary action is activated through the ops bastion.
+- **Dependencies:** do not append a port; the workflow supplies `2022`. Enable
+  `run_migrations` only for this canary and only for backward-compatible expand
+  migrations.
 
 ### `BETA_APP_TWO_HOST` — second deployment SSH destination
 
 - **GitHub location:** `production` Environment variable, not a secret.
 - **Value:** `10.42.0.12`.
-- **Purpose:** identifies the second app node in the rolling deployment.
+- **Purpose:** identifies the second app node used by the explicit
+  `deploy-app-2` promotion after external monitoring and operator review.
 - **Dependencies:** it must be a different private address from app one, and
   the ops firewall/private network must allow the connection on `2022`.
 

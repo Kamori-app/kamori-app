@@ -8,7 +8,7 @@ use crate::{CryptoEngine, EncryptedGroupKey, secret_vault};
 use super::{
     state::{
         MOBILE_ACCOUNT_MASTER_KEY, MOBILE_COLLECTION_KEYS, MOBILE_DEVICE_SECRETS,
-        MOBILE_REFRESH_TOKEN,
+        MOBILE_REFRESH_TOKEN, MOBILE_SYNC_STARTS,
         set_mobile_refresh_token,
     },
     transport::{
@@ -17,10 +17,10 @@ use super::{
     },
     types::{
         MobileCollection, MobileCreateSpaceRequest, MobileCreateSpaceResponse,
-        MobileDeviceKeyPackage, MobileDeviceSecrets, MobileListSpacesResponse,
-        MobilePutRecoveryKeyPackageRequest,
-        MobileProvisionResult, MobileRegisterDeviceRequest, MobileRegisterDeviceResponse,
-        MobileSpaceLifecycleResponse, MobileStoredResponse,
+        MobileDeviceKeyPackage, MobileDeviceSecrets, MobileListRecoveryKeyPackagesResponse,
+        MobileListSpacesResponse, MobileProvisionResult, MobilePutDeviceKeyPackageRequest,
+        MobilePutRecoveryKeyPackageRequest, MobileRegisterDeviceRequest,
+        MobileRegisterDeviceResponse, MobileSpaceLifecycleResponse, MobileStoredResponse,
     },
 };
 
@@ -43,7 +43,7 @@ fn metadata_kind() -> String {
     "pim".to_string()
 }
 
-fn generate_device_secrets() -> MobileDeviceSecrets {
+pub(super) fn generate_device_secrets() -> MobileDeviceSecrets {
     let hpke = CryptoEngine::generate_x25519_keypair();
     let mut signing_private_key = [0_u8; 32];
     OsRng.fill_bytes(&mut signing_private_key);
@@ -55,13 +55,37 @@ fn generate_device_secrets() -> MobileDeviceSecrets {
     }
 }
 
+pub(super) fn wrap_recovery_space_key(
+    account_master_key: &[u8; 32],
+    space_key: &[u8; 32],
+) -> Result<Vec<u8>, String> {
+    let identity = CryptoEngine::derive_account_recovery_keypair(account_master_key);
+    let encrypted = CryptoEngine::encrypt_group_key_for_peer(space_key, &identity.public_key)
+        .map_err(|error| error.to_string())?;
+    rmp_serde::to_vec_named(&encrypted).map_err(|error| error.to_string())
+}
+
+fn unwrap_recovery_space_key(
+    account_master_key: &[u8; 32],
+    package: &[u8],
+) -> Result<[u8; 32], String> {
+    let encrypted: EncryptedGroupKey =
+        rmp_serde::from_slice(package).map_err(|error| error.to_string())?;
+    let identity = CryptoEngine::derive_account_recovery_keypair(account_master_key);
+    CryptoEngine::decrypt_group_key_from_peer(&encrypted, &identity.private_key)
+        .map_err(|error| error.to_string())
+}
+
 pub(super) async fn mobile_provision_device_and_spaces_impl(
     cloud_base_url: String,
     access_token: String,
     account_master_key: [u8; 32],
     platform: String,
+    device_enrollment_token: Option<String>,
     existing_device: Option<MobileDeviceSecrets>,
 ) -> Result<MobileProvisionResult, String> {
+    let cloud_base_url = crate::local_bridge_runner::normalize_cloud_base_url(&cloud_base_url)
+        .map_err(|error| error.to_string())?;
     let platform = platform.trim().to_ascii_lowercase();
     if !matches!(platform.as_str(), "android" | "ios") {
         return Err("mobile platform must be android or ios".to_string());
@@ -82,26 +106,29 @@ pub(super) async fn mobile_provision_device_and_spaces_impl(
     )
     .map_err(|error| error.to_string())?;
     let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
-    let register_body = encode_msgpack(&MobileRegisterDeviceRequest {
-        device_id,
-        signing_public_key: signing_public_key.to_vec(),
-        hpke_public_key: device.hpke_public_key.to_vec(),
-        encrypted_name,
-        platform,
-    })?;
-    let (_registered, rotated): (MobileRegisterDeviceResponse, Option<(String, String)>) =
-        post_msgpack_with_auth_refresh(
-            &cloud_base_url,
-            "/devices",
-            register_body,
-            &access_token,
-            refresh_token.as_deref(),
-        )
-        .await?;
     let mut current_access_token = access_token;
-    if let Some((new_access_token, new_refresh_token)) = rotated {
-        current_access_token = new_access_token;
-        set_mobile_refresh_token(Some(new_refresh_token)).await;
+    if let Some(enrollment_token) = device_enrollment_token {
+        let register_body = encode_msgpack(&MobileRegisterDeviceRequest {
+            enrollment_token,
+            device_id,
+            signing_public_key: signing_public_key.to_vec(),
+            hpke_public_key: device.hpke_public_key.to_vec(),
+            encrypted_name,
+            platform,
+        })?;
+        let (_registered, rotated): (MobileRegisterDeviceResponse, Option<(String, String)>) =
+            post_msgpack_with_auth_refresh(
+                &cloud_base_url,
+                "/devices",
+                register_body,
+                &current_access_token,
+                refresh_token.as_deref(),
+            )
+            .await?;
+        if let Some((new_access_token, new_refresh_token)) = rotated {
+            current_access_token = new_access_token;
+            set_mobile_refresh_token(Some(new_refresh_token)).await;
+        }
     }
 
     let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
@@ -118,25 +145,79 @@ pub(super) async fn mobile_provision_device_and_spaces_impl(
         set_mobile_refresh_token(Some(new_refresh_token)).await;
     }
 
+    let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
+    let (recovery, rotated): (MobileListRecoveryKeyPackagesResponse, Option<(String, String)>) =
+        get_msgpack_with_auth_refresh(
+            &cloud_base_url,
+            "/spaces/recovery-key-packages",
+            &current_access_token,
+            refresh_token.as_deref(),
+        )
+        .await?;
+    if let Some((new_access_token, new_refresh_token)) = rotated {
+        current_access_token = new_access_token;
+        set_mobile_refresh_token(Some(new_refresh_token)).await;
+    }
+    let recovery_packages = recovery
+        .packages
+        .into_iter()
+        .map(|package| {
+            (
+                (package.space_id, package.key_epoch),
+                package.encrypted_key_package,
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
     let mut collections = Vec::new();
     let mut runtime_keys = std::collections::HashMap::new();
+    let mut sync_starts = std::collections::HashMap::new();
     for space in spaces.spaces {
-        let Some(package) = space.device_key_packages.iter().find(|package| {
+        let device_package = space.device_key_packages.iter().find(|package| {
             package.device_id == device_id && package.key_epoch == space.key_epoch
-        }) else {
+        });
+        let key = if let Some(package) = device_package {
+            let encrypted: EncryptedGroupKey =
+                rmp_serde::from_slice(&package.encrypted_key_package)
+                    .map_err(|error| format!("invalid device key package: {error}"))?;
+            CryptoEngine::decrypt_group_key_from_peer(&encrypted, &device.hpke_private_key)
+                .map_err(|error| format!("failed to unwrap security-space key: {error}"))?
+        } else if let Some(package) = recovery_packages.get(&(space.space_id, space.key_epoch)) {
+            unwrap_recovery_space_key(&account_master_key, package)
+                .map_err(|error| format!("failed to unwrap recovery key package: {error}"))?
+        } else {
             continue;
         };
-        let encrypted: EncryptedGroupKey = rmp_serde::from_slice(&package.encrypted_key_package)
-            .map_err(|error| format!("invalid device key package: {error}"))?;
-        let key = CryptoEngine::decrypt_group_key_from_peer(
-            &encrypted,
-            &device.hpke_private_key,
-        )
-        .map_err(|error| format!("failed to unwrap security-space key: {error}"))?;
+        if device_package.is_none() {
+            let encrypted =
+                CryptoEngine::encrypt_group_key_for_peer(&key, &device.hpke_public_key)
+                    .map_err(|error| error.to_string())?;
+            let body = encode_msgpack(&MobilePutDeviceKeyPackageRequest {
+                package: MobileDeviceKeyPackage {
+                    device_id,
+                    key_epoch: space.key_epoch,
+                    encrypted_key_package: rmp_serde::to_vec_named(&encrypted)
+                        .map_err(|error| error.to_string())?,
+                },
+            })?;
+            let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
+            let (_stored, rotated): (MobileStoredResponse, Option<(String, String)>) =
+                post_msgpack_with_auth_refresh(
+                    &cloud_base_url,
+                    &format!("/spaces/{}/device-key-packages", space.space_id),
+                    body,
+                    &current_access_token,
+                    refresh_token.as_deref(),
+                )
+                .await?;
+            if let Some((new_access_token, new_refresh_token)) = rotated {
+                current_access_token = new_access_token;
+                set_mobile_refresh_token(Some(new_refresh_token)).await;
+            }
+        }
         let recovery_body = encode_msgpack(&MobilePutRecoveryKeyPackageRequest {
             key_epoch: space.key_epoch,
-            encrypted_key_package: secret_vault::encrypt(&account_master_key, &key)
-                .map_err(|error| error.to_string())?,
+            encrypted_key_package: wrap_recovery_space_key(&account_master_key, &key)?,
         })?;
         let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
         let (_stored, rotated): (MobileStoredResponse, Option<(String, String)>) =
@@ -160,15 +241,22 @@ pub(super) async fn mobile_provision_device_and_spaces_impl(
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| format!("Space {}", &space.space_id.to_string()[..8]));
         runtime_keys.insert(space.space_id.to_string(), (space.key_epoch, key));
+        sync_starts.insert(
+            space.space_id.to_string(),
+            space.history_start_seq.max(space.current_state_start_seq),
+        );
         collections.push(MobileCollection {
             collection_id: space.space_id.to_string(),
             name,
             role: space.role,
             key_epoch: space.key_epoch,
+            history_start_seq: space.history_start_seq,
+            current_state_start_seq: space.current_state_start_seq,
             collection_key: key,
         });
     }
     *MOBILE_COLLECTION_KEYS.lock().await = runtime_keys;
+    *MOBILE_SYNC_STARTS.lock().await = sync_starts;
     *MOBILE_DEVICE_SECRETS.lock().await = Some(device.clone());
     *MOBILE_ACCOUNT_MASTER_KEY.lock().await = Some(account_master_key);
 
@@ -224,8 +312,7 @@ pub(super) async fn mobile_create_collection_impl(
             encrypted_key_package: rmp_serde::to_vec_named(&encrypted_key)
                 .map_err(|error| error.to_string())?,
         }],
-        encrypted_recovery_key_package: secret_vault::encrypt(&account_master_key, &key)
-            .map_err(|error| error.to_string())?,
+        encrypted_recovery_key_package: wrap_recovery_space_key(&account_master_key, &key)?,
     };
     let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
     let (_created, rotated): (MobileCreateSpaceResponse, Option<(String, String)>) =
@@ -252,11 +339,17 @@ pub(super) async fn mobile_create_collection_impl(
         .lock()
         .await
         .insert(space_id.to_string(), (1, key));
+    MOBILE_SYNC_STARTS
+        .lock()
+        .await
+        .insert(space_id.to_string(), 0);
     Ok(MobileCollection {
         collection_id: space_id.to_string(),
         name,
         role: "owner".to_string(),
         key_epoch: 1,
+        history_start_seq: 0,
+        current_state_start_seq: 0,
         collection_key: key,
     })
 }
@@ -296,6 +389,10 @@ pub(super) async fn mobile_move_collection_to_trash_impl(
         set_mobile_refresh_token(Some(new_refresh_token)).await;
     }
     MOBILE_COLLECTION_KEYS
+        .lock()
+        .await
+        .remove(&collection_id.to_string());
+    MOBILE_SYNC_STARTS
         .lock()
         .await
         .remove(&collection_id.to_string());

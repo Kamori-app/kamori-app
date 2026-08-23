@@ -4,7 +4,7 @@ use opaque_ke::ciphersuite::CipherSuite;
 use opaque_ke::key_exchange::tripledh::TripleDh;
 use sha2_opaque::Sha512;
 
-use crate::{CipherAlgorithm, EncryptedGroupKey, EncryptedPayload, Keypair};
+use crate::{CipherAlgorithm, CryptoEngine, EncryptedGroupKey, EncryptedPayload, Keypair};
 
 mod auth {
     include!("frb_api/auth.rs");
@@ -50,23 +50,35 @@ pub fn generate_x25519_keypair() -> Keypair {
 }
 
 #[flutter_rust_bridge::frb]
+pub fn derive_account_recovery_keypair(master_key: [u8; 32]) -> Keypair {
+    CryptoEngine::derive_account_recovery_keypair(&master_key)
+}
+
+#[flutter_rust_bridge::frb]
 pub fn encrypt_payload(
     algorithm: CipherAlgorithm,
     key: [u8; 32],
     nonce: Vec<u8>,
     plaintext: Vec<u8>,
     aad: Vec<u8>,
-) -> EncryptedPayload {
+) -> Result<EncryptedPayload, String> {
     crypto_exports::encrypt_payload_impl(algorithm, key, nonce, plaintext, aad)
 }
 
 #[flutter_rust_bridge::frb]
-pub fn decrypt_payload(encrypted: EncryptedPayload, key: [u8; 32], aad: Vec<u8>) -> Vec<u8> {
+pub fn decrypt_payload(
+    encrypted: EncryptedPayload,
+    key: [u8; 32],
+    aad: Vec<u8>,
+) -> Result<Vec<u8>, String> {
     crypto_exports::decrypt_payload_impl(encrypted, key, aad)
 }
 
 #[flutter_rust_bridge::frb]
-pub fn encrypt_group_key_for_peer(cmk: [u8; 32], peer_public_key: [u8; 32]) -> EncryptedGroupKey {
+pub fn encrypt_group_key_for_peer(
+    cmk: [u8; 32],
+    peer_public_key: [u8; 32],
+) -> Result<EncryptedGroupKey, String> {
     crypto_exports::encrypt_group_key_for_peer_impl(cmk, peer_public_key)
 }
 
@@ -74,7 +86,7 @@ pub fn encrypt_group_key_for_peer(cmk: [u8; 32], peer_public_key: [u8; 32]) -> E
 pub fn decrypt_group_key_from_peer(
     encrypted: EncryptedGroupKey,
     recipient_private_key: [u8; 32],
-) -> [u8; 32] {
+) -> Result<[u8; 32], String> {
     crypto_exports::decrypt_group_key_from_peer_impl(encrypted, recipient_private_key)
 }
 
@@ -88,12 +100,20 @@ pub async fn mobile_password_login(
     auth::mobile_password_login_impl(cloud_base_url, username, password, totp_code).await
 }
 
+/// Generates a mobile device identity before any server-side enrollment so
+/// Flutter can persist the private keys transactionally in platform storage.
+#[flutter_rust_bridge::frb]
+pub fn mobile_generate_device_secrets() -> MobileDeviceSecrets {
+    devices::generate_device_secrets()
+}
+
 #[flutter_rust_bridge::frb]
 pub async fn mobile_provision_device_and_spaces(
     cloud_base_url: String,
     access_token: String,
     account_master_key: [u8; 32],
     platform: String,
+    device_enrollment_token: Option<String>,
     existing_device: Option<MobileDeviceSecrets>,
 ) -> Result<MobileProvisionResult, String> {
     devices::mobile_provision_device_and_spaces_impl(
@@ -101,6 +121,7 @@ pub async fn mobile_provision_device_and_spaces(
         access_token,
         account_master_key,
         platform,
+        device_enrollment_token,
         existing_device,
     )
     .await
@@ -117,13 +138,21 @@ pub async fn mobile_move_collection_to_trash(collection_id: String) -> Result<()
 }
 
 #[flutter_rust_bridge::frb]
-pub async fn mobile_import_refresh_token(refresh_token: String) -> Result<(), String> {
-    auth::mobile_import_refresh_token_impl(refresh_token).await
+pub async fn mobile_import_refresh_token(
+    refresh_token: String,
+    rotation_request_id: String,
+) -> Result<(), String> {
+    auth::mobile_import_refresh_token_impl(refresh_token, rotation_request_id).await
 }
 
 #[flutter_rust_bridge::frb]
 pub async fn mobile_export_refresh_token() -> Option<String> {
     auth::mobile_export_refresh_token_impl().await
+}
+
+#[flutter_rust_bridge::frb]
+pub async fn mobile_export_refresh_rotation_request_id() -> Option<String> {
+    auth::mobile_export_refresh_rotation_request_id_impl().await
 }
 
 #[flutter_rust_bridge::frb]
@@ -188,6 +217,8 @@ pub async fn mobile_list_pim_items() -> Result<Vec<MobilePimItem>, String> {
 pub async fn mobile_upsert_pim_item(
     space_id: String,
     resource_id: Option<String>,
+    projection_id: Option<String>,
+    head_operation_id: Option<String>,
     resource_kind: String,
     title: String,
     completed: bool,
@@ -199,6 +230,8 @@ pub async fn mobile_upsert_pim_item(
     bridge::mobile_upsert_pim_item_impl(
         space_id,
         resource_id,
+        projection_id,
+        head_operation_id,
         resource_kind,
         title,
         completed,
@@ -214,18 +247,34 @@ pub async fn mobile_upsert_pim_item(
 pub async fn mobile_delete_pim_item(
     space_id: String,
     resource_id: String,
+    projection_id: String,
+    head_operation_id: String,
     resource_kind: String,
 ) -> Result<(), String> {
-    bridge::mobile_delete_pim_item_impl(space_id, resource_id, resource_kind).await
+    bridge::mobile_delete_pim_item_impl(
+        space_id,
+        resource_id,
+        projection_id,
+        head_operation_id,
+        resource_kind,
+    )
+    .await
 }
 
 #[flutter_rust_bridge::frb]
 pub async fn mobile_register_collection_key(
     collection_id: String,
     key_epoch: u32,
+    sync_start_seq: u64,
     cmk: [u8; 32],
 ) -> Result<(), String> {
-    bridge::mobile_register_collection_key_impl(collection_id, key_epoch, cmk).await
+    bridge::mobile_register_collection_key_impl(
+        collection_id,
+        key_epoch,
+        sync_start_seq,
+        cmk,
+    )
+    .await
 }
 
 #[flutter_rust_bridge::frb]

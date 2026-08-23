@@ -14,14 +14,14 @@ void main() {
       );
 
       expect(result.accessToken, isNull);
-      expect(result.preauthToken, isNull);
+      expect(result.totpContinuationToken, isNull);
       expect(result.totpVerified, isFalse);
     });
 
-    test('returns preauth first and session after totp', () async {
+    test('returns a continuation first and a session after totp', () async {
       final bridge = MockRustBridgeApi();
 
-      final preauth = await bridge.passwordLogin(
+      final continuation = await bridge.passwordLogin(
         cloudBaseUrl: 'http://127.0.0.1:3000',
         username: 'alice',
         password: 'secret',
@@ -33,8 +33,8 @@ void main() {
         totpCode: '123456',
       );
 
-      expect(preauth.accessToken, isNull);
-      expect(preauth.preauthToken, isNotNull);
+      expect(continuation.accessToken, isNull);
+      expect(continuation.totpContinuationToken, isNotNull);
       expect(authed.accessToken, isNotNull);
       expect(authed.totpVerified, isTrue);
     });
@@ -57,13 +57,17 @@ void main() {
 
       expect(
         () => bridge.registerCollectionKey(
-            collectionId: '', keyEpoch: 1, cmk: List.filled(32, 1)),
+            collectionId: '',
+            keyEpoch: 1,
+            syncStartSeq: 0,
+            cmk: List.filled(32, 1)),
         throwsArgumentError,
       );
       expect(
         () => bridge.registerCollectionKey(
           collectionId: 'collection-1',
           keyEpoch: 1,
+          syncStartSeq: 0,
           cmk: List.filled(31, 1),
         ),
         throwsArgumentError,

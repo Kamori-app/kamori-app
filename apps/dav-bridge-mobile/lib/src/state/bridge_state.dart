@@ -1,6 +1,10 @@
 import 'package:dav_bridge_mobile/src/models/bridge_models.dart';
 
 const String kDefaultMobileSqlitePath = '.kamori/mobile-cache.sqlite3';
+const String kDefaultMobileCloudBaseUrl = String.fromEnvironment(
+  'KAMORI_CLOUD_BASE_URL',
+  defaultValue: 'https://api.kamori.app',
+);
 
 class BridgeState {
   const BridgeState({
@@ -11,19 +15,20 @@ class BridgeState {
     required this.collections,
     required this.pimItems,
     this.accessToken,
+    this.username,
     this.error,
     this.lastSyncAt,
     this.syncedItemsTotal = 0,
     this.backgroundSyncEnabled = true,
-    this.calendarProjectionEnabled = false,
-    this.contactsProjectionEnabled = false,
+    this.calendarProjectionCollectionIds = const <String>{},
+    this.contactsProjectionCollectionIds = const <String>{},
   });
 
   factory BridgeState.initial() {
     return const BridgeState(
       isBusy: false,
       isAuthenticated: false,
-      cloudBaseUrl: 'http://127.0.0.1:3000',
+      cloudBaseUrl: kDefaultMobileCloudBaseUrl,
       sqlitePath: kDefaultMobileSqlitePath,
       collections: <CollectionEntry>[],
       pimItems: <PimItem>[],
@@ -33,6 +38,7 @@ class BridgeState {
   final bool isBusy;
   final bool isAuthenticated;
   final String? accessToken;
+  final String? username;
   final String cloudBaseUrl;
   final String sqlitePath;
   final List<CollectionEntry> collections;
@@ -41,14 +47,16 @@ class BridgeState {
   final DateTime? lastSyncAt;
   final int syncedItemsTotal;
   final bool backgroundSyncEnabled;
-  final bool calendarProjectionEnabled;
-  final bool contactsProjectionEnabled;
+  final Set<String> calendarProjectionCollectionIds;
+  final Set<String> contactsProjectionCollectionIds;
 
   BridgeState copyWith({
     bool? isBusy,
     bool? isAuthenticated,
     String? accessToken,
     bool clearAccessToken = false,
+    String? username,
+    bool clearUsername = false,
     String? cloudBaseUrl,
     String? sqlitePath,
     List<CollectionEntry>? collections,
@@ -59,13 +67,14 @@ class BridgeState {
     bool clearLastSyncAt = false,
     int? syncedItemsTotal,
     bool? backgroundSyncEnabled,
-    bool? calendarProjectionEnabled,
-    bool? contactsProjectionEnabled,
+    Set<String>? calendarProjectionCollectionIds,
+    Set<String>? contactsProjectionCollectionIds,
   }) {
     return BridgeState(
       isBusy: isBusy ?? this.isBusy,
       isAuthenticated: isAuthenticated ?? this.isAuthenticated,
       accessToken: clearAccessToken ? null : (accessToken ?? this.accessToken),
+      username: clearUsername ? null : (username ?? this.username),
       cloudBaseUrl: cloudBaseUrl ?? this.cloudBaseUrl,
       sqlitePath: sqlitePath ?? this.sqlitePath,
       collections: collections ?? this.collections,
@@ -75,10 +84,12 @@ class BridgeState {
       syncedItemsTotal: syncedItemsTotal ?? this.syncedItemsTotal,
       backgroundSyncEnabled:
           backgroundSyncEnabled ?? this.backgroundSyncEnabled,
-      calendarProjectionEnabled:
-          calendarProjectionEnabled ?? this.calendarProjectionEnabled,
-      contactsProjectionEnabled:
-          contactsProjectionEnabled ?? this.contactsProjectionEnabled,
+      calendarProjectionCollectionIds: Set.unmodifiable(
+        calendarProjectionCollectionIds ?? this.calendarProjectionCollectionIds,
+      ),
+      contactsProjectionCollectionIds: Set.unmodifiable(
+        contactsProjectionCollectionIds ?? this.contactsProjectionCollectionIds,
+      ),
     );
   }
 }

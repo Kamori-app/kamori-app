@@ -11,19 +11,70 @@ use super::dto::{
 };
 use crypto_core_lib::operation_envelope::OperationEnvelopeV1;
 
+pub(crate) enum CreateSpaceResult {
+    Created(SpaceSummary),
+    WorkspaceAccessDenied,
+    InvalidDevicePackage,
+    IdConflict,
+}
+
 pub(crate) async fn create_space(
     pool: &PgPool,
     user_id: Uuid,
     workspace_id: Uuid,
     request: &CreateSpaceRequest,
-) -> anyhow::Result<SpaceSummary> {
+) -> anyhow::Result<CreateSpaceResult> {
     let mut tx = pool.begin().await?;
+    let authorized_workspace: Option<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT workspace.id
+        FROM workspaces workspace
+        JOIN workspace_members member
+          ON member.workspace_id = workspace.id
+         AND member.user_id = $2
+         AND member.status = 'active'
+        WHERE workspace.id = $1 AND workspace.deleted_at IS NULL
+        FOR SHARE OF workspace, member
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if authorized_workspace.is_none() {
+        tx.rollback().await?;
+        return Ok(CreateSpaceResult::WorkspaceAccessDenied);
+    }
+
+    let requested_device_ids = request
+        .device_key_packages
+        .iter()
+        .map(|package| package.device_id)
+        .collect::<Vec<_>>();
+    let valid_device_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id
+        FROM devices
+        WHERE user_id = $1 AND status = 'active' AND id = ANY($2)
+        FOR SHARE
+        "#,
+    )
+    .bind(user_id)
+    .bind(&requested_device_ids)
+    .fetch_all(&mut *tx)
+    .await?;
+    if valid_device_ids.len() != requested_device_ids.len() {
+        tx.rollback().await?;
+        return Ok(CreateSpaceResult::InvalidDevicePackage);
+    }
+
     let row = sqlx::query(
         r#"
         INSERT INTO security_spaces (
             id, workspace_id, owner_user_id, created_by, encrypted_metadata
         )
         VALUES ($1, $2, $3, $3, $4)
+        ON CONFLICT (id) DO NOTHING
         RETURNING (extract(epoch FROM created_at) * 1000)::bigint AS created_at_ms
         "#,
     )
@@ -31,8 +82,12 @@ pub(crate) async fn create_space(
     .bind(workspace_id)
     .bind(user_id)
     .bind(&request.encrypted_metadata)
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
+    let Some(row) = row else {
+        tx.rollback().await?;
+        return Ok(CreateSpaceResult::IdConflict);
+    };
     let created_at_unix_ms: i64 = row.try_get("created_at_ms")?;
 
     sqlx::query(
@@ -61,14 +116,12 @@ pub(crate) async fn create_space(
     .await?;
 
     for package in &request.device_key_packages {
-        let result = sqlx::query(
+        sqlx::query(
             r#"
             INSERT INTO security_space_device_keys (
                 space_id, user_id, device_id, key_epoch, encrypted_key_package
             )
-            SELECT $1, $2, d.id, 1, $4
-            FROM devices d
-            WHERE d.id = $3 AND d.user_id = $2 AND d.status = 'active'
+            VALUES ($1, $2, $3, 1, $4)
             "#,
         )
         .bind(request.space_id)
@@ -77,9 +130,6 @@ pub(crate) async fn create_space(
         .bind(&package.encrypted_key_package)
         .execute(&mut *tx)
         .await?;
-        if result.rows_affected() != 1 {
-            anyhow::bail!("device key package references an inactive or foreign device");
-        }
     }
 
     sqlx::query(
@@ -96,15 +146,17 @@ pub(crate) async fn create_space(
     .await?;
 
     tx.commit().await?;
-    Ok(SpaceSummary {
+    Ok(CreateSpaceResult::Created(SpaceSummary {
         space_id: request.space_id,
         workspace_id,
         role: SpaceRole::Owner,
         key_epoch: 1,
+        history_start_seq: 0,
+        current_state_start_seq: 0,
         encrypted_metadata: request.encrypted_metadata.clone(),
         device_key_packages: request.device_key_packages.clone(),
         created_at_unix_ms,
-    })
+    }))
 }
 
 pub(crate) async fn put_recovery_key_package(
@@ -179,6 +231,8 @@ pub(crate) async fn list_spaces(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
     let rows = sqlx::query(
         r#"
         SELECT s.id AS space_id, s.workspace_id, sm.role, s.current_key_epoch,
+               sm.history_start_seq,
+               s.current_state_start_seq,
                s.encrypted_metadata,
                (extract(epoch FROM s.created_at) * 1000)::bigint AS created_at_ms
         FROM security_space_members sm
@@ -192,6 +246,12 @@ pub(crate) async fn list_spaces(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
     .bind(user_id)
     .fetch_all(pool)
     .await?;
+    let space_ids = rows
+        .iter()
+        .map(|row| row.try_get("space_id"))
+        .collect::<Result<Vec<Uuid>, sqlx::Error>>()?;
+    let mut packages_by_space =
+        list_device_key_packages_for_spaces(pool, user_id, &space_ids).await?;
 
     let mut spaces = Vec::with_capacity(rows.len());
     for row in rows {
@@ -203,8 +263,12 @@ pub(crate) async fn list_spaces(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
             workspace_id: row.try_get("workspace_id")?,
             role: SpaceRole::from_db(&role)?,
             key_epoch: u32::try_from(key_epoch)?,
+            history_start_seq: u64::try_from(row.try_get::<i64, _>("history_start_seq")?)?,
+            current_state_start_seq: u64::try_from(
+                row.try_get::<i64, _>("current_state_start_seq")?,
+            )?,
             encrypted_metadata: row.try_get("encrypted_metadata")?,
-            device_key_packages: list_device_key_packages(pool, user_id, space_id).await?,
+            device_key_packages: packages_by_space.remove(&space_id).unwrap_or_default(),
             created_at_unix_ms: row.try_get("created_at_ms")?,
         });
     }
@@ -218,6 +282,8 @@ pub(crate) async fn list_trashed_spaces(
     let rows = sqlx::query(
         r#"
         SELECT s.id AS space_id, s.workspace_id, sm.role, s.current_key_epoch,
+               sm.history_start_seq,
+               s.current_state_start_seq,
                s.encrypted_metadata,
                (extract(epoch FROM s.created_at) * 1000)::bigint AS created_at_ms
         FROM security_space_members sm
@@ -233,6 +299,12 @@ pub(crate) async fn list_trashed_spaces(
     .bind(user_id)
     .fetch_all(pool)
     .await?;
+    let space_ids = rows
+        .iter()
+        .map(|row| row.try_get("space_id"))
+        .collect::<Result<Vec<Uuid>, sqlx::Error>>()?;
+    let mut packages_by_space =
+        list_device_key_packages_for_spaces(pool, user_id, &space_ids).await?;
     let mut spaces = Vec::with_capacity(rows.len());
     for row in rows {
         let role: String = row.try_get("role")?;
@@ -243,8 +315,12 @@ pub(crate) async fn list_trashed_spaces(
             workspace_id: row.try_get("workspace_id")?,
             role: SpaceRole::from_db(&role)?,
             key_epoch: u32::try_from(key_epoch)?,
+            history_start_seq: u64::try_from(row.try_get::<i64, _>("history_start_seq")?)?,
+            current_state_start_seq: u64::try_from(
+                row.try_get::<i64, _>("current_state_start_seq")?,
+            )?,
             encrypted_metadata: row.try_get("encrypted_metadata")?,
-            device_key_packages: list_device_key_packages(pool, user_id, space_id).await?,
+            device_key_packages: packages_by_space.remove(&space_id).unwrap_or_default(),
             created_at_unix_ms: row.try_get("created_at_ms")?,
         });
     }
@@ -294,33 +370,39 @@ pub(crate) async fn restore_from_trash(
     Ok(result.rows_affected() == 1)
 }
 
-pub(crate) async fn list_device_key_packages(
+async fn list_device_key_packages_for_spaces(
     pool: &PgPool,
     user_id: Uuid,
-    space_id: Uuid,
-) -> anyhow::Result<Vec<DeviceKeyPackage>> {
+    space_ids: &[Uuid],
+) -> anyhow::Result<HashMap<Uuid, Vec<DeviceKeyPackage>>> {
+    if space_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
     let rows = sqlx::query(
         r#"
-        SELECT device_id, key_epoch, encrypted_key_package
+        SELECT space_id, device_id, key_epoch, encrypted_key_package
         FROM security_space_device_keys
-        WHERE space_id = $1 AND user_id = $2
-        ORDER BY key_epoch DESC, created_at ASC
+        WHERE user_id = $1 AND space_id = ANY($2)
+        ORDER BY space_id, key_epoch DESC, created_at ASC
         "#,
     )
-    .bind(space_id)
     .bind(user_id)
+    .bind(space_ids)
     .fetch_all(pool)
     .await?;
-    rows.iter()
-        .map(|row| {
-            let epoch: i32 = row.try_get("key_epoch")?;
-            Ok(DeviceKeyPackage {
+    let mut packages = HashMap::<Uuid, Vec<DeviceKeyPackage>>::new();
+    for row in rows {
+        let epoch: i32 = row.try_get("key_epoch")?;
+        packages
+            .entry(row.try_get("space_id")?)
+            .or_default()
+            .push(DeviceKeyPackage {
                 device_id: row.try_get("device_id")?,
                 key_epoch: u32::try_from(epoch)?,
                 encrypted_key_package: row.try_get("encrypted_key_package")?,
-            })
-        })
-        .collect()
+            });
+    }
+    Ok(packages)
 }
 
 pub(crate) async fn put_device_key_package(
@@ -360,19 +442,29 @@ pub(crate) async fn list_members(
     actor_id: Uuid,
     space_id: Uuid,
 ) -> anyhow::Result<Option<Vec<SpaceMemberSummary>>> {
-    let actor_can_read: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM security_space_members WHERE space_id = $1 AND user_id = $2 AND status = 'active')",
+    let mut tx = pool.begin().await?;
+    let actor_can_read: Option<i32> = sqlx::query_scalar(
+        r#"
+        SELECT 1
+        FROM security_space_members member
+        JOIN security_spaces space ON space.id = member.space_id
+        WHERE member.space_id = $1 AND member.user_id = $2
+          AND member.status = 'active' AND space.status = 'active'
+        FOR SHARE OF member, space
+        "#,
     )
     .bind(space_id)
     .bind(actor_id)
-    .fetch_one(pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    if !actor_can_read {
+    if actor_can_read.is_none() {
+        tx.rollback().await?;
         return Ok(None);
     }
     let rows = sqlx::query(
         r#"
-        SELECT member.user_id, users.username, member.role, member.key_epoch
+        SELECT member.user_id, users.username, users.public_key_bundle,
+               member.role, member.key_epoch
         FROM security_space_members member
         JOIN users ON users.id = member.user_id
                   AND users.deleted_at IS NULL AND users.suspended_at IS NULL
@@ -381,7 +473,7 @@ pub(crate) async fn list_members(
         "#,
     )
     .bind(space_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
     let members = rows
         .iter()
@@ -393,9 +485,11 @@ pub(crate) async fn list_members(
                 username: row.try_get("username")?,
                 role: SpaceRole::from_db(&role)?,
                 key_epoch: u32::try_from(epoch)?,
+                public_key_bundle: row.try_get("public_key_bundle")?,
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    tx.commit().await?;
     Ok(Some(members))
 }
 
@@ -404,24 +498,36 @@ pub(crate) async fn list_space_devices(
     actor_id: Uuid,
     space_id: Uuid,
 ) -> anyhow::Result<Option<Vec<SpaceDeviceSummary>>> {
-    let actor_can_read: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM security_space_members WHERE space_id = $1 AND user_id = $2 AND status = 'active')",
+    let mut tx = pool.begin().await?;
+    let history_start_seq: Option<i64> = sqlx::query_scalar(
+        r#"
+        SELECT member.history_start_seq
+        FROM security_space_members member
+        JOIN security_spaces space ON space.id = member.space_id
+        WHERE member.space_id = $1 AND member.user_id = $2
+          AND member.status = 'active' AND space.status = 'active'
+        FOR SHARE OF member, space
+        "#,
     )
     .bind(space_id)
     .bind(actor_id)
-    .fetch_one(pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    if !actor_can_read {
+    let Some(history_start_seq) = history_start_seq else {
+        tx.rollback().await?;
         return Ok(None);
-    }
+    };
     let rows = sqlx::query(
         r#"
-        SELECT DISTINCT d.id, d.signing_public_key
+        SELECT DISTINCT d.id, d.user_id, d.status = 'active' AS active,
+               d.signing_public_key, d.hpke_public_key
         FROM devices d
         WHERE EXISTS (
             SELECT 1
             FROM operation_log operation
-            WHERE operation.space_id = $1 AND operation.author_device_id = d.id
+            WHERE operation.space_id = $1
+              AND operation.author_device_id = d.id
+              AND operation.space_seq > $2
         ) OR EXISTS (
             SELECT 1
             FROM security_space_members member
@@ -434,23 +540,31 @@ pub(crate) async fn list_space_devices(
         "#,
     )
     .bind(space_id)
-    .fetch_all(pool)
+    .bind(history_start_seq)
+    .fetch_all(&mut *tx)
     .await?;
-    rows.iter()
+    let devices = rows
+        .iter()
         .map(|row| {
             Ok(SpaceDeviceSummary {
                 device_id: row.try_get("id")?,
+                user_id: row.try_get("user_id")?,
+                active: row.try_get("active")?,
                 signing_public_key: row.try_get("signing_public_key")?,
+                hpke_public_key: row.try_get("hpke_public_key")?,
             })
         })
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map(Some)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    tx.commit().await?;
+    Ok(Some(devices))
 }
 
 pub(crate) enum RevokeMemberResult {
     Revoked,
+    AlreadyRevoked,
     AccessDenied,
     EpochConflict,
+    RotationConflict,
     TargetNotFound,
     CannotRevokeOwner,
     PackageCoverageMismatch,
@@ -459,14 +573,83 @@ pub(crate) enum RevokeMemberResult {
 pub(crate) struct MemberRotation<'a> {
     pub(crate) actor_id: Uuid,
     pub(crate) space_id: Uuid,
-    pub(crate) target_user_id: Uuid,
+    pub(crate) target_user_id: Option<Uuid>,
     pub(crate) expected_key_epoch: u32,
     pub(crate) new_key_epoch: u32,
+    pub(crate) base_space_seq: u64,
     pub(crate) rotation_id: Uuid,
     pub(crate) new_encrypted_metadata: &'a [u8],
     pub(crate) packages: &'a [DeviceKeyPackage],
     pub(crate) recovery_packages: &'a [MemberRecoveryKeyPackage],
     pub(crate) snapshots: &'a [OperationEnvelopeV1],
+    pub(crate) quarantined_streams: &'a [Uuid],
+    pub(crate) request_hash: &'a [u8; 32],
+}
+
+pub(crate) enum RotationRetryResult {
+    NotFound,
+    Committed,
+    Conflict,
+    AccessDenied,
+}
+
+pub(crate) async fn check_rotation_retry(
+    pool: &PgPool,
+    actor_id: Uuid,
+    space_id: Uuid,
+    target_user_id: Option<Uuid>,
+    new_key_epoch: u32,
+    rotation_id: Uuid,
+    request_hash: &[u8; 32],
+) -> anyhow::Result<RotationRetryResult> {
+    let is_owner: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM security_spaces space
+            JOIN security_space_members member
+              ON member.space_id = space.id
+             AND member.user_id = $2
+             AND member.status = 'active'
+            WHERE space.id = $1
+              AND space.status = 'active'
+              AND space.owner_user_id = $2
+        )
+        "#,
+    )
+    .bind(space_id)
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await?;
+    if !is_owner {
+        return Ok(RotationRetryResult::AccessDenied);
+    }
+    let existing = sqlx::query(
+        r#"
+        SELECT space_id, key_epoch, status, created_by, target_user_id, request_hash
+        FROM security_space_epochs
+        WHERE rotation_id = $1
+        "#,
+    )
+    .bind(rotation_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(existing) = existing else {
+        return Ok(RotationRetryResult::NotFound);
+    };
+    let epoch: i32 = existing.try_get("key_epoch")?;
+    let matches = existing.try_get::<Uuid, _>("space_id")? == space_id
+        && u32::try_from(epoch)? == new_key_epoch
+        && existing.try_get::<Option<Uuid>, _>("created_by")? == Some(actor_id)
+        && existing.try_get::<Option<Uuid>, _>("target_user_id")? == target_user_id
+        && existing
+            .try_get::<Option<Vec<u8>>, _>("request_hash")?
+            .as_deref()
+            == Some(request_hash.as_slice());
+    if matches && existing.try_get::<String, _>("status")? == "committed" {
+        Ok(RotationRetryResult::Committed)
+    } else {
+        Ok(RotationRetryResult::Conflict)
+    }
 }
 
 pub(crate) async fn revoke_member_and_rotate(
@@ -479,16 +662,20 @@ pub(crate) async fn revoke_member_and_rotate(
         target_user_id,
         expected_key_epoch,
         new_key_epoch,
+        base_space_seq,
         rotation_id,
         new_encrypted_metadata,
         packages,
         recovery_packages,
         snapshots,
+        quarantined_streams,
+        request_hash,
     } = rotation;
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
         r#"
-        SELECT s.current_key_epoch, s.owner_user_id, target.role AS target_role
+        SELECT s.current_key_epoch, s.next_sequence, s.owner_user_id,
+               target.role AS target_role
         FROM security_spaces s
         JOIN security_space_members actor
           ON actor.space_id = s.id AND actor.user_id = $2 AND actor.status = 'active'
@@ -512,18 +699,50 @@ pub(crate) async fn revoke_member_and_rotate(
         tx.rollback().await?;
         return Ok(RevokeMemberResult::AccessDenied);
     }
-    let target_role: Option<String> = row.try_get("target_role")?;
-    let Some(target_role) = target_role else {
+    let existing_rotation = sqlx::query(
+        r#"
+        SELECT space_id, key_epoch, status, created_by, target_user_id, request_hash
+        FROM security_space_epochs
+        WHERE rotation_id = $1
+        "#,
+    )
+    .bind(rotation_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(existing) = existing_rotation {
+        let epoch: i32 = existing.try_get("key_epoch")?;
+        let matches = existing.try_get::<Uuid, _>("space_id")? == space_id
+            && u32::try_from(epoch)? == new_key_epoch
+            && existing.try_get::<Option<Uuid>, _>("created_by")? == Some(actor_id)
+            && existing.try_get::<Option<Uuid>, _>("target_user_id")? == target_user_id
+            && existing
+                .try_get::<Option<Vec<u8>>, _>("request_hash")?
+                .as_deref()
+                == Some(request_hash.as_slice());
+        let committed = existing.try_get::<String, _>("status")? == "committed";
         tx.rollback().await?;
-        return Ok(RevokeMemberResult::TargetNotFound);
-    };
-    if target_role == "owner" {
-        tx.rollback().await?;
-        return Ok(RevokeMemberResult::CannotRevokeOwner);
+        return Ok(if matches && committed {
+            RevokeMemberResult::AlreadyRevoked
+        } else {
+            RevokeMemberResult::RotationConflict
+        });
+    }
+    if target_user_id.is_some() {
+        let target_role: Option<String> = row.try_get("target_role")?;
+        let Some(target_role) = target_role else {
+            tx.rollback().await?;
+            return Ok(RevokeMemberResult::TargetNotFound);
+        };
+        if target_role == "owner" {
+            tx.rollback().await?;
+            return Ok(RevokeMemberResult::CannotRevokeOwner);
+        }
     }
     let current_epoch: i32 = row.try_get("current_key_epoch")?;
+    let current_sequence: i64 = row.try_get("next_sequence")?;
     if u32::try_from(current_epoch)? != expected_key_epoch
         || new_key_epoch != expected_key_epoch.saturating_add(1)
+        || u64::try_from(current_sequence)? != base_space_seq
     {
         tx.rollback().await?;
         return Ok(RevokeMemberResult::EpochConflict);
@@ -531,14 +750,14 @@ pub(crate) async fn revoke_member_and_rotate(
 
     let remaining_devices: Vec<Uuid> = sqlx::query_scalar(
         r#"
-        SELECT DISTINCT sdk.device_id
-        FROM security_space_device_keys sdk
-        JOIN devices d ON d.id = sdk.device_id AND d.status = 'active'
+        SELECT DISTINCT d.id
+        FROM devices d
         JOIN security_space_members sm
-          ON sm.space_id = sdk.space_id
-         AND sm.user_id = sdk.user_id
+          ON sm.user_id = d.user_id
          AND sm.status = 'active'
-        WHERE sdk.space_id = $1 AND sdk.user_id <> $2
+        WHERE sm.space_id = $1
+          AND ($2::uuid IS NULL OR sm.user_id <> $2)
+          AND d.status = 'active'
         "#,
     )
     .bind(space_id)
@@ -560,7 +779,9 @@ pub(crate) async fn revoke_member_and_rotate(
     let remaining_users: HashSet<Uuid> = sqlx::query_scalar(
         r#"
         SELECT user_id FROM security_space_members
-        WHERE space_id = $1 AND user_id <> $2 AND status = 'active'
+        WHERE space_id = $1
+          AND ($2::uuid IS NULL OR user_id <> $2)
+          AND status = 'active'
         "#,
     )
     .bind(space_id)
@@ -580,6 +801,33 @@ pub(crate) async fn revoke_member_and_rotate(
         return Ok(RevokeMemberResult::PackageCoverageMismatch);
     }
 
+    // The service verifies signatures before entering this transaction for a
+    // fast, precise client error. Lock and verify the author devices again
+    // after the space lock so a concurrent device revocation cannot commit a
+    // new-epoch snapshot from a device that is no longer authorized.
+    for snapshot in snapshots {
+        let signing_public_key: Option<Vec<u8>> = sqlx::query_scalar(
+            r#"
+            SELECT signing_public_key
+            FROM devices
+            WHERE id = $1 AND user_id = $2 AND status = 'active'
+            FOR SHARE
+            "#,
+        )
+        .bind(snapshot.author_device_id)
+        .bind(actor_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(signing_public_key) = signing_public_key else {
+            tx.rollback().await?;
+            return Ok(RevokeMemberResult::PackageCoverageMismatch);
+        };
+        if snapshot.verify(&signing_public_key).is_err() {
+            tx.rollback().await?;
+            return Ok(RevokeMemberResult::PackageCoverageMismatch);
+        }
+    }
+
     let expected_streams: HashSet<Uuid> =
         sqlx::query_scalar("SELECT DISTINCT stream_id FROM operation_log WHERE space_id = $1")
             .bind(space_id)
@@ -587,8 +835,13 @@ pub(crate) async fn revoke_member_and_rotate(
             .await?
             .into_iter()
             .collect();
-    let supplied_streams: HashSet<Uuid> = snapshots.iter().map(|item| item.stream_id).collect();
-    if supplied_streams.len() != snapshots.len() || supplied_streams != expected_streams {
+    let mut supplied_streams: HashSet<Uuid> = snapshots.iter().map(|item| item.stream_id).collect();
+    if supplied_streams.len() != snapshots.len()
+        || quarantined_streams
+            .iter()
+            .any(|stream_id| !supplied_streams.insert(*stream_id))
+        || supplied_streams != expected_streams
+    {
         tx.rollback().await?;
         return Ok(RevokeMemberResult::PackageCoverageMismatch);
     }
@@ -597,24 +850,29 @@ pub(crate) async fn revoke_member_and_rotate(
     sqlx::query(
         r#"
         INSERT INTO security_space_epochs (
-            space_id, key_epoch, rotation_id, status, created_by
-        ) VALUES ($1, $2, $3, 'preparing', $4)
+            space_id, key_epoch, rotation_id, status, created_by,
+            target_user_id, request_hash
+        ) VALUES ($1, $2, $3, 'preparing', $4, $5, $6)
         "#,
     )
     .bind(space_id)
     .bind(epoch)
     .bind(rotation_id)
     .bind(actor_id)
+    .bind(target_user_id)
+    .bind(request_hash.as_slice())
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query(
-        "UPDATE security_space_members SET status = 'revoked', revoked_at = now() WHERE space_id = $1 AND user_id = $2 AND status = 'active'",
-    )
-    .bind(space_id)
-    .bind(target_user_id)
-    .execute(&mut *tx)
-    .await?;
+    if let Some(target_user_id) = target_user_id {
+        sqlx::query(
+            "UPDATE security_space_members SET status = 'revoked', revoked_at = now() WHERE space_id = $1 AND user_id = $2 AND status = 'active'",
+        )
+        .bind(space_id)
+        .bind(target_user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     for (device_id, encrypted_package) in supplied {
         let inserted = sqlx::query(
@@ -702,11 +960,18 @@ pub(crate) async fn revoke_member_and_rotate(
     .execute(&mut *tx)
     .await?;
     sqlx::query(
-        "UPDATE security_spaces SET current_key_epoch = $2, encrypted_metadata = $3 WHERE id = $1",
+        r#"
+        UPDATE security_spaces
+        SET current_key_epoch = $2,
+            encrypted_metadata = $3,
+            current_state_start_seq = $4
+        WHERE id = $1
+        "#,
     )
     .bind(space_id)
     .bind(epoch)
     .bind(new_encrypted_metadata)
+    .bind(i64::try_from(base_space_seq)?)
     .execute(&mut *tx)
     .await?;
     sqlx::query(

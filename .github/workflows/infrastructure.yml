@@ -36,7 +36,7 @@ jobs:
           # Keep this pin and backend URL aligned with infra/Pulumi.yaml and
           # SECRETS.md. This exact contract has completed production updates
           # against the Backblaze B2 state bucket.
-          pulumi-version: 3.258.0
+          pulumi-version: 3.259.0
           stack-name: production
           work-dir: infra
           cloud-url: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true
@@ -50,3 +50,100 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      - name: Apply encrypted host configuration
+        if: inputs.command == 'up'
+        working-directory: infra
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.B2_PULUMI_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_PULUMI_APPLICATION_KEY }}
+          AWS_REGION: eu-central-003
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          PULUMI_BACKEND_URL: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true
+        run: |
+          set -euo pipefail
+          pulumi login "$PULUMI_BACKEND_URL"
+          pulumi stack select production
+
+          ssh_dir="$RUNNER_TEMP/kamori-infrastructure-ssh"
+          install -d -m 0700 "$ssh_dir"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          pulumi stack output configSshPrivateKey --show-secrets >"$ssh_dir/config-key"
+          pulumi stack output sshRawKnownHosts >"$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/config-key" "$ssh_dir/known_hosts"
+          ops_host=$(pulumi stack output opsPublicIPv4)
+
+          cat >"$ssh_dir/config" <<EOF
+          Host kamori-beta-ops
+            HostName $ops_host
+            HostKeyAlias kamori-beta-ops
+            User deploy
+            Port 2022
+            IdentityFile $ssh_dir/config-key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $ssh_dir/known_hosts
+            HostKeyAlgorithms ssh-ed25519
+
+          Host kamori-beta-app-1
+            HostName 10.42.0.11
+            HostKeyAlias kamori-beta-app-1
+            User deploy
+            Port 2022
+            IdentityFile $ssh_dir/config-key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $ssh_dir/known_hosts
+            HostKeyAlgorithms ssh-ed25519
+            ProxyJump kamori-beta-ops
+
+          Host kamori-beta-app-2
+            HostName 10.42.0.12
+            HostKeyAlias kamori-beta-app-2
+            User deploy
+            Port 2022
+            IdentityFile $ssh_dir/config-key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $ssh_dir/known_hosts
+            HostKeyAlgorithms ssh-ed25519
+            ProxyJump kamori-beta-ops
+
+          Host kamori-beta-db-primary
+            HostName 10.42.0.21
+            HostKeyAlias kamori-beta-db-primary
+            User deploy
+            Port 2022
+            IdentityFile $ssh_dir/config-key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $ssh_dir/known_hosts
+            HostKeyAlgorithms ssh-ed25519
+            ProxyJump kamori-beta-ops
+          EOF
+          chmod 0600 "$ssh_dir/config"
+
+          apply_configuration() {
+            output_name=$1
+            host=$2
+            role=$3
+            for attempt in $(seq 1 60); do
+              if pulumi stack output "$output_name" --show-secrets \
+                | ssh -F "$ssh_dir/config" "$host" "apply $role"; then
+                return 0
+              fi
+              if [[ "$attempt" == 60 ]]; then
+                echo "could not apply $role configuration to $host" >&2
+                return 1
+              fi
+              sleep 10
+            done
+          }
+
+          # Ops establishes NAT for the private-only hosts. Database setup must
+          # complete before app containers are subsequently deployed.
+          apply_configuration opsHostConfiguration kamori-beta-ops ops
+          apply_configuration databaseHostConfiguration kamori-beta-db-primary db-primary
+          apply_configuration appOneHostConfiguration kamori-beta-app-1 app
+          apply_configuration appTwoHostConfiguration kamori-beta-app-2 app

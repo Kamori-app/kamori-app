@@ -12,6 +12,7 @@ use hpke::{
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -37,14 +38,30 @@ pub enum CipherAlgorithm {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedPayload {
     pub algorithm: CipherAlgorithm,
+    #[serde(with = "serde_bytes")]
     pub nonce: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     pub ciphertext: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedGroupKey {
     pub version: u8,
+    #[serde(with = "serde_bytes")]
     pub encapsulated_key: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub ciphertext: Vec<u8>,
+}
+
+/// One account master key encrypted for a single, short-lived native-device
+/// authorization flow. It is deliberately a distinct wire type from a space
+/// key package so the two protocols cannot be confused accidentally.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EncryptedDeviceBootstrap {
+    pub version: u8,
+    #[serde(with = "serde_bytes")]
+    pub encapsulated_key: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     pub ciphertext: Vec<u8>,
 }
 
@@ -64,6 +81,23 @@ impl CryptoEngine {
         let mut secret_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut secret_bytes);
         let secret = StaticSecret::from(secret_bytes);
+        let public = PublicKey::from(&secret);
+        Keypair {
+            private_key: secret.to_bytes(),
+            public_key: public.to_bytes(),
+        }
+    }
+
+    /// Derives the account recovery HPKE identity from the 256-bit data
+    /// recovery master key. The domain-separated derivation is deterministic,
+    /// so the 24-word kit can reconstruct it without another server secret.
+    pub fn derive_account_recovery_keypair(master_key: &[u8; 32]) -> Keypair {
+        let private_key = Self::hkdf_sha256(
+            master_key,
+            None,
+            b"kamori.account-recovery-hpke-private-key.v1\0",
+        );
+        let secret = StaticSecret::from(private_key);
         let public = PublicKey::from(&secret);
         Keypair {
             private_key: secret.to_bytes(),
@@ -228,6 +262,69 @@ impl CryptoEngine {
             encapsulated_key: encapsulated_key.to_bytes().as_slice().to_vec(),
             ciphertext,
         })
+    }
+
+    /// Encrypts the account master key for the ephemeral HPKE identity bound
+    /// to one external-browser authorization flow. Binding the flow id in AAD
+    /// prevents a package approved for one prompt from being replayed into a
+    /// different prompt, even for the same recipient key.
+    pub fn encrypt_device_bootstrap(
+        master_key: &[u8; 32],
+        peer_public_key: &[u8; 32],
+        flow_id: Uuid,
+    ) -> Result<EncryptedDeviceBootstrap> {
+        type Kem = X25519HkdfSha256;
+        type Kdf = HkdfSha256;
+        type Aead = ChaCha20Poly1305;
+
+        const INFO: &[u8] = b"kamori.hpke.device-bootstrap.v1";
+        const AAD_DOMAIN: &[u8] = b"kamori.device-bootstrap-master-key.v1\0";
+        let public_key = <Kem as KemTrait>::PublicKey::from_bytes(peer_public_key)
+            .map_err(|_| CryptoError::InvalidKeyLength)?;
+        let (encapsulated_key, mut context) =
+            setup_sender::<Aead, Kdf, Kem>(&OpModeS::Base, &public_key, INFO)
+                .map_err(|_| CryptoError::EncryptionFailed)?;
+        let aad = [AAD_DOMAIN, flow_id.as_bytes()].concat();
+        let ciphertext = context
+            .seal(master_key, &aad)
+            .map_err(|_| CryptoError::EncryptionFailed)?;
+        Ok(EncryptedDeviceBootstrap {
+            version: 1,
+            encapsulated_key: encapsulated_key.to_bytes().as_slice().to_vec(),
+            ciphertext,
+        })
+    }
+
+    pub fn decrypt_device_bootstrap(
+        encrypted: &EncryptedDeviceBootstrap,
+        recipient_private_key: &[u8; 32],
+        flow_id: Uuid,
+    ) -> Result<[u8; 32]> {
+        type Kem = X25519HkdfSha256;
+        type Kdf = HkdfSha256;
+        type Aead = ChaCha20Poly1305;
+
+        const INFO: &[u8] = b"kamori.hpke.device-bootstrap.v1";
+        const AAD_DOMAIN: &[u8] = b"kamori.device-bootstrap-master-key.v1\0";
+        if encrypted.version != 1 {
+            return Err(anyhow!("unsupported device bootstrap package version"));
+        }
+        let private_key = <Kem as KemTrait>::PrivateKey::from_bytes(recipient_private_key)
+            .map_err(|_| CryptoError::InvalidKeyLength)?;
+        let encapsulated_key =
+            <Kem as KemTrait>::EncappedKey::from_bytes(encrypted.encapsulated_key.as_slice())
+                .map_err(|_| CryptoError::DecryptionFailed)?;
+        let mut context =
+            setup_receiver::<Aead, Kdf, Kem>(&OpModeR::Base, &private_key, &encapsulated_key, INFO)
+                .map_err(|_| CryptoError::DecryptionFailed)?;
+        let aad = [AAD_DOMAIN, flow_id.as_bytes()].concat();
+        let plaintext = context
+            .open(&encrypted.ciphertext, &aad)
+            .map_err(|_| CryptoError::DecryptionFailed)?;
+        let master_key: [u8; 32] = plaintext
+            .try_into()
+            .map_err(|_| anyhow!("invalid decrypted account master key length"))?;
+        Ok(master_key)
     }
 
     pub fn decrypt_group_key_from_peer(

@@ -70,11 +70,11 @@ if systemctl restart kamori-cloud.service; then
     rm -f "$previous_release"
     previous_release=
   fi
-  echo "deployed immutable application release"
+  echo "activated immutable release; availability is evaluated by external monitoring"
   exit 0
 fi
 
-echo "service restart failed; rolling back the release file" >&2
+echo "service process failed to start; restoring the previous release file" >&2
 if [[ -n "$previous_release" ]]; then
   mv "$previous_release" "$release_file"
   previous_release=

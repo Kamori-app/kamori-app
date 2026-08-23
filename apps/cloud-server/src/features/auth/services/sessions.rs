@@ -8,8 +8,8 @@ use time::OffsetDateTime;
 
 use crate::{
     features::auth::dto::{
-        ListSessionsResponse, LogoutRequest, LogoutResponse, RefreshRequest, RefreshResponse,
-        RevokeSessionRequest, RevokeSessionResponse,
+        CsrfBootstrapResponse, ListSessionsResponse, LogoutRequest, LogoutResponse, RefreshRequest,
+        RefreshResponse, RevokeSessionRequest, RevokeSessionResponse,
     },
     features::auth::{
         repositories::{
@@ -19,13 +19,11 @@ use crate::{
         transport::{
             RefreshTransport, clear_csrf_cookie, clear_refresh_cookie,
             client_metadata_from_headers, generate_csrf_token, hash_refresh_token,
-            read_refresh_cookie, refresh_transport_from_headers, set_csrf_cookie,
+            read_csrf_cookie, read_refresh_cookie, refresh_transport_from_headers, set_csrf_cookie,
             set_refresh_cookie, validate_cookie_csrf, validate_cookie_request_origin,
         },
     },
-    features::common::{
-        ApiError, MsgPack, authorize_session, bad_request, internal_error, unauthenticated,
-    },
+    features::common::{ApiError, MsgPack, bad_request, internal_error, unauthenticated},
     platform::state::AppState,
 };
 
@@ -69,25 +67,62 @@ pub(crate) async fn refresh(
     .await?;
 
     let access_token = state
-        .issue_access_token(rotated.user_id, &rotated.username)
+        .issue_access_token(rotated.user_id, &rotated.username, rotated.new_token_id)
         .map_err(internal_error)?;
 
+    let next_csrf_token =
+        matches!(refresh_transport, RefreshTransport::Cookie).then(generate_csrf_token);
     let mut response = MsgPack(RefreshResponse {
         access_token,
+        username: rotated.username,
         refresh_token: match refresh_transport {
             RefreshTransport::Body => Some(rotated.new_token.clone()),
             RefreshTransport::Cookie => None,
         },
         refresh_token_id: Some(rotated.new_token_id),
+        csrf_token: next_csrf_token.clone(),
     })
     .into_response();
 
     if matches!(refresh_transport, RefreshTransport::Cookie) {
         set_refresh_cookie(&state.config, &mut response, &rotated.new_token)?;
-        let csrf_token = generate_csrf_token();
-        set_csrf_cookie(&state.config, &mut response, &csrf_token)?;
+        set_csrf_cookie(
+            &state.config,
+            &mut response,
+            next_csrf_token
+                .as_deref()
+                .ok_or_else(|| internal_error("missing rotated CSRF token"))?,
+        )?;
     }
 
+    Ok(response)
+}
+
+/// Returns the host-only double-submit token to an explicitly allowed browser
+/// origin. This bridges the intentional `api.*` / `app.*` origin split without
+/// making either authentication cookie visible to sibling subdomains.
+pub(crate) async fn csrf_bootstrap(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    if refresh_transport_from_headers(headers)? != RefreshTransport::Cookie {
+        return Err(bad_request("CSRF bootstrap requires cookie transport"));
+    }
+    validate_cookie_request_origin(&state.config, headers)?;
+    if read_refresh_cookie(&state.config, headers).is_none() {
+        return Err(unauthenticated("refresh session is unavailable"));
+    }
+    let existing =
+        read_csrf_cookie(&state.config, headers).filter(|token| (32..=128).contains(&token.len()));
+    let should_set_cookie = existing.is_none();
+    let csrf_token = existing.unwrap_or_else(generate_csrf_token);
+    let mut response = MsgPack(CsrfBootstrapResponse {
+        csrf_token: csrf_token.clone(),
+    })
+    .into_response();
+    if should_set_cookie {
+        set_csrf_cookie(&state.config, &mut response, &csrf_token)?;
+    }
     Ok(response)
 }
 
@@ -137,9 +172,21 @@ pub(crate) async fn revoke(
     headers: &HeaderMap,
     payload: RevokeSessionRequest,
 ) -> Result<RevokeSessionResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
-    let revoked =
-        revoke_refresh_token_by_id_for_user(&state.pool, user_id, payload.refresh_token_id).await?;
+    let principal = crate::features::common::authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        crate::features::auth::dto::ReauthAction::SecuritySettings,
+    )
+    .await?;
+    let revoked = revoke_refresh_token_by_id_for_user(
+        &state.pool,
+        principal.user_id,
+        payload.refresh_token_id,
+    )
+    .await?;
 
     Ok(RevokeSessionResponse { revoked })
 }
@@ -148,8 +195,9 @@ pub(crate) async fn list_sessions(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<ListSessionsResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = crate::features::common::authorize_principal(state, headers).await?;
     Ok(ListSessionsResponse {
-        sessions: list_refresh_sessions(&state.pool, user_id).await?,
+        sessions: list_refresh_sessions(&state.pool, principal.user_id, principal.session_id)
+            .await?,
     })
 }

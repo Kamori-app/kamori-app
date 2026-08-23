@@ -26,6 +26,11 @@ func TestRenderCloudEnvQuotesSecretValuesAndKeepsRequiredGuards(t *testing.T) {
 		"KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP=false",
 		"KAMORI_REFRESH_ROTATION_KEY_FILE=/run/secrets/refresh-rotation-key",
 		"KAMORI_REGISTRATION_ENABLED=false",
+		"KAMORI_CORS_ALLOW_ORIGINS=https://app.kamori.app,tauri://localhost",
+		"KAMORI_WEB_COOKIE_ORIGINS=https://app.kamori.app",
+		"KAMORI_ADMIN_CORS_ALLOW_ORIGINS=https://admin.kamori.app",
+		"KAMORI_TRUSTED_PROXY_CIDRS=172.30.0.2/32,10.42.0.5/32",
+		"KAMORI_TRUSTED_PROXY_CIDRS=172.30.0.2/32",
 	}
 	for _, expected := range required {
 		if !strings.Contains(env, expected) {

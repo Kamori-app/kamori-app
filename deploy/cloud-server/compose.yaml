@@ -12,6 +12,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      kamori_internal:
+        ipv4_address: 172.30.0.2
     depends_on:
       cloud:
         condition: service_healthy
@@ -38,6 +41,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      kamori_internal:
+        ipv4_address: 172.30.0.3
     healthcheck:
       test: ["CMD", "/usr/local/bin/cloud-server", "healthcheck"]
       interval: 15s
@@ -61,6 +67,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      kamori_internal:
+        ipv4_address: 172.30.0.4
 
   admin:
     image: ${ADMIN_IMAGE:?ADMIN_IMAGE is required}
@@ -78,3 +87,13 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      kamori_internal:
+        ipv4_address: 172.30.0.5
+
+networks:
+  kamori_internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

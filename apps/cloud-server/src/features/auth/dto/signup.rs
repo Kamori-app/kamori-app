@@ -24,6 +24,8 @@ pub struct SignupStartResponse {
 /// OPAQUE signup finish request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignupFinishRequest {
+    /// Stable idempotency key retained across exact network retries.
+    pub signup_request_id: Uuid,
     /// User login name.
     pub username: String,
     /// OPAQUE client finish message bytes.

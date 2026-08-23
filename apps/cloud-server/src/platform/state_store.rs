@@ -48,6 +48,14 @@ pub trait StateStore: Send + Sync {
     /// Stores a value by key with a TTL.
     async fn put(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), StateStoreError>;
 
+    /// Stores a value only when the key does not already exist.
+    async fn put_if_absent(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError>;
+
     /// Loads a value by key.
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, StateStoreError>;
 
@@ -57,8 +65,25 @@ pub trait StateStore: Send + Sync {
     /// Atomically removes and returns a value when it exists and is unexpired.
     async fn take(&self, key: &str) -> Result<Option<Vec<u8>>, StateStoreError>;
 
+    /// Replaces an unexpired value only when its bytes still match `expected`.
+    async fn compare_and_set(
+        &self,
+        key: &str,
+        expected: &[u8],
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError>;
+
     /// Atomically increments a counter and applies TTL when it is first created.
     async fn increment(&self, key: &str, ttl: Duration) -> Result<u64, StateStoreError>;
+
+    /// Atomically adds weighted request units and sets TTL on first creation.
+    async fn increment_by(
+        &self,
+        key: &str,
+        amount: u64,
+        ttl: Duration,
+    ) -> Result<u64, StateStoreError>;
 }
 
 /// Valkey-backed state store implementation.
@@ -98,18 +123,40 @@ impl StateStore for ValkeyStore {
         let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
         let ttl_seconds = ttl.as_secs().max(1);
 
-        let _: () = redis::pipe()
-            .cmd("SET")
+        let _: () = redis::cmd("SET")
             .arg(self.key(key))
             .arg(value)
-            .cmd("EXPIRE")
-            .arg(self.key(key))
-            .arg(ttl_seconds as usize)
+            .arg("EX")
+            .arg(ttl_seconds)
             .query_async(&mut conn)
             .await
             .map_err(|e| StateStoreError::Backend(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn put_if_absent(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError> {
+        let mut conn = self
+            .client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| StateStoreError::Backend(e.to_string()))?;
+        let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
+        let result: Option<String> = redis::cmd("SET")
+            .arg(self.key(key))
+            .arg(value)
+            .arg("NX")
+            .arg("EX")
+            .arg(ttl.as_secs().max(1))
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| StateStoreError::Backend(e.to_string()))?;
+        Ok(result.is_some())
     }
 
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, StateStoreError> {
@@ -157,7 +204,43 @@ impl StateStore for ValkeyStore {
             .map_err(|e| StateStoreError::Backend(e.to_string()))
     }
 
+    async fn compare_and_set(
+        &self,
+        key: &str,
+        expected: &[u8],
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError> {
+        let mut conn = self
+            .client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| StateStoreError::Backend(e.to_string()))?;
+        let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
+        let script = redis::Script::new(
+            "if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1 else return 0 end",
+        );
+        let changed: i64 = script
+            .key(self.key(key))
+            .arg(expected)
+            .arg(value)
+            .arg(ttl.as_secs().max(1))
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| StateStoreError::Backend(e.to_string()))?;
+        Ok(changed == 1)
+    }
+
     async fn increment(&self, key: &str, ttl: Duration) -> Result<u64, StateStoreError> {
+        self.increment_by(key, 1, ttl).await
+    }
+
+    async fn increment_by(
+        &self,
+        key: &str,
+        amount: u64,
+        ttl: Duration,
+    ) -> Result<u64, StateStoreError> {
         let mut conn = self
             .client
             .get_multiplexed_async_connection()
@@ -166,11 +249,12 @@ impl StateStore for ValkeyStore {
         let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
         let ttl_seconds = ttl.as_secs().max(1);
         let script = redis::Script::new(
-            "local value = redis.call('INCR', KEYS[1]); if value == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return value",
+            "local existed = redis.call('EXISTS', KEYS[1]); local value = redis.call('INCRBY', KEYS[1], ARGV[2]); if existed == 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return value",
         );
         script
             .key(self.key(key))
             .arg(ttl_seconds)
+            .arg(amount)
             .invoke_async(&mut conn)
             .await
             .map_err(|e| StateStoreError::Backend(e.to_string()))
@@ -216,6 +300,30 @@ impl StateStore for InMemoryStore {
         Ok(())
     }
 
+    async fn put_if_absent(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError> {
+        let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
+        let mut guard = self.inner.write().await;
+        if guard
+            .get(key)
+            .is_some_and(|entry| entry.expires_at > Instant::now())
+        {
+            return Ok(false);
+        }
+        guard.insert(
+            key.to_string(),
+            MemoryEntry {
+                value: value.to_vec(),
+                expires_at: Instant::now() + ttl,
+            },
+        );
+        Ok(true)
+    }
+
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, StateStoreError> {
         let mut guard = self.inner.write().await;
         if let Some(entry) = guard.get(key) {
@@ -245,7 +353,45 @@ impl StateStore for InMemoryStore {
         Ok(Some(entry.value))
     }
 
+    async fn compare_and_set(
+        &self,
+        key: &str,
+        expected: &[u8],
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<bool, StateStoreError> {
+        let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
+        let mut guard = self.inner.write().await;
+        let now = Instant::now();
+        let matches = guard
+            .get(key)
+            .is_some_and(|entry| entry.expires_at > now && entry.value == expected);
+        if !matches {
+            if guard.get(key).is_some_and(|entry| entry.expires_at <= now) {
+                guard.remove(key);
+            }
+            return Ok(false);
+        }
+        guard.insert(
+            key.to_string(),
+            MemoryEntry {
+                value: value.to_vec(),
+                expires_at: now + ttl,
+            },
+        );
+        Ok(true)
+    }
+
     async fn increment(&self, key: &str, ttl: Duration) -> Result<u64, StateStoreError> {
+        self.increment_by(key, 1, ttl).await
+    }
+
+    async fn increment_by(
+        &self,
+        key: &str,
+        amount: u64,
+        ttl: Duration,
+    ) -> Result<u64, StateStoreError> {
         let ttl = if ttl.is_zero() { self.default_ttl } else { ttl };
         let mut guard = self.inner.write().await;
         let now = Instant::now();
@@ -261,7 +407,7 @@ impl StateStore for InMemoryStore {
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(0)
-            .saturating_add(1);
+            .saturating_add(amount);
         entry.value = current.to_string().into_bytes();
         Ok(current)
     }
@@ -307,6 +453,36 @@ mod tests {
         store.put("k", b"v", Duration::from_secs(1)).await.unwrap();
         assert_eq!(store.take("k").await.unwrap(), Some(b"v".to_vec()));
         assert_eq!(store.take("k").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn in_memory_store_conditional_mutations_are_atomic() {
+        let store = InMemoryStore::new(Duration::from_secs(60));
+        assert!(
+            store
+                .put_if_absent("k", b"one", Duration::from_secs(1))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .put_if_absent("k", b"two", Duration::from_secs(1))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .compare_and_set("k", b"wrong", b"two", Duration::from_secs(1))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .compare_and_set("k", b"one", b"two", Duration::from_secs(1))
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.get("k").await.unwrap(), Some(b"two".to_vec()));
     }
 
     #[tokio::test]

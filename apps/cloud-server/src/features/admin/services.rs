@@ -323,21 +323,16 @@ pub(crate) async fn add_security_key_finish(
         ));
     }
     let binding_key = format!("{ADMIN_KEY_ENROLLMENT_PREFIX}{}", payload.flow_id);
+    consume_reauth(state, actor.id, &payload.reauth_token).await?;
     let binding = state
         .state_store
-        .get(&binding_key)
+        .take(&binding_key)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| unauthenticated("security-key enrollment expired"))?;
     if binding.as_slice() != actor.id.as_bytes() {
         return Err(unauthenticated("security-key enrollment identity mismatch"));
     }
-    consume_reauth(state, actor.id, &payload.reauth_token).await?;
-    state
-        .state_store
-        .delete(&binding_key)
-        .await
-        .map_err(internal_error)?;
     let credential: RegisterPublicKeyCredential = serde_json::from_slice(&payload.credential)
         .map_err(|_| bad_request("invalid credential"))?;
     let security_key = state
@@ -371,20 +366,6 @@ pub(crate) async fn remove_security_key(
             "typed security-key confirmation does not match",
         ));
     }
-    let key_count = repositories::security_key_count(&state.pool, actor.id)
-        .await
-        .map_err(internal_error)?;
-    let registration_open = effective_bool(
-        state,
-        "registration_enabled",
-        state.config.registration_enabled,
-    )
-    .await?;
-    if registration_open && key_count <= 2 {
-        return Err(bad_request(
-            "close registration or enroll a replacement before removing this key",
-        ));
-    }
     consume_reauth(state, actor.id, &payload.reauth_token).await?;
     let client = client_metadata_from_headers(headers);
     match repositories::remove_security_key(
@@ -393,6 +374,7 @@ pub(crate) async fn remove_security_key(
         payload.key_id,
         reason,
         client.ip_address.as_deref(),
+        state.config.registration_enabled,
     )
     .await
     .map_err(internal_error)?
@@ -403,9 +385,13 @@ pub(crate) async fn remove_security_key(
         repositories::RemoveSecurityKeyResult::NotFound => {
             Err(bad_request("operator security key not found"))
         }
-        repositories::RemoveSecurityKeyResult::WouldRemoveLast => Err(bad_request(
-            "the last operator security key cannot be removed",
-        )),
+        repositories::RemoveSecurityKeyResult::WouldViolateMinimum { required } => {
+            Err(bad_request(if required == 2 {
+                "close registration or enroll a replacement before removing this key"
+            } else {
+                "the last operator security key cannot be removed"
+            }))
+        }
     }
 }
 
@@ -443,7 +429,7 @@ pub(crate) async fn dashboard(
     })
 }
 
-fn setting_defaults(state: &AppState) -> [(&'static str, Value); 8] {
+fn setting_defaults(state: &AppState) -> [(&'static str, Value); 11] {
     [
         (
             "registration_enabled",
@@ -465,6 +451,18 @@ fn setting_defaults(state: &AppState) -> [(&'static str, Value); 8] {
         (
             "owner_rolling_24h_egress_bytes",
             Value::from(state.config.owner_rolling_24h_egress_bytes),
+        ),
+        (
+            "owner_concurrent_blob_downloads",
+            Value::from(state.config.owner_concurrent_blob_downloads),
+        ),
+        (
+            "global_concurrent_blob_downloads",
+            Value::from(state.config.global_concurrent_blob_downloads),
+        ),
+        (
+            "blob_download_bytes_per_second",
+            Value::from(state.config.blob_download_bytes_per_second),
         ),
         (
             "global_nonessential_egress_stop_bytes",
@@ -549,8 +547,28 @@ fn validate_setting(key: &str, value: &Value) -> Result<(), ApiError> {
         | "owner_rolling_24h_egress_bytes"
         | "global_nonessential_egress_stop_bytes"
         | "global_emergency_egress_breaker_bytes" => match value.as_u64() {
-            Some(value) if value >= 1024 * 1024 => Ok(()),
-            _ => Err(bad_request("quota setting must be at least 1 MiB")),
+            Some(value) if (1024 * 1024..=i64::MAX as u64).contains(&value) => Ok(()),
+            _ => Err(bad_request(
+                "quota setting must be at least 1 MiB and fit PostgreSQL BIGINT",
+            )),
+        },
+        "owner_concurrent_blob_downloads" => match value.as_u64() {
+            Some(1..=100) => Ok(()),
+            _ => Err(bad_request(
+                "owner_concurrent_blob_downloads must be between 1 and 100",
+            )),
+        },
+        "global_concurrent_blob_downloads" => match value.as_u64() {
+            Some(1..=4096) => Ok(()),
+            _ => Err(bad_request(
+                "global_concurrent_blob_downloads must be between 1 and 4096",
+            )),
+        },
+        "blob_download_bytes_per_second" => match value.as_u64() {
+            Some(102_400..=104_857_600) => Ok(()),
+            _ => Err(bad_request(
+                "blob_download_bytes_per_second must be between 100 KiB/s and 100 MiB/s",
+            )),
         },
         _ => Err(bad_request("unknown or invalid runtime setting")),
     }
@@ -588,6 +606,11 @@ async fn validate_setting_relationships(
             "rolling 24-hour egress cannot exceed monthly owner egress",
         ));
     }
+    if number("owner_concurrent_blob_downloads")? > number("global_concurrent_blob_downloads")? {
+        return Err(bad_request(
+            "owner blob concurrency cannot exceed global blob concurrency",
+        ));
+    }
     if number("global_nonessential_egress_stop_bytes")?
         >= number("global_emergency_egress_breaker_bytes")?
     {
@@ -622,36 +645,30 @@ pub(crate) async fn update_setting(
     if payload.confirmation != format!("SET {}", payload.key) {
         return Err(bad_request("typed setting confirmation does not match"));
     }
-    if payload.key == "registration_enabled"
-        && payload.value == Value::Bool(true)
-        && repositories::security_key_count(&state.pool, actor.id)
-            .await
-            .map_err(internal_error)?
-            < 2
-    {
-        return Err(bad_request(
-            "enroll a second roaming security key before opening registration",
-        ));
-    }
+    let expected_version = i64::try_from(payload.expected_version)
+        .map_err(|_| bad_request("expected_version exceeds the supported range"))?;
     consume_reauth(state, actor.id, &payload.reauth_token).await?;
     let client = client_metadata_from_headers(headers);
-    let changed = repositories::set_runtime_value(
+    let result = repositories::set_runtime_value(
         &state.pool,
         actor.id,
         &payload.key,
         &payload.value,
-        i64::try_from(payload.expected_version).map_err(internal_error)?,
+        expected_version,
         reason,
         client.ip_address.as_deref(),
     )
     .await
     .map_err(internal_error)?;
-    if !changed {
-        return Err(conflict(
+    match result {
+        repositories::SetRuntimeValueResult::Changed => Ok(AdminMutationResponse { changed: true }),
+        repositories::SetRuntimeValueResult::VersionConflict => Err(conflict(
             "runtime setting version changed; reload and retry",
-        ));
+        )),
+        repositories::SetRuntimeValueResult::SecurityKeyMinimum => Err(bad_request(
+            "enroll a second roaming security key before opening registration",
+        )),
     }
-    Ok(AdminMutationResponse { changed })
 }
 
 pub(crate) async fn suspend(
@@ -729,6 +746,31 @@ pub(crate) async fn effective_u64(
             .ok_or_else(|| internal_error(format!("invalid stored value for {key}"))),
         None => Ok(default),
     }
+}
+
+pub(crate) async fn effective_u64_values(
+    state: &AppState,
+    defaults: &[(&str, u64)],
+) -> Result<HashMap<String, u64>, ApiError> {
+    let keys = defaults
+        .iter()
+        .map(|(key, _)| (*key).to_string())
+        .collect::<Vec<_>>();
+    let stored = repositories::get_runtime_values(&state.pool, &keys)
+        .await
+        .map_err(internal_error)?;
+    defaults
+        .iter()
+        .map(|(key, default)| {
+            let value = match stored.get(*key) {
+                Some(value) => value
+                    .as_u64()
+                    .ok_or_else(|| internal_error(format!("invalid stored value for {key}")))?,
+                None => *default,
+            };
+            Ok(((*key).to_string(), value))
+        })
+        .collect()
 }
 
 #[cfg(test)]

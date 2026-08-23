@@ -26,10 +26,12 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
   await page.getByRole("button", { name: "Add Task" }).click();
   await expect(page.getByText("Task saved to the encrypted offline outbox.")).toBeVisible();
   await expect(page.getByText("Offline acceptance task", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Complete" }).click();
+  await expect(page.getByText("Task completed.")).toBeVisible();
 
   await context.setOffline(false);
   await page.getByRole("button", { name: "Sync Now" }).click();
-  await expect(page.getByText(/Sync completed: .*1 outbox items uploaded\./)).toBeVisible();
+  await expect(page.getByText(/Sync completed: .*2 outbox items uploaded\./)).toBeVisible();
 
   await page.getByPlaceholder("Event title").fill("Acceptance event");
   await page.locator('input[type="datetime-local"]').nth(0).fill("2030-01-02T10:00");
@@ -43,14 +45,27 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
   await expect(page.getByText("Contact encrypted and synced.")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("Authenticated", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not signed in", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Your server session is available, but sign in again to unlock encrypted browser data.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await signIn(page, account);
   await expect(page.getByText("Offline acceptance task", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
   await expect(page.getByText("Acceptance event", { exact: true })).toBeVisible();
   await expect(page.getByText("Acceptance Contact", { exact: true })).toBeVisible();
 
   await logout(page);
-  await signIn(page, account);
+  await signIn(page, account, { allowLocalUnlock: true });
   await page.getByRole("button", { name: "Sync Now" }).click();
   await expect(page.getByText(/Sync completed:/)).toBeVisible();
+  await expect(page.getByText("Offline acceptance task", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText("Authenticated", { exact: true })).toBeVisible();
   await expect(page.getByText("Offline acceptance task", { exact: true })).toBeVisible();
 });

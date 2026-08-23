@@ -13,10 +13,11 @@ use crate::{
 
 use super::{
     dto::{
-        CreateSpaceRequest, CreateSpaceResponse, ListSpaceDevicesResponse,
-        ListSpaceMembersResponse, ListSpacesResponse, PutDeviceKeyPackageRequest,
-        PutDeviceKeyPackageResponse, PutRecoveryKeyPackageRequest, PutRecoveryKeyPackageResponse,
-        RevokeSpaceMemberRequest, RevokeSpaceMemberResponse, SpaceLifecycleResponse,
+        CreateSpaceRequest, CreateSpaceResponse, ListRecoveryKeyPackagesResponse,
+        ListSpaceDevicesResponse, ListSpaceMembersResponse, ListSpacesResponse,
+        PutDeviceKeyPackageRequest, PutDeviceKeyPackageResponse, PutRecoveryKeyPackageRequest,
+        PutRecoveryKeyPackageResponse, RevokeSpaceMemberRequest, RevokeSpaceMemberResponse,
+        RotateSpaceKeyRequest, RotateSpaceKeyResponse, SpaceLifecycleResponse,
     },
     services,
 };
@@ -37,6 +38,15 @@ pub async fn put_recovery_key_package(
 ) -> Result<MsgPack<PutRecoveryKeyPackageResponse>, ApiError> {
     Ok(MsgPack(
         services::put_recovery_key_package(&state, &headers, space_id, request).await?,
+    ))
+}
+
+pub async fn list_recovery_key_packages(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<MsgPack<ListRecoveryKeyPackagesResponse>, ApiError> {
+    Ok(MsgPack(
+        services::list_recovery_key_packages(&state, &headers).await?,
     ))
 }
 
@@ -79,6 +89,17 @@ pub async fn revoke_member(
 ) -> Result<MsgPack<RevokeSpaceMemberResponse>, ApiError> {
     Ok(MsgPack(
         services::revoke_member(&state, &headers, space_id, user_id, request).await?,
+    ))
+}
+
+pub async fn rotate_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(space_id): Path<Uuid>,
+    MsgPack(request): MsgPack<RotateSpaceKeyRequest>,
+) -> Result<MsgPack<RotateSpaceKeyResponse>, ApiError> {
+    Ok(MsgPack(
+        services::rotate_key(&state, &headers, space_id, request).await?,
     ))
 }
 

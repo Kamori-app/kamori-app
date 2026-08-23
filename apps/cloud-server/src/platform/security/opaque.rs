@@ -184,14 +184,10 @@ impl OpaqueServer {
         let key = login_state_key(username, flow_id);
         let state_bytes = self
             .state_store
-            .get(&key)
+            .take(&key)
             .await
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing login state for user"))?;
-        self.state_store
-            .delete(&key)
-            .await
-            .map_err(map_store_error)?;
 
         let state = ServerLogin::<DefaultOpaqueSuite>::deserialize(&state_bytes)
             .map_err(|e| anyhow!("deserialize login state: {e:?}"))?;
@@ -228,7 +224,9 @@ pub fn decode_credential_response(bytes: &[u8]) -> Result<CredentialResponse<Def
 }
 
 fn login_state_key(username: &str, flow_id: uuid::Uuid) -> String {
-    format!("opaque:login:{username}:{flow_id}")
+    let user_scope = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(Sha256::digest(username.as_bytes()));
+    format!("opaque:login:{user_scope}:{flow_id}")
 }
 
 fn map_store_error(err: crate::platform::state_store::StateStoreError) -> anyhow::Error {
