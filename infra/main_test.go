@@ -36,3 +36,16 @@ func TestHostProvisioningPhaseIsExplicitlyBounded(t *testing.T) {
 		t.Fatal("unknown destructive phase was accepted")
 	}
 }
+
+func TestOnlyReplacePhaseAdoptsChangedImmutableUserData(t *testing.T) {
+	tests := map[string]hostLifecycle{
+		hostProvisioningRetire:  {protected: false, replaceUserData: false},
+		hostProvisioningReplace: {protected: false, replaceUserData: true},
+		hostProvisioningProtect: {protected: true, replaceUserData: false},
+	}
+	for phase, want := range tests {
+		if got := hostLifecycleForPhase(phase); got != want {
+			t.Errorf("host lifecycle for %s = %+v, want %+v", phase, got, want)
+		}
+	}
+}

@@ -160,13 +160,15 @@ works.
 explicit and reviewable:
 
 1. `retire` disables Pulumi and Hetzner delete/rebuild protection without
-   changing host configuration.
+   changing host configuration or adopting changed immutable `userData`.
 2. `replace` installs the generated raw identities and restricted configuration
    channel, recreates the four empty servers, preserves and reattaches the
    PostgreSQL volume, removes public networking from app/DB, and then applies
    each role configuration in place.
 3. `protect` reenables Pulumi and Hetzner protection after the replacement is
-   complete.
+   complete. Routine protected updates ignore later bootstrap `userData`
+   changes and deliver mutable assets only through the host-configuration
+   channel.
 
 Each transition requires a separate protected Pulumi preview and update. The
 application deployment remains a separate manually approved workflow. CI/CD

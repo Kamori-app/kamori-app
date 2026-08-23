@@ -25,7 +25,8 @@ func provisionHosts(
 	drBucketName string,
 	phase string,
 ) (*hostResources, error) {
-	return provisionAutomatedHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, phase == hostProvisioningProtect)
+	lifecycle := hostLifecycleForPhase(phase)
+	return provisionAutomatedHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, lifecycle.protected, lifecycle.replaceUserData)
 }
 
 func provisionAutomatedHosts(
@@ -38,6 +39,7 @@ func provisionAutomatedHosts(
 	sshKeys []string,
 	drBucketName string,
 	protected bool,
+	replaceUserData bool,
 ) (*hostResources, error) {
 	opts := pulumi.Provider(provider)
 	passwords, err := provisionGeneratedPasswords(ctx)
@@ -259,7 +261,15 @@ func provisionAutomatedHosts(
 			opts,
 			pulumi.DependsOn(append(dependencies, subnet, firewall)),
 			pulumi.DeleteBeforeReplace(true),
-			pulumi.ReplaceOnChanges([]string{"userData"}),
+		}
+		if replaceUserData {
+			resourceOptions = append(resourceOptions, pulumi.ReplaceOnChanges([]string{"userData"}))
+		} else {
+			// Cloud-init is an immutable bootstrap input. Routine retire/protect
+			// updates deliver mutable configuration through the restricted host
+			// channel and must never replace a running host because repository
+			// bootstrap code evolved. Only the explicit replace phase adopts it.
+			resourceOptions = append(resourceOptions, pulumi.IgnoreChanges([]string{"userData"}))
 		}
 		if protected {
 			resourceOptions = append(resourceOptions, pulumi.Protect(true))
