@@ -8,7 +8,7 @@ require (
 	github.com/pulumi/pulumi-terraform-provider/sdks/go/minio/v3 v3.38.5
 	github.com/pulumi/pulumi-terraform-provider/sdks/go/porkbun v0.0.0-00010101000000-000000000000
 	github.com/pulumi/pulumi-tls/sdk/v5 v5.5.1
-	github.com/pulumi/pulumi/sdk/v3 v3.258.0
+	github.com/pulumi/pulumi/sdk/v3 v3.259.0
 	golang.org/x/crypto v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -31,7 +31,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
-	github.com/cheggaaa/pb v1.0.29 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
