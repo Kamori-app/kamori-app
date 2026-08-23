@@ -69,6 +69,10 @@ systemctl restart ssh.socket
 
 case "$role" in
   app)
+    systemctl enable kamori-private-egress.service
+    systemctl restart systemd-resolved.service
+    systemctl restart kamori-private-egress.service
+    resolvectl flush-caches
     chown 10001:10001 \
       /etc/kamori/cloud.env \
       /etc/kamori/secrets/opaque-server-setup \
@@ -84,7 +88,11 @@ case "$role" in
     ;;
   ops)
     systemctl enable --now docker.service
-    systemctl enable --now kamori-nat-gateway.service
+    systemctl enable kamori-nat-gateway.service
+    # Docker and package upgrades may rebuild netfilter chains while the
+    # oneshot NAT unit remains active. Restart it on every reviewed config
+    # application so private-only nodes retain deterministic egress.
+    systemctl restart kamori-nat-gateway.service
     docker compose --project-directory /opt/kamori/ops \
       --file /opt/kamori/ops/compose.yaml \
       --env-file /etc/kamori/ops.env config --quiet
@@ -97,6 +105,10 @@ case "$role" in
     systemctl enable --now kamori-blob-replication.timer
     ;;
   db-primary)
+    systemctl enable kamori-private-egress.service
+    systemctl restart systemd-resolved.service
+    systemctl restart kamori-private-egress.service
+    resolvectl flush-caches
     /usr/local/lib/kamori/bootstrap-primary
     ;;
 esac

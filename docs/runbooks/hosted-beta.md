@@ -43,7 +43,12 @@ route. App and database nodes receive no public IP addresses. `ops` provides
 NAT and is the only SSH bastion. The private-host egress service configures the
 default route and Hetzner's two recursive DNS resolvers before any package
 installation, because the private-only interface receives no resolver through
-DHCP.
+DHCP. The resolver pair is also stored in `systemd-resolved`; every approved
+host-configuration update restarts the private egress service and reconstructs
+the ops NAT rules, so later Docker, network, or package restarts cannot leave a
+one-shot unit marked active with stale kernel state. Release registry login and
+immutable image pulls use bounded retries, but still fail closed after five
+attempts.
 
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the

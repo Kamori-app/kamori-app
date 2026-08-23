@@ -84,8 +84,10 @@ exposes that port, protected by key-only authentication and Fail2ban. App and
 database nodes have private addresses only and route required outbound traffic
 through the ops NAT gateway. Their boot-time egress service also assigns
 Hetzner's two recursive DNS resolvers to the private interface before package
-installation; private-network DHCP does not provide resolver addresses. No
-administrator source-IP configuration is required.
+installation. The same resolver pair is persisted in `systemd-resolved`, and
+the reviewed host-configuration channel reapplies both private routes and NAT
+rules after service or package changes. Private-network DHCP does not provide
+resolver addresses. No administrator source-IP configuration is required.
 Application and provider secrets stay in encrypted Pulumi config. GitHub stores
 the passphrase that unlocks that config and the dedicated B2 credential needed
 to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud
