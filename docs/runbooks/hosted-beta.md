@@ -25,13 +25,17 @@ The first rollout is deliberately split into three protected infrastructure
 updates:
 
 1. With `hostProvisioningPhase=retire`, run `Hosted infrastructure / preview`,
-   confirm that only host/volume protections change, then run `up`.
+   confirm that only host/volume protections change, then run `up`. This phase
+   deliberately ignores changed immutable `userData`.
 2. Set `hostProvisioningPhase=replace`, preview the expected replacement of
    four VMs, two load-balancer targets, and the PostgreSQL volume attachment.
    The PostgreSQL data volume and stable ops public IP must remain unchanged.
    Then run `up`.
 3. Set `hostProvisioningPhase=protect`, preview protection-only changes and run
-   `up` again.
+   `up` again. Routine protected updates continue to ignore bootstrap
+   `userData`; mutable files are applied through the restricted configuration
+   channel. Only a future explicit `replace` phase may adopt changed bootstrap
+   input by replacing a VM.
 
 The `replace` update creates the immutable machine baseline with cloud-init,
 then the same infrastructure job applies encrypted role configuration through

@@ -34,6 +34,18 @@ type nodeSpec struct {
 	privateIP  string
 }
 
+type hostLifecycle struct {
+	protected       bool
+	replaceUserData bool
+}
+
+func hostLifecycleForPhase(phase string) hostLifecycle {
+	return hostLifecycle{
+		protected:       phase == hostProvisioningProtect,
+		replaceUserData: phase == hostProvisioningReplace,
+	}
+}
+
 func validateHostProvisioningPhase(value string) error {
 	switch value {
 	case hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect:
