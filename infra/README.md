@@ -160,7 +160,9 @@ works.
 explicit and reviewable:
 
 1. `retire` disables Pulumi and Hetzner delete/rebuild protection without
-   changing host configuration or adopting changed immutable `userData`.
+   changing host configuration or adopting changed immutable `userData`. The
+   workflow also skips the post-update host delivery because the dedicated
+   configuration identity is not trusted until replacement.
 2. `replace` installs the generated raw identities and restricted configuration
    channel, recreates the four empty servers, preserves and reattaches the
    PostgreSQL volume, removes public networking from app/DB, and then applies

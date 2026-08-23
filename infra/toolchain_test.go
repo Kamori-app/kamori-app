@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,26 @@ func TestPulumiBackendMatchesInfrastructureWorkflow(t *testing.T) {
 
 	if !regexp.MustCompile(`[?&]awssdk=v2(?:&|$)`).MatchString(projectBackend) {
 		t.Fatal("Backblaze B2 backend must use the proven AWS SDK v2 path")
+	}
+}
+
+func TestRetirePhaseDoesNotUseTheUntrustedConfigurationIdentity(t *testing.T) {
+	t.Parallel()
+
+	workflow, err := os.ReadFile("../.github/workflows/infrastructure.yml")
+	if err != nil {
+		t.Fatalf("read infrastructure workflow: %v", err)
+	}
+	contents := string(workflow)
+	phaseCheck := strings.Index(contents, `host_phase=$(pulumi config get kamori:hostProvisioningPhase)`)
+	sshKeyRead := strings.Index(contents, `pulumi stack output configSshPrivateKey --show-secrets`)
+	if phaseCheck < 0 || sshKeyRead < 0 || phaseCheck >= sshKeyRead {
+		t.Fatal("retire phase must exit before reading or using the not-yet-trusted configuration identity")
+	}
+	for _, required := range []string{`if [[ "$host_phase" == "retire" ]]`, "exit 0"} {
+		if !strings.Contains(contents[phaseCheck:sshKeyRead], required) {
+			t.Fatalf("retire guard is missing %q", required)
+		}
 	}
 }
 
