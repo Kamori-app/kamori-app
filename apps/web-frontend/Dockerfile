@@ -24,7 +24,7 @@ ENV VITE_KAMORI_API_BASE_URL=$VITE_KAMORI_API_BASE_URL
 ENV VITE_KAMORI_WEB_APP_URL=$VITE_KAMORI_WEB_APP_URL
 RUN bun run --filter web-frontend build
 
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 ORIGIN=https://app.kamori.app
 WORKDIR /workspace/apps/web-frontend
 COPY --from=runtime-dependencies /workspace/node_modules /workspace/node_modules
