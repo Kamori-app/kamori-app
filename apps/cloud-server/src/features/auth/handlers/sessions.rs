@@ -20,6 +20,13 @@ pub async fn refresh(
     auth_services::refresh(&state, &headers, payload).await
 }
 
+pub async fn csrf_bootstrap(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    auth_services::csrf_bootstrap(&state, &headers).await
+}
+
 pub async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -11,7 +11,7 @@
     "sync": "svelte-kit sync",
     "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json",
     "lint": "bun run check",
-    "test:unit": "bun test src/lib/nav/section-nav.test.mjs src/lib/auth/cookie-csrf.test.mjs src/lib/auth/session-flow.test.mjs",
+    "test:unit": "bun test src/lib",
     "test": "bun run check && bun run test:unit"
   },
   "dependencies": {
@@ -19,8 +19,8 @@
     "@fontsource/ibm-plex-serif": "^5.3.0",
     "@msgpack/msgpack": "^3.1.3",
     "@noble/ciphers": "^2.3.0",
-    "@sveltejs/kit": "^2.70.2",
-    "svelte": "^5.56.9"
+    "@sveltejs/kit": "^2.70.3",
+    "svelte": "^5.56.10"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.5.7",
@@ -31,7 +31,7 @@
     "postcss": "^8.5.26",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.3",
-    "typescript": "~6",
-    "vite": "^8.2.1"
+    "typescript": "~6.0.3",
+    "vite": "^8.2.2"
   }
 }

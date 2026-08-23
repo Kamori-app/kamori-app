@@ -36,6 +36,12 @@ pub(crate) async fn start(
         return Err(bad_request("opaque_start_request has invalid size"));
     }
     let principal = authorize_principal(state, headers).await?;
+    crate::platform::rate_limit::enforce_credential_attempt(
+        state,
+        "opaque-reauth",
+        principal.user_id.as_bytes(),
+    )
+    .await?;
     let user = get_user_by_username(&state.pool, &principal.username).await?;
     if user.id != principal.user_id {
         return Err(unauthenticated("session identity mismatch"));
@@ -51,7 +57,7 @@ pub(crate) async fn start(
             Some(&password_file),
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| bad_request("invalid OPAQUE reauthentication request"))?;
     state
         .state_store
         .put(
@@ -64,7 +70,9 @@ pub(crate) async fn start(
     Ok(ReauthStartResponse {
         opaque_flow_id: opaque.flow_id,
         opaque_server_message: opaque.message,
-        totp_required: state.config.enable_totp && user.totp_secret_ciphertext.is_some(),
+        // Availability controls enrollment, never enforcement for an account
+        // that already opted into a second factor.
+        totp_required: user.totp_secret_ciphertext.is_some(),
     })
 }
 
@@ -101,9 +109,7 @@ pub(crate) async fn finish(
         return Err(unauthenticated("reauthentication action mismatch"));
     }
 
-    if state.config.enable_totp
-        && let Some(ciphertext) = user.totp_secret_ciphertext.as_deref()
-    {
+    if let Some(ciphertext) = user.totp_secret_ciphertext.as_deref() {
         let secret = decrypt_user_totp(
             &state.config.auth_totp_kek,
             &user.id.to_string(),
@@ -141,7 +147,7 @@ pub(crate) async fn finish(
     }
 
     let reauth_token = state
-        .issue_reauth_token(principal.user_id, &principal.username)
+        .issue_reauth_token(principal.user_id, &principal.username, principal.session_id)
         .map_err(internal_error)?;
     state
         .state_store
@@ -172,6 +178,36 @@ pub(crate) async fn consume_reauth_token(
         return Err(unauthenticated(
             "reauthentication proof does not match account",
         ));
+    }
+    let proof_session_id = proof
+        .session_id
+        .filter(|session_id| !session_id.is_nil())
+        .ok_or_else(|| unauthenticated("reauthentication proof has no session binding"))?;
+    if state.account_state_checks_enabled {
+        let active: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM refresh_tokens rt
+                JOIN devices d
+                  ON d.id = rt.device_id AND d.user_id = rt.user_id
+                JOIN users u ON u.id = rt.user_id
+                WHERE rt.id = $1 AND rt.user_id = $2
+                  AND rt.revoked_at IS NULL AND rt.expires_at > now()
+                  AND d.status = 'active'
+                  AND u.deleted_at IS NULL AND u.suspended_at IS NULL
+            )
+            "#,
+        )
+        .bind(proof_session_id)
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_error)?;
+        if !active {
+            return Err(unauthenticated(
+                "reauthentication session is no longer active",
+            ));
+        }
     }
     let action = state
         .state_store

@@ -19,9 +19,9 @@ RUN rm -rf node_modules apps/*/node_modules packages/*/node_modules tests/*/node
 FROM dependencies AS builder
 COPY . .
 ARG VITE_KAMORI_API_BASE_URL=https://api.kamori.app
-ARG VITE_KAMORI_WEB_CSRF_COOKIE_NAME=__Host-kamori_csrf
+ARG VITE_KAMORI_WEB_APP_URL=https://app.kamori.app/app
 ENV VITE_KAMORI_API_BASE_URL=$VITE_KAMORI_API_BASE_URL
-ENV VITE_KAMORI_WEB_CSRF_COOKIE_NAME=$VITE_KAMORI_WEB_CSRF_COOKIE_NAME
+ENV VITE_KAMORI_WEB_APP_URL=$VITE_KAMORI_WEB_APP_URL
 RUN bun run --filter web-frontend build
 
 FROM node:24-alpine AS runtime

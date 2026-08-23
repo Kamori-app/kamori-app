@@ -17,12 +17,21 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _loginUsernameController = TextEditingController();
   final _loginPasswordController = TextEditingController();
   final _loginTotpController = TextEditingController();
+  final _serviceUrlController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _serviceUrlController.text =
+        ref.read(bridgeControllerProvider).cloudBaseUrl;
+  }
 
   @override
   void dispose() {
     _loginUsernameController.dispose();
     _loginPasswordController.dispose();
     _loginTotpController.dispose();
+    _serviceUrlController.dispose();
     super.dispose();
   }
 
@@ -42,7 +51,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               usernameController: _loginUsernameController,
               passwordController: _loginPasswordController,
               totpController: _loginTotpController,
+              serviceUrlController: _serviceUrlController,
               onPasswordLogin: _handlePasswordLogin,
+              onServiceUrlApply: _handleServiceUrlApply,
             ),
             if (state.error != null && state.error!.isNotEmpty)
               Positioned(
@@ -83,6 +94,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
           totpCode: _loginTotpController.text,
         );
   }
+
+  Future<void> _handleServiceUrlApply() => ref
+      .read(bridgeControllerProvider.notifier)
+      .updateCloudBaseUrl(_serviceUrlController.text);
 }
 
 class _LoginForm extends StatelessWidget {
@@ -90,13 +105,17 @@ class _LoginForm extends StatelessWidget {
     required this.usernameController,
     required this.passwordController,
     required this.totpController,
+    required this.serviceUrlController,
     required this.onPasswordLogin,
+    required this.onServiceUrlApply,
   });
 
   final TextEditingController usernameController;
   final TextEditingController passwordController;
   final TextEditingController totpController;
+  final TextEditingController serviceUrlController;
   final Future<void> Function() onPasswordLogin;
+  final Future<void> Function() onServiceUrlApply;
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +154,33 @@ class _LoginForm extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(context.strings.text('passkeyPlan')),
+          const SizedBox(height: 12),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: Text(context.strings.text('advancedConnection')),
+            subtitle: Text(context.strings.text('advancedConnectionBody')),
+            children: [
+              TextField(
+                controller: serviceUrlController,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: context.strings.text('serviceUrl'),
+                  helperText: context.strings.text('serviceUrlHelp'),
+                ),
+                onSubmitted: (_) => onServiceUrlApply(),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton(
+                  onPressed: onServiceUrlApply,
+                  child: Text(context.strings.text('apply')),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

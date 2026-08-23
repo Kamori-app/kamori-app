@@ -6,7 +6,35 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use super::common::{MAIN_TRAY_ID, clear_refresh_token_secure, reveal_main_window, to_ui_error};
+use super::common::{
+    MAIN_TRAY_ID, clear_refresh_token_secure, clear_session_username_secure, reveal_main_window,
+    to_ui_error,
+};
+
+fn normalize_cloud_base_url(value: &str) -> Result<String, String> {
+    let mut parsed = url::Url::parse(value.trim()).map_err(to_ui_error)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Kamori service URL must include a host".to_string())?;
+    let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback) {
+        return Err("remote Kamori service URLs must use HTTPS".to_string());
+    }
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(
+            "Kamori service URL must not contain credentials, query, or fragment".to_string(),
+        );
+    }
+    if !parsed.path().bytes().all(|byte| byte == b'/') {
+        return Err("Kamori service URL must be an origin without a path".to_string());
+    }
+    parsed.set_path("");
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
+}
 
 fn ensure_tray_icon(app: &AppHandle) -> Result<(), String> {
     if app.tray_by_id(MAIN_TRAY_ID).is_some() {
@@ -123,11 +151,28 @@ pub async fn configure_backend(
     state: State<'_, DesktopState>,
     cloud_base_url: String,
 ) -> Result<(), String> {
-    let previous_base_url = state.cloud_base_url().await;
+    let normalized = normalize_cloud_base_url(&cloud_base_url)?;
+    let previous_base_url = normalize_cloud_base_url(&state.cloud_base_url().await)?;
+    if normalized == previous_base_url {
+        return Ok(());
+    }
+    if state.require_access_token().await.is_ok()
+        || state.refresh_token().await.is_some()
+        || state.username().await.is_some()
+    {
+        return Err("sign out before changing the Kamori service URL".to_string());
+    }
     clear_refresh_token_secure(&previous_base_url)?;
-    state.set_backend(cloud_base_url).await;
+    clear_session_username_secure(&previous_base_url)?;
+    state.set_backend(normalized).await;
     state.set_access_token(None).await;
     state.set_refresh_token(None).await;
+    state.set_username(None).await;
+    state.collections.write().await.clear();
+    *state.device_identity.write().await = None;
+    *state.dav_credentials.write().await = None;
+    *state.pending_totp_login.lock().await = None;
+    *state.pending_browser_login.lock().await = None;
     Ok(())
 }
 
@@ -143,7 +188,7 @@ pub async fn apply_window_preferences(
         .ok_or_else(|| "invalid close behavior".to_string())?;
     let normalized = normalize_window_preferences(parsed_behavior, show_tray_icon);
 
-    state.set_window_preferences(normalized.close_behavior, normalized.show_tray_icon);
+    state.set_close_behavior(normalized.close_behavior);
     sync_tray_icon(&app, normalized.show_tray_icon)?;
     sync_activation_policy(&app, normalized.close_behavior, normalized.show_tray_icon)?;
     Ok(())
@@ -152,6 +197,21 @@ pub async fn apply_window_preferences(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloud_base_url_requires_https_except_loopback() {
+        assert_eq!(
+            normalize_cloud_base_url(" https://api.kamori.app/// ").unwrap(),
+            "https://api.kamori.app"
+        );
+        assert_eq!(
+            normalize_cloud_base_url("http://127.0.0.1:3000/").unwrap(),
+            "http://127.0.0.1:3000"
+        );
+        assert!(normalize_cloud_base_url("http://api.kamori.app").is_err());
+        assert!(normalize_cloud_base_url("https://user@api.kamori.app").is_err());
+        assert!(normalize_cloud_base_url("https://api.kamori.app/api").is_err());
+    }
 
     #[test]
     fn normalize_window_preferences_forces_tray_for_hide() {

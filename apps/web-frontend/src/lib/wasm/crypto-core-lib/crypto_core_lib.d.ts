@@ -1,11 +1,17 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export function assign_pim_branch_graph(default_projection_resource_id: string, nodes: any): any;
+
 export function decrypt_group_key_from_peer(encrypted: any, recipient_private_key: Uint8Array): Uint8Array;
 
 export function decrypt_payload(encrypted: any, key: Uint8Array, aad: Uint8Array): Uint8Array;
 
 export function decrypt_vault_bytes(master_key: Uint8Array, encrypted: Uint8Array): Uint8Array;
+
+export function derive_account_recovery_keypair(master_key: Uint8Array): any;
+
+export function encrypt_account_master_key_for_device(master_key: Uint8Array, peer_public_key: Uint8Array, flow_id: string): Uint8Array;
 
 export function encrypt_group_key_for_peer(cmk: Uint8Array, peer_public_key: Uint8Array): any;
 
@@ -23,6 +29,8 @@ export function generate_x25519_keypair(): any;
  * Encodes the 256-bit account master key as a checksummed 24-word BIP-39 kit.
  */
 export function master_key_to_recovery_phrase(master_key: Uint8Array): string;
+
+export function materialize_pim_operation(operation: any, existing_projection?: string | null): string;
 
 export function opaque_signin_finish(flow_id: string, password: Uint8Array, opaque_server_message: Uint8Array): any;
 
@@ -51,16 +59,20 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly decrypt_group_key_from_peer: (a: any, b: number, c: number) => [number, number];
-    readonly decrypt_payload: (a: any, b: number, c: number, d: number, e: number) => [number, number];
+    readonly assign_pim_branch_graph: (a: number, b: number, c: any) => [number, number, number];
+    readonly decrypt_group_key_from_peer: (a: any, b: number, c: number) => [number, number, number, number];
+    readonly decrypt_payload: (a: any, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly decrypt_vault_bytes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly encrypt_group_key_for_peer: (a: number, b: number, c: number, d: number) => any;
-    readonly encrypt_payload: (a: any, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => any;
+    readonly derive_account_recovery_keypair: (a: number, b: number) => [number, number, number];
+    readonly encrypt_account_master_key_for_device: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly encrypt_group_key_for_peer: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly encrypt_payload: (a: any, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly encrypt_vault_bytes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_qr_svg: (a: number, b: number) => [number, number, number, number];
     readonly generate_web_device_identity: () => [number, number, number];
-    readonly generate_x25519_keypair: () => any;
+    readonly generate_x25519_keypair: () => [number, number, number];
     readonly master_key_to_recovery_phrase: (a: number, b: number) => [number, number, number, number];
+    readonly materialize_pim_operation: (a: any, b: number, c: number) => [number, number, number, number];
     readonly opaque_signin_finish: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly opaque_signin_start: (a: number, b: number) => [number, number, number];
     readonly opaque_signup_finish: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
@@ -76,8 +88,8 @@ export interface InitOutput {
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

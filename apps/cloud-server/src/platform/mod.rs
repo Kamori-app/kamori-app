@@ -7,6 +7,7 @@ pub mod maintenance;
 pub mod metrics;
 pub mod object_storage;
 pub mod rate_limit;
+pub mod request_guard;
 pub mod secret_box;
 pub mod security;
 pub mod state;

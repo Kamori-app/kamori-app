@@ -5,16 +5,13 @@
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
     import {
+        deriveAccountRecoveryKeypair,
         masterKeyToRecoveryPhrase,
         opaqueSignupFinish,
         opaqueSignupStart,
     } from "$lib/opaqueClient";
     import { encode } from "@msgpack/msgpack";
-    import {
-        deriveDataRecoveryVerifier,
-        lockWebVault,
-        unlockOrCreateWebVault,
-    } from "$lib/cryptoVault";
+    import { deriveDataRecoveryVerifier } from "$lib/cryptoVault";
     import { wrapAccountMasterKey } from "$lib/opaqueClient";
     import { locale } from "$lib/i18n";
 
@@ -85,6 +82,7 @@
     let pendingSignup:
         | {
               username: string;
+              signupRequestId: string;
               phrase: string;
               opaqueFinishRequest: Uint8Array;
               encryptedMasterKey: Uint8Array;
@@ -145,27 +143,34 @@
             );
 
             const masterKey = randomBytes(32);
-            const encryptedMasterKey = await wrapAccountMasterKey(
-                finish.export_key,
-                masterKey,
-            );
-            const device = await unlockOrCreateWebVault(username, masterKey);
-            const publicKeyBundle = encode({
-                version: 1,
-                device_id: device.deviceId,
-                signing_public_key: device.identity.signing_public_key,
-                hpke_public_key: device.identity.hpke_public_key,
-            });
+            try {
+                const encryptedMasterKey = await wrapAccountMasterKey(
+                    finish.export_key,
+                    masterKey,
+                );
+                const recoveryIdentity = await deriveAccountRecoveryKeypair(masterKey);
+                let publicKeyBundle: Uint8Array;
+                try {
+                    publicKeyBundle = encode({
+                        version: 2,
+                        account_recovery_public_key: recoveryIdentity.public_key,
+                    });
+                } finally {
+                    recoveryIdentity.private_key.fill(0);
+                }
 
-            pendingSignup = {
-                username,
-                phrase: await masterKeyToRecoveryPhrase(masterKey),
-                opaqueFinishRequest: finish.opaque_finish_request,
-                encryptedMasterKey,
-                publicKeyBundle,
-                recoveryVerifier: await deriveDataRecoveryVerifier(masterKey),
-            };
-            masterKey.fill(0);
+                pendingSignup = {
+                    username,
+                    signupRequestId: crypto.randomUUID(),
+                    phrase: await masterKeyToRecoveryPhrase(masterKey),
+                    opaqueFinishRequest: finish.opaque_finish_request,
+                    encryptedMasterKey,
+                    publicKeyBundle,
+                    recoveryVerifier: await deriveDataRecoveryVerifier(masterKey),
+                };
+            } finally {
+                masterKey.fill(0);
+            }
             signupPassword = "";
             signupPasswordConfirm = "";
             setNotice(
@@ -192,6 +197,7 @@
         setLoading("signup-finish");
         try {
             await cloudApi.signupFinish($appState.cloudBaseUrl, {
+                signup_request_id: pendingSignup.signupRequestId,
                 username: pendingSignup.username,
                 opaque_finish_request: pendingSignup.opaqueFinishRequest,
                 encrypted_master_key: pendingSignup.encryptedMasterKey,
@@ -201,7 +207,6 @@
             signupUsername = "";
             recoveryConfirmation = "";
             pendingSignup = undefined;
-            lockWebVault();
             onOpenSignIn();
             setNotice(copy.created);
         } catch (error) {

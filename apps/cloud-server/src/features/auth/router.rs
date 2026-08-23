@@ -31,13 +31,19 @@ pub fn router() -> Router<AppState> {
         )
         .route("/auth/signin/start", post(handlers::signin_start))
         .route("/auth/signin/finish", post(handlers::signin_finish))
+        .route("/auth/signin/totp", post(handlers::signin_totp))
         .route("/auth/reauth/start", post(handlers::reauth_start))
         .route("/auth/reauth/finish", post(handlers::reauth_finish))
         .route("/auth/refresh", post(handlers::refresh))
+        .route("/auth/csrf", post(handlers::csrf_bootstrap))
         .route("/auth/logout", post(handlers::logout))
         .route(
             "/auth/device-authorization/start",
             post(handlers::device_authorization_start),
+        )
+        .route(
+            "/auth/device-authorization/inspect",
+            post(handlers::device_authorization_inspect),
         )
         .route(
             "/auth/device-authorization/approve",

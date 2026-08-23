@@ -3,7 +3,7 @@ runtime: go
 description: Kamori hosted MVP infrastructure on Hetzner with Porkbun DNS, B2, and Hetzner S3-compatible storage
 # Keep the CLI and backend contract aligned with the infrastructure workflow;
 # this exact configuration has completed production updates against B2.
-requiredPulumiVersion: "=3.258.0"
+requiredPulumiVersion: "=3.259.0"
 backend:
   url: s3://kamori-production-pulumi-state?endpoint=s3.eu-central-003.backblazeb2.com&region=eu-central-003&awssdk=v2&s3ForcePathStyle=true
 packages:

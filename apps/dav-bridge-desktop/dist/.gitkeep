@@ -1,1 +1,1 @@
-
+# Keep Tauri's frontendDist present for clean Rust-only checks.

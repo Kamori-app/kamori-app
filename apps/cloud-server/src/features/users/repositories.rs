@@ -276,12 +276,8 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
-        "DELETE FROM blob_egress_reservations WHERE owner_user_id = $1 OR requested_by = $1",
-    )
-    .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    // Retain pseudonymous reservation rows through the active quota windows.
+    // Deleting them would orphan pending ledger bytes and undercount global use.
     sqlx::query("DELETE FROM security_space_invites WHERE created_by = $1")
         .bind(user_id)
         .execute(&mut *tx)
@@ -302,6 +298,25 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("DELETE FROM account_recovery_attempts WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM signup_completions WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        r#"
+        UPDATE ownership_transfer_offers
+        SET cancelled_at = now()
+        WHERE (current_owner_id = $1 OR target_user_id = $1)
+          AND accepted_at IS NULL AND cancelled_at IS NULL
+        "#,
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("DELETE FROM user_consents WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *tx)
@@ -324,10 +339,13 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         r#"
         UPDATE users
         SET username = 'deleted-' || id::text,
-            opaque_record = ''::bytea,
-            encrypted_master_key = ''::bytea,
-            public_key_bundle = ''::bytea,
+            opaque_record = NULL,
+            encrypted_master_key = NULL,
+            public_key_bundle = NULL,
+            recovery_verifier_hash = NULL,
             totp_secret_ciphertext = NULL,
+            suspended_at = NULL,
+            suspension_reason = NULL,
             deleted_at = now()
         WHERE id = $1 AND deleted_at IS NULL
         "#,

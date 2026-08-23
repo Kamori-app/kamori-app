@@ -243,7 +243,6 @@ jobs:
           tags: kamori/web:acceptance
           build-args: |
             VITE_KAMORI_API_BASE_URL=http://127.0.0.1:18080
-            VITE_KAMORI_WEB_CSRF_COOKIE_NAME=kamori_csrf
           cache-from: type=gha,scope=web-frontend
       - name: Build operator console image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

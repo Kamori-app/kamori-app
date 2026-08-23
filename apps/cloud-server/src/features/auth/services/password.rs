@@ -1,9 +1,7 @@
 //! Service logic for password change and account recovery reset.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
-use uuid::Uuid;
+use time::{Duration, OffsetDateTime};
 
 use crate::{
     features::auth::dto::{
@@ -12,13 +10,13 @@ use crate::{
         PasswordChangeStartRequest, PasswordChangeStartResponse,
     },
     features::auth::repositories::{
-        apply_account_recovery_reset, find_user_for_data_recovery,
+        AccountRecoveryReset, apply_account_recovery_reset, create_account_recovery_attempt,
+        find_account_recovery_attempt_user, find_user_for_data_recovery,
         update_user_password_file_and_revoke_refresh_sessions,
     },
     features::common::{
         ApiError, authorize_principal, bad_request, internal_error, unauthenticated,
     },
-    platform::jwt::TokenKind,
     platform::state::AppState,
 };
 
@@ -40,7 +38,7 @@ pub(crate) async fn password_change_start(
         .opaque
         .registration_start(&username, &payload.opaque_start_request)
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| bad_request("invalid OPAQUE password-change request"))?;
 
     Ok(PasswordChangeStartResponse {
         opaque_server_message: opaque_message,
@@ -62,6 +60,12 @@ pub(crate) async fn password_change_finish(
     let user_id = principal.user_id;
     let username = principal.username;
 
+    let password_file_bytes = state
+        .opaque
+        .registration_finish(&username, &payload.opaque_finish_request)
+        .await
+        .map_err(|_| bad_request("invalid OPAQUE password-change finish"))?;
+
     consume_reauth_token(
         state,
         &payload.reauth_token,
@@ -70,12 +74,6 @@ pub(crate) async fn password_change_finish(
         crate::features::auth::dto::ReauthAction::ChangePassword,
     )
     .await?;
-
-    let password_file_bytes = state
-        .opaque
-        .registration_finish(&username, &payload.opaque_finish_request)
-        .await
-        .map_err(internal_error)?;
 
     update_user_password_file_and_revoke_refresh_sessions(
         &state.pool,
@@ -97,6 +95,12 @@ pub(crate) async fn account_recovery_start(
     }
     let username = normalize_username(&payload.username)
         .map_err(|_| unauthenticated("invalid recovery credentials"))?;
+    crate::platform::rate_limit::enforce_credential_attempt(
+        state,
+        "account-recovery",
+        username.as_bytes(),
+    )
+    .await?;
     let recovery_verifier_hash = hash_data_recovery_verifier(&payload.recovery_verifier)
         .map_err(|_| unauthenticated("invalid recovery credentials"))?;
     let Some(user_id) =
@@ -109,19 +113,19 @@ pub(crate) async fn account_recovery_start(
         .opaque
         .registration_start(&username, &payload.opaque_start_request)
         .await
-        .map_err(internal_error)?;
+        .map_err(|_| unauthenticated("invalid recovery credentials"))?;
     let recovery_token = state
         .issue_account_recovery_token(user_id, &username)
         .map_err(internal_error)?;
-    state
-        .state_store
-        .put(
-            &recovery_token_state_key(&recovery_token),
-            user_id.as_bytes(),
-            Duration::from_secs(state.config.jwt_account_recovery_ttl_seconds.max(1) as u64),
-        )
-        .await
-        .map_err(internal_error)?;
+    let token_hash: [u8; 32] = Sha256::digest(recovery_token.as_bytes()).into();
+    create_account_recovery_attempt(
+        &state.pool,
+        &token_hash,
+        user_id,
+        OffsetDateTime::now_utc()
+            + Duration::seconds(state.config.jwt_account_recovery_ttl_seconds.max(1)),
+    )
+    .await?;
 
     Ok(AccountRecoveryStartResponse {
         opaque_server_message: opaque_message,
@@ -141,28 +145,34 @@ pub(crate) async fn account_recovery_finish(
             "account recovery key material has invalid size",
         ));
     }
-    let (user_id, username) =
-        validate_account_recovery_token_for_user(state, &payload.recovery_token)?;
-    let consumed_user_id = state
-        .state_store
-        .take(&recovery_token_state_key(&payload.recovery_token))
-        .await
-        .map_err(internal_error)?
-        .ok_or_else(|| unauthenticated("account recovery token was already used or expired"))?;
-    if consumed_user_id.as_slice() != user_id.as_bytes() {
-        return Err(unauthenticated("invalid account recovery token"));
+    if !(32..=4096).contains(&payload.recovery_token.len()) {
+        return Err(unauthenticated("invalid or expired account recovery token"));
     }
+    let token_hash: [u8; 32] = Sha256::digest(payload.recovery_token.as_bytes()).into();
+    let user_id = find_account_recovery_attempt_user(&state.pool, &token_hash)
+        .await?
+        .ok_or_else(|| unauthenticated("invalid or expired account recovery token"))?;
     let password_file_bytes = state
         .opaque
-        .registration_finish(&username, &payload.opaque_finish_request)
+        .registration_finish("", &payload.opaque_finish_request)
         .await
-        .map_err(internal_error)?;
-
+        .map_err(|_| bad_request("invalid OPAQUE account-recovery finish"))?;
+    let mut request_hasher = Sha256::new();
+    request_hasher.update(b"kamori.account-recovery-finish.v1\0");
+    request_hasher.update((payload.opaque_finish_request.len() as u64).to_be_bytes());
+    request_hasher.update(&payload.opaque_finish_request);
+    request_hasher.update((payload.encrypted_master_key.len() as u64).to_be_bytes());
+    request_hasher.update(&payload.encrypted_master_key);
+    let request_hash: [u8; 32] = request_hasher.finalize().into();
     apply_account_recovery_reset(
         &state.pool,
-        user_id,
-        &password_file_bytes,
-        &payload.encrypted_master_key,
+        AccountRecoveryReset {
+            user_id,
+            token_hash: &token_hash,
+            request_hash: &request_hash,
+            opaque_record: &password_file_bytes,
+            encrypted_master_key: &payload.encrypted_master_key,
+        },
     )
     .await?;
 
@@ -176,25 +186,4 @@ pub(crate) async fn account_recovery_finish(
         totp_disabled: true,
         space_key_packages,
     })
-}
-
-fn recovery_token_state_key(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    format!("auth:account-recovery:{}", URL_SAFE_NO_PAD.encode(digest))
-}
-
-fn validate_account_recovery_token_for_user(
-    state: &AppState,
-    token: &str,
-) -> Result<(Uuid, String), ApiError> {
-    let claims = state.validate_token(token).map_err(internal_error)?;
-    if claims.kind != TokenKind::AccountRecovery {
-        return Err(unauthenticated("invalid account recovery token"));
-    }
-    let username = claims
-        .username
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| unauthenticated("invalid account recovery token"))?;
-    Ok((claims.user_id, username))
 }

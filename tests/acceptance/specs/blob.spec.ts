@@ -64,6 +64,31 @@ test("@full encrypted blob integrity, idempotency, download, and storage quota",
     stored: false,
   });
 
+  // Blob ids are scoped to a security space. Reusing an opaque client id in an
+  // unrelated space must neither leak the first blob nor create a global-id
+  // collision between tenants.
+  const secondSpaceId = await createCollection(page, "Second blob namespace");
+  const secondData = new Uint8Array(data);
+  secondData[0] ^= 0xff;
+  const secondSpaceUpload = await fetch(`${apiUrl}/spaces/${secondSpaceId}/blobs`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/msgpack",
+      Accept: "application/msgpack",
+    },
+    body: encode({
+      blob_id: blobId,
+      ciphertext_sha256: sha256(secondData),
+      size_padded: secondData.length,
+      data: secondData,
+    }),
+  });
+  expect(secondSpaceUpload.status).toBe(200);
+  expect(
+    decode(new Uint8Array(await secondSpaceUpload.arrayBuffer())) as UploadResponse,
+  ).toEqual({ blob_id: blobId, stored: true });
+
   const download = await fetch(`${apiUrl}/spaces/${spaceId}/blobs/${blobId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
 	"github.com/pulumi/pulumi-tls/sdk/v5/go/tls"
@@ -48,6 +49,8 @@ type sshPKI struct {
 	caPublicKey      pulumi.StringOutput
 	deployPublicKey  pulumi.StringOutput
 	deployPrivateKey pulumi.StringOutput
+	configPublicKey  pulumi.StringOutput
+	configPrivateKey pulumi.StringOutput
 	hosts            map[string]sshHostIdentity
 }
 
@@ -195,7 +198,14 @@ func provisionSSHPKI(ctx *pulumi.Context, hostNames []string) (*sshPKI, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create SSH deploy key: %w", err)
 	}
+	configKey, err := tls.NewPrivateKey(ctx, "ssh-config-key", &tls.PrivateKeyArgs{
+		Algorithm: pulumi.String("ED25519"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create SSH host-configuration key: %w", err)
+	}
 
+	issuedAt := time.Now().UTC().Truncate(time.Hour)
 	hosts := make(map[string]sshHostIdentity, len(hostNames))
 	for index, hostName := range hostNames {
 		hostKey, err := tls.NewPrivateKey(ctx, "ssh-host-key-"+hostName, &tls.PrivateKeyArgs{
@@ -205,7 +215,7 @@ func provisionSSHPKI(ctx *pulumi.Context, hostNames []string) (*sshPKI, error) {
 			return nil, fmt.Errorf("create SSH host key for %s: %w", hostName, err)
 		}
 		certificate := pulumi.All(caKey.PrivateKeyOpenssh, hostKey.PublicKeyOpenssh).ApplyT(func(values []interface{}) (string, error) {
-			return signSSHHostCertificate(values[0].(string), values[1].(string), hostName, uint64(index+1))
+			return signSSHHostCertificate(values[0].(string), values[1].(string), hostName, uint64(index+1), issuedAt)
 		}).(pulumi.StringOutput)
 		hosts[hostName] = sshHostIdentity{
 			privateKey:  hostKey.PrivateKeyOpenssh,
@@ -218,11 +228,13 @@ func provisionSSHPKI(ctx *pulumi.Context, hostNames []string) (*sshPKI, error) {
 		caPublicKey:      caKey.PublicKeyOpenssh,
 		deployPublicKey:  deployKey.PublicKeyOpenssh,
 		deployPrivateKey: deployKey.PrivateKeyOpenssh,
+		configPublicKey:  configKey.PublicKeyOpenssh,
+		configPrivateKey: configKey.PrivateKeyOpenssh,
 		hosts:            hosts,
 	}, nil
 }
 
-func signSSHHostCertificate(caPrivateKey, hostPublicKey, principal string, serial uint64) (string, error) {
+func signSSHHostCertificate(caPrivateKey, hostPublicKey, principal string, serial uint64, issuedAt time.Time) (string, error) {
 	caSigner, err := ssh.ParsePrivateKey([]byte(caPrivateKey))
 	if err != nil {
 		return "", fmt.Errorf("parse SSH host CA key: %w", err)
@@ -237,16 +249,16 @@ func signSSHHostCertificate(caPrivateKey, hostPublicKey, principal string, seria
 		CertType:        ssh.HostCert,
 		KeyId:           principal,
 		ValidPrincipals: []string{principal},
-		ValidAfter:      0,
-		ValidBefore:     ssh.CertTimeInfinity,
+		ValidAfter:      uint64(issuedAt.Add(-5 * time.Minute).Unix()),
+		ValidBefore:     uint64(issuedAt.Add(397 * 24 * time.Hour).Unix()),
 	}
-	if err := certificate.SignCert(bytes.NewReader(sshCertificateEntropy(hostPublicKey, principal)), caSigner); err != nil {
+	if err := certificate.SignCert(bytes.NewReader(sshCertificateEntropy(hostPublicKey, principal, issuedAt)), caSigner); err != nil {
 		return "", fmt.Errorf("sign SSH host certificate: %w", err)
 	}
 	return string(ssh.MarshalAuthorizedKey(certificate)), nil
 }
 
-func sshCertificateEntropy(hostPublicKey, principal string) []byte {
-	digest := sha256.Sum256([]byte("kamori:ssh-host-certificate:v1\x00" + principal + "\x00" + hostPublicKey))
+func sshCertificateEntropy(hostPublicKey, principal string, issuedAt time.Time) []byte {
+	digest := sha256.Sum256([]byte("kamori:ssh-host-certificate:v2\x00" + principal + "\x00" + issuedAt.Format(time.RFC3339) + "\x00" + hostPublicKey))
 	return digest[:]
 }

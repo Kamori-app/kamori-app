@@ -6,8 +6,8 @@ mod origin;
 mod refresh_transport;
 
 pub(crate) use cookies::{
-    clear_csrf_cookie, clear_refresh_cookie, read_refresh_cookie, set_csrf_cookie,
-    set_refresh_cookie,
+    clear_csrf_cookie, clear_refresh_cookie, read_csrf_cookie, read_refresh_cookie,
+    set_csrf_cookie, set_refresh_cookie,
 };
 pub(crate) use csrf::{generate_csrf_token, validate_cookie_csrf};
 pub(crate) use origin::validate_cookie_request_origin;
@@ -154,6 +154,7 @@ mod tests {
                 .iter()
                 .any(|cookie: &String| cookie.starts_with("__Host-kamori_csrf=csrf-token;"))
         );
+        assert!(cookies.iter().all(|cookie| cookie.contains("; HttpOnly;")));
         assert!(
             cookies
                 .iter()

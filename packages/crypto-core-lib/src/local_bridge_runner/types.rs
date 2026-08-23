@@ -169,6 +169,24 @@ pub struct LocalResource {
     pub updated_at_ms: i64,
 }
 
+/// One explicit materialized branch of a logical PIM stream.
+///
+/// First-party clients must use `projection_resource_id` together with
+/// `head_operation_id` when mutating an existing item. This keeps conflict
+/// branches distinct and provides optimistic concurrency without parsing DAV
+/// filenames.
+#[derive(Clone, Debug)]
+pub struct MaterializedPimBranch {
+    pub space_id: Uuid,
+    pub logical_resource_id: Uuid,
+    pub projection_resource_id: String,
+    pub head_operation_id: Uuid,
+    pub kind: DavResourceKind,
+    pub payload: Option<String>,
+    pub deleted: bool,
+    pub conflict: bool,
+}
+
 /// A durable local DAV collection change used by RFC 6578 sync reports.
 #[cfg(feature = "local-bridge")]
 #[derive(Clone, Debug)]

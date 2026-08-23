@@ -1,7 +1,6 @@
 //! MessagePack request/response extractors and responders.
 
 use axum::{
-    Json,
     body::Bytes,
     extract::{FromRequest, Request},
     http::{HeaderValue, StatusCode, header},
@@ -12,6 +11,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use super::{ApiError, ErrorResponse};
 
 /// MessagePack request/response wrapper used by binary-heavy endpoints.
+#[derive(Debug)]
 pub struct MsgPack<T>(pub T);
 
 impl<S, T> FromRequest<S> for MsgPack<T>
@@ -23,10 +23,25 @@ where
     type Rejection = ApiError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let content_type = req
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if content_type != Some("application/msgpack") {
+            return Err((
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                MsgPack(ErrorResponse::new(
+                    "unsupported_media_type",
+                    "Content-Type must be application/msgpack",
+                )),
+            ));
+        }
         let bytes = Bytes::from_request(req, state).await.map_err(|_error| {
             (
                 StatusCode::BAD_REQUEST,
-                Json(ErrorResponse::new(
+                MsgPack(ErrorResponse::new(
                     "invalid_request",
                     "invalid msgpack request body",
                 )),
@@ -37,12 +52,21 @@ where
         let value = T::deserialize(&mut deserializer).map_err(|_error| {
             (
                 StatusCode::BAD_REQUEST,
-                Json(ErrorResponse::new(
+                MsgPack(ErrorResponse::new(
                     "invalid_request",
                     "failed to decode msgpack body",
                 )),
             )
         })?;
+        if !deserializer.get_ref().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                MsgPack(ErrorResponse::new(
+                    "invalid_request",
+                    "msgpack request body contains trailing data",
+                )),
+            ));
+        }
         Ok(Self(value))
     }
 }
@@ -71,7 +95,16 @@ where
                 let response =
                     ErrorResponse::new("internal_error", "failed to encode server response");
                 tracing::error!(request_id = %response.request_id, %error, "msgpack response encoding failed");
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
+                let fallback = rmp_serde::to_vec_named(&response).unwrap_or_default();
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(
+                        header::CONTENT_TYPE,
+                        HeaderValue::from_static("application/msgpack"),
+                    )],
+                    fallback,
+                )
+                    .into_response()
             }
         }
     }
@@ -79,8 +112,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use axum::{body::Body, extract::FromRequest, http::Request};
     use serde::{Deserialize, Serialize};
     use uuid::Uuid;
+
+    use super::*;
 
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct BrowserContract {
@@ -120,5 +156,30 @@ mod tests {
             rmp_serde::Deserializer::new(encoded.as_slice()).with_human_readable();
         let decoded = BrowserContract::deserialize(&mut deserializer).expect("decode contract");
         assert_eq!(decoded, expected);
+    }
+
+    #[tokio::test]
+    async fn extractor_requires_msgpack_and_rejects_trailing_values() {
+        let body = rmp_serde::to_vec_named(&BrowserContract {
+            id: Uuid::new_v4(),
+            public_key: vec![1, 2, 3],
+        })
+        .expect("encode request");
+        let missing_content_type = Request::new(Body::from(body.clone()));
+        let rejection = MsgPack::<BrowserContract>::from_request(missing_content_type, &())
+            .await
+            .expect_err("content type is mandatory");
+        assert_eq!(rejection.0, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        let mut trailing = body;
+        trailing.push(0xc0);
+        let trailing_request = Request::builder()
+            .header(header::CONTENT_TYPE, "application/msgpack")
+            .body(Body::from(trailing))
+            .expect("request");
+        let rejection = MsgPack::<BrowserContract>::from_request(trailing_request, &())
+            .await
+            .expect_err("trailing value is rejected");
+        assert_eq!(rejection.0, StatusCode::BAD_REQUEST);
     }
 }

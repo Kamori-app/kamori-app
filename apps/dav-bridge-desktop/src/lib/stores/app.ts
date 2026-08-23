@@ -24,7 +24,7 @@ export interface BackendSettingsState {
 }
 
 const defaultBackendSettings: BackendSettingsState = {
-  cloudBaseUrl: 'http://127.0.0.1:3000',
+  cloudBaseUrl: 'https://api.kamori.app',
 };
 
 const backendStorageKey = 'kamori.desktop.backend-settings.v2';

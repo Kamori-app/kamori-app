@@ -18,12 +18,16 @@ pub struct TotpStatusResponse {
 }
 
 /// TOTP setup-start request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TotpSetupStartRequest {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotpSetupStartRequest {
+    pub reauth_token: String,
+}
 
 /// TOTP setup-start response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpSetupStartResponse {
+    /// One-time server-side setup flow.
+    pub flow_id: uuid::Uuid,
     /// Base32 manual entry key for authenticator apps.
     pub manual_entry_key: String,
     /// `otpauth://` URI for authenticator import.
@@ -33,8 +37,8 @@ pub struct TotpSetupStartResponse {
 /// TOTP setup-finish request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpSetupFinishRequest {
-    /// Base32 manual entry key returned by setup-start.
-    pub manual_entry_key: String,
+    /// One-time setup flow returned by setup-start.
+    pub flow_id: uuid::Uuid,
     /// Current TOTP code from authenticator app.
     pub code: String,
 }
@@ -51,6 +55,7 @@ pub struct TotpSetupFinishResponse {
 /// TOTP disable request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TotpDisableRequest {
+    pub reauth_token: String,
     /// Current TOTP code (required when TOTP is enabled).
     pub code: Option<String>,
 }
@@ -63,8 +68,10 @@ pub struct TotpDisableResponse {
 }
 
 /// Account recovery-code regeneration request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AccountRecoveryCodesRegenerateRequest {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountRecoveryCodesRegenerateRequest {
+    pub reauth_token: String,
+}
 
 /// Account recovery-code regeneration response.
 #[derive(Debug, Clone, Serialize, Deserialize)]

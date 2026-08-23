@@ -1,12 +1,15 @@
 //! Session and dashboard commands.
 use tauri::State;
+use zeroize::Zeroize;
 
 use crate::{
     models::{DashboardSnapshot, LogoutResult},
     state::DesktopState,
 };
 
-use super::common::{clear_refresh_token_secure, revoke_refresh_session, to_ui_error};
+use super::common::{
+    clear_refresh_token_secure, clear_session_username_secure, revoke_refresh_session, to_ui_error,
+};
 
 /// Returns a dashboard snapshot used by SPA cards.
 #[tauri::command]
@@ -30,16 +33,49 @@ pub async fn logout(state: State<'_, DesktopState>) -> Result<LogoutResult, Stri
         handle.abort();
         let _ = handle.await;
     }
+    let mut local_warnings = Vec::new();
     if let Some(runner) = state.bridge.lock().await.take() {
-        runner.stop().await.map_err(to_ui_error)?;
+        if let Err(error) = runner.clear_persisted_credentials().await {
+            local_warnings.push(format!(
+                "Encrypted cached credentials could not be removed: {}",
+                to_ui_error(error)
+            ));
+        }
+        if let Err(error) = runner.stop().await {
+            local_warnings.push(format!(
+                "The local DAV bridge could not be stopped cleanly: {}",
+                to_ui_error(error)
+            ));
+        }
     }
     let keychain_warning = clear_refresh_token_secure(&cloud_base_url).err();
-    state.set_access_token(None).await;
-    state.set_refresh_token(None).await;
+    let username_keychain_warning = clear_session_username_secure(&cloud_base_url).err();
+    if let Some(mut token) = state.access_token.write().await.take() {
+        token.zeroize();
+    }
+    if let Some(mut token) = state.refresh_token.write().await.take() {
+        token.zeroize();
+    }
     state.set_username(None).await;
-    state.collections.write().await.clear();
-    *state.device_identity.write().await = None;
-    *state.dav_credentials.write().await = None;
+    let mut collections = state.collections.write().await;
+    for (_, mut collection) in collections.drain() {
+        collection.name.zeroize();
+        collection.cmk.zeroize();
+    }
+    drop(collections);
+    if let Some(mut identity) = state.device_identity.write().await.take() {
+        identity.signing_private_key.zeroize();
+    }
+    if let Some((mut username, mut password)) = state.dav_credentials.write().await.take() {
+        username.zeroize();
+        password.zeroize();
+    }
+    if let Some(mut pending) = state.pending_totp_login.lock().await.take() {
+        pending.username.zeroize();
+        pending.continuation_token.zeroize();
+        pending.export_key.zeroize();
+    }
+    *state.pending_browser_login.lock().await = None;
     let (server_session_revoked, server_warning) = match server_result {
         Ok(revoked) => (revoked, None),
         Err(error) => (
@@ -49,14 +85,21 @@ pub async fn logout(state: State<'_, DesktopState>) -> Result<LogoutResult, Stri
             )),
         ),
     };
-    let warning = match (server_warning, keychain_warning) {
-        (Some(server), Some(keychain)) => Some(format!("{server}; {keychain}")),
-        (Some(server), None) => Some(server),
-        (None, Some(keychain)) => Some(format!(
+    let mut warnings = local_warnings;
+    if let Some(server) = server_warning {
+        warnings.push(server);
+    }
+    if let Some(keychain) = keychain_warning {
+        warnings.push(format!(
             "Signed out, but the refresh token could not be removed from the keychain: {keychain}"
-        )),
-        (None, None) => None,
-    };
+        ));
+    }
+    if let Some(keychain) = username_keychain_warning {
+        warnings.push(format!(
+            "Signed out, but session metadata could not be removed from the keychain: {keychain}"
+        ));
+    }
+    let warning = (!warnings.is_empty()).then(|| warnings.join("; "));
     Ok(LogoutResult {
         server_session_revoked,
         warning,

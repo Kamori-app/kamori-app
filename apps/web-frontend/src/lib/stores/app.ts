@@ -1,9 +1,8 @@
 import { browser } from "$app/environment";
 import { writable } from "svelte/store";
+import { normalizeCloudBaseUrl } from "$lib/endpoint";
 
-/**
- * Persistent collection descriptor stored in web app local state.
- */
+/** In-memory collection descriptor hydrated from the encrypted vault/cloud. */
 export interface CollectionEntry {
   id: string;
   name: string;
@@ -17,14 +16,14 @@ export interface CollectionEntry {
  * Root web app state.
  *
  * Security note:
- * access/preauth tokens are memory-only and must never be persisted.
+ * Access and TOTP-continuation tokens are memory-only and must never be persisted.
  * Refresh token is cookie-bound (`HttpOnly`) and not stored in app state.
  */
 export interface AppState {
   cloudBaseUrl: string;
   currentUsername: string;
   accessToken: string | null;
-  preauthToken: string | null;
+  totpContinuationToken: string | null;
   collections: CollectionEntry[];
   syncedItemsTotal: number;
   lastSyncedSeq: number;
@@ -41,7 +40,7 @@ const defaultState: AppState = {
   cloudBaseUrl: configuredCloudBaseUrl,
   currentUsername: "",
   accessToken: null,
-  preauthToken: null,
+  totpContinuationToken: null,
   collections: [],
   syncedItemsTotal: 0,
   lastSyncedSeq: 0,
@@ -49,26 +48,7 @@ const defaultState: AppState = {
 };
 
 /**
- * Runtime guard for validating persisted collection entries.
- */
-const isValidCollection = (value: unknown): value is CollectionEntry => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<CollectionEntry>;
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.name === "string" &&
-    typeof candidate.keyAvailable === "boolean" &&
-    typeof candidate.keyEpoch === "number" &&
-    ["owner", "editor", "reader"].includes(candidate.role ?? "") &&
-    typeof candidate.syncedItems === "number"
-  );
-};
-
-/**
- * Loads persisted app state from browser storage with shape validation.
+ * Loads the sole persisted connection preference from browser storage.
  */
 const loadPersistedState = (): AppState => {
   if (!browser) {
@@ -82,34 +62,17 @@ const loadPersistedState = (): AppState => {
 
   try {
     const parsed = JSON.parse(raw) as Partial<AppState>;
-    const collections = Array.isArray(parsed.collections)
-      ? parsed.collections.filter(isValidCollection)
-      : defaultState.collections;
-
-    const currentUsername =
-      typeof parsed.currentUsername === "string"
-        ? parsed.currentUsername
-        : defaultState.currentUsername;
-
     return {
       ...defaultState,
-      cloudBaseUrl:
-        typeof parsed.cloudBaseUrl === "string" && parsed.cloudBaseUrl
-          ? parsed.cloudBaseUrl
-          : defaultState.cloudBaseUrl,
-      currentUsername,
-      accessToken: defaultState.accessToken,
-      preauthToken: defaultState.preauthToken,
-      syncedItemsTotal:
-        typeof parsed.syncedItemsTotal === "number"
-          ? parsed.syncedItemsTotal
-          : defaultState.syncedItemsTotal,
-      lastSyncedSeq:
-        typeof parsed.lastSyncedSeq === "number"
-          ? parsed.lastSyncedSeq
-          : defaultState.lastSyncedSeq,
-      collections,
-      notice: defaultState.notice,
+      cloudBaseUrl: (() => {
+        try {
+          return typeof parsed.cloudBaseUrl === "string" && parsed.cloudBaseUrl
+            ? normalizeCloudBaseUrl(parsed.cloudBaseUrl)
+            : normalizeCloudBaseUrl(defaultState.cloudBaseUrl);
+        } catch {
+          return normalizeCloudBaseUrl(defaultState.cloudBaseUrl);
+        }
+      })(),
     };
   } catch {
     return defaultState;
@@ -119,14 +82,12 @@ const loadPersistedState = (): AppState => {
 export const appState = writable<AppState>(loadPersistedState());
 
 if (browser) {
-  // Persist only non-sensitive state. Auth fields stay memory-only.
+  // Account identity, decrypted collection metadata, cursors, counters, and
+  // auth state stay memory-only. The encrypted vault remains in IndexedDB.
   appState.subscribe((state) => {
-    const {
-      notice: _notice,
-      accessToken: _accessToken,
-      preauthToken: _preauthToken,
-      ...persisted
-    } = state;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ cloudBaseUrl: state.cloudBaseUrl }),
+    );
   });
 }

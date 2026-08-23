@@ -41,6 +41,10 @@ pub struct SpaceSummary {
     pub workspace_id: Uuid,
     pub role: SpaceRole,
     pub key_epoch: u32,
+    /// Transport cursor immediately before the first operation this membership may read.
+    pub history_start_seq: u64,
+    /// Cursor immediately before the first operation in the current key epoch.
+    pub current_state_start_seq: u64,
     #[serde(with = "serde_bytes")]
     pub encrypted_metadata: Vec<u8>,
     pub device_key_packages: Vec<DeviceKeyPackage>,
@@ -63,6 +67,9 @@ pub struct SpaceMemberSummary {
     pub username: String,
     pub role: SpaceRole,
     pub key_epoch: u32,
+    /// Account-recovery HPKE public bundle published by the member.
+    #[serde(with = "serde_bytes")]
+    pub public_key_bundle: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -73,8 +80,12 @@ pub struct ListSpaceMembersResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SpaceDeviceSummary {
     pub device_id: Uuid,
+    pub user_id: Uuid,
+    pub active: bool,
     #[serde(with = "serde_bytes")]
     pub signing_public_key: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub hpke_public_key: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -121,16 +132,28 @@ pub struct RecoverySpaceKeyPackage {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RevokeSpaceMemberRequest {
+pub struct ListRecoveryKeyPackagesResponse {
+    pub packages: Vec<RecoverySpaceKeyPackage>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RotateSpaceKeyRequest {
     pub rotation_id: Uuid,
     pub expected_key_epoch: u32,
     pub new_key_epoch: u32,
+    /// Last operation sequence included in every encrypted snapshot.
+    pub base_space_seq: u64,
     #[serde(with = "serde_bytes")]
     pub new_encrypted_metadata: Vec<u8>,
     pub remaining_device_packages: Vec<DeviceKeyPackage>,
     pub remaining_recovery_packages: Vec<MemberRecoveryKeyPackage>,
     pub snapshots: Vec<OperationEnvelopeV1>,
+    /// Authenticated streams that were deliberately quarantined and therefore
+    /// cannot produce a current-state snapshot.
+    pub quarantined_streams: Vec<Uuid>,
 }
+
+pub type RevokeSpaceMemberRequest = RotateSpaceKeyRequest;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MemberRecoveryKeyPackage {
@@ -143,6 +166,12 @@ pub struct MemberRecoveryKeyPackage {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RevokeSpaceMemberResponse {
     pub revoked: bool,
+    pub key_epoch: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RotateSpaceKeyResponse {
+    pub rotated: bool,
     pub key_epoch: u32,
 }
 

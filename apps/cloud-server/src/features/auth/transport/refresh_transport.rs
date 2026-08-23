@@ -61,14 +61,8 @@ pub(crate) fn client_metadata_from_headers(headers: &HeaderMap) -> ClientMetadat
         .map(ToOwned::to_owned);
 
     let ip_address = headers
-        .get("x-forwarded-for")
+        .get(crate::platform::rate_limit::VERIFIED_CLIENT_IP_HEADER)
         .and_then(|value| value.to_str().ok())
-        .and_then(|raw| raw.split(',').next())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|value| value.to_str().ok())
-        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);

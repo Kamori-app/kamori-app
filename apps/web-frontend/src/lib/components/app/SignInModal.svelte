@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { decode } from "@msgpack/msgpack";
     import { cloudApi } from "$lib/api/cloud";
     import { tokenStore } from "$lib/auth/tokenStore";
     import { appState } from "$lib/stores/app";
@@ -11,19 +12,22 @@
         opaqueSignupFinish,
         opaqueSignupStart,
         recoveryPhraseToMasterKey,
-        decryptVaultBytes,
+        unwrapSpaceKeyFromAccountRecovery,
         unwrapAccountMasterKey,
         wrapAccountMasterKey,
         encryptVaultBytes,
     } from "$lib/opaqueClient";
     import {
         deriveDataRecoveryVerifier,
+        forgetMasterKeyForLocalUnlock,
         lockWebVault,
-        rememberMasterKeyForLocalPasskey,
+        rememberMasterKeyForLocalUnlock,
         storeSpaceKey,
         resetWebCredentialsAfterRecovery,
         unlockOrCreateWebVault,
-        unlockWebVaultFromLocalPasskey,
+        unlockWebVaultForRecovery,
+        unlockWebVaultFromLocalUnlock,
+        withActiveMasterKey,
     } from "$lib/cryptoVault";
     import {
         parseRequestOptions,
@@ -52,13 +56,22 @@
             passkeyBody: "Passkey login uses discoverable authentication and does not require username input.",
             credentialsRequired: "Username and password are required.",
             signedIn: "Signed in with password.",
-            totpRequired: "TOTP is required. Enter a code and submit sign in again.",
+            totpRequired: "TOTP is required. Enter a code to complete this sign-in.",
             passwordFailed: "Password sign-in failed.",
             signInFailed: "Sign-in failed",
             passkeyUnsupported: "Passkey login is not supported in this browser.",
             passkeyFailed: "Passkey sign-in failed",
             passkeyUnlocked: "Signed in with passkey and unlocked this approved browser.",
             passkeyApprove: "Passkey authentication succeeded. Enter your password once to approve and unlock this new browser.",
+            recoveryRequired: "Username, 24-word data recovery kit, and new password are required.",
+            passwordMismatch: "Password confirmation does not match.",
+            invalidRecoveryKit: "The 24-word data recovery kit is invalid.",
+            invalidRecoveredSpaceKey: "A recovered space key has an invalid length.",
+            recoveryCompleted: "Account recovery completed. Your password was reset, TOTP was disabled, and existing sessions, passkeys, and devices were revoked. Sign in with your new password.",
+            recoveryFailed: "Account recovery failed",
+            passkeyCancelled: "Passkey request was cancelled.",
+            localUnlock: "Allow passkey sign-in to unlock data on this browser",
+            localUnlockBody: "Off by default. Kamori stores the account key encrypted by a non-exportable browser key. This protects copied storage, but code running as app.kamori.app in this browser profile can request decryption.",
         },
         ru: {
             title: "Войти",
@@ -79,13 +92,22 @@
             passkeyBody: "Passkey использует discoverable-аутентификацию, поэтому имя пользователя вводить не нужно.",
             credentialsRequired: "Введите имя пользователя и пароль.",
             signedIn: "Вход по паролю выполнен.",
-            totpRequired: "Нужен TOTP-код. Введите его и повторите вход.",
+            totpRequired: "Нужен TOTP-код. Введите его, чтобы завершить этот вход.",
             passwordFailed: "Не удалось войти по паролю.",
             signInFailed: "Не удалось войти",
             passkeyUnsupported: "Этот браузер не поддерживает вход с passkey.",
             passkeyFailed: "Не удалось войти с passkey",
             passkeyUnlocked: "Вход с passkey выполнен, одобренный браузер разблокирован.",
             passkeyApprove: "Passkey подтверждён. Один раз введите пароль, чтобы одобрить и разблокировать новый браузер.",
+            recoveryRequired: "Введите имя пользователя, recovery kit из 24 слов и новый пароль.",
+            passwordMismatch: "Пароли не совпадают.",
+            invalidRecoveryKit: "Recovery kit из 24 слов недействителен.",
+            invalidRecoveredSpaceKey: "Восстановленный ключ пространства имеет неверную длину.",
+            recoveryCompleted: "Аккаунт восстановлен. Пароль сброшен, TOTP отключён, а прежние сессии, passkey и устройства отозваны. Войдите с новым паролем.",
+            recoveryFailed: "Не удалось восстановить аккаунт",
+            passkeyCancelled: "Запрос passkey отменён.",
+            localUnlock: "Разрешить passkey-входу разблокировать данные в этом браузере",
+            localUnlockBody: "По умолчанию выключено. Ключ аккаунта хранится зашифрованным неизвлекаемым ключом браузера. Это защищает скопированное хранилище, но код app.kamori.app в этом профиле может запросить расшифровку.",
         },
     } as const;
 
@@ -107,6 +129,8 @@
     let recoveryPhrase = "";
     let loadingAction = "";
     let wasOpen = false;
+    let pendingOpaqueExportKey: Uint8Array | null = null;
+    let allowLocalUnlock = false;
 
     const setLoading = (value: string) => {
         loadingAction = value;
@@ -125,13 +149,35 @@
      */
     const signinWithOpaque = async () => {
         const username = loginUsername.trim();
-        if (!username || !loginPassword) {
+        const continuationToken = $appState.totpContinuationToken;
+        if (!username || (!continuationToken && !loginPassword)) {
             setNotice(copy.credentialsRequired);
             return;
         }
 
         setLoading("signin-opaque");
         try {
+            if (continuationToken) {
+                const code = loginTotpCode.trim();
+                if (!code || !pendingOpaqueExportKey) {
+                    setNotice(copy.totpRequired);
+                    return;
+                }
+                const response = await cloudApi.signinTotp(
+                    $appState.cloudBaseUrl,
+                    {
+                        continuation_token: continuationToken,
+                        totp_code: code,
+                    },
+                );
+                await completePasswordSignin(
+                    username,
+                    response,
+                    pendingOpaqueExportKey,
+                );
+                return;
+            }
+
             const start = await opaqueSigninStart(loginPassword);
             const startResponse = await cloudApi.signinStart(
                 $appState.cloudBaseUrl,
@@ -155,65 +201,30 @@
                     opaque_flow_id: startResponse.opaque_flow_id,
                     opaque_finish_request: finish.opaque_finish_request,
                     totp_code: totp,
-                    preauth_token:
-                        $appState.preauthToken ??
-                        startResponse.preauth_token ??
-                        undefined,
                 },
             );
 
             if (finishResponse.access_token) {
-                const masterKey = await unwrapAccountMasterKey(
-                    finish.export_key,
-                    finishResponse.encrypted_master_key,
-                );
-                const device = await unlockOrCreateWebVault(
+                await completePasswordSignin(
                     username,
-                    masterKey,
+                    finishResponse,
+                    finish.export_key,
                 );
-                await rememberMasterKeyForLocalPasskey(username, masterKey);
-                const encryptedDeviceName = await encryptVaultBytes(
-                    masterKey,
-                    new TextEncoder().encode("Web browser"),
-                );
-                await cloudApi.registerDevice(
-                    $appState.cloudBaseUrl,
-                    {
-                        device_id: device.deviceId,
-                        signing_public_key:
-                            device.identity.signing_public_key,
-                        hpke_public_key: device.identity.hpke_public_key,
-                        encrypted_name: encryptedDeviceName,
-                        platform: "web",
-                    },
-                    finishResponse.access_token,
-                );
-                masterKey.fill(0);
-                tokenStore.setAccessToken(finishResponse.access_token);
-                appState.update((state) => ({
-                    ...state,
-                    currentUsername: username,
-                    accessToken: finishResponse.access_token ?? null,
-                    preauthToken: null,
-                    notice: copy.signedIn,
-                }));
-                loginPassword = "";
-                loginTotpCode = "";
-                onClose();
                 return;
             }
 
-            if (finishResponse.preauth_token) {
+            if (finishResponse.totp_continuation_token) {
+                pendingOpaqueExportKey?.fill(0);
+                pendingOpaqueExportKey = new Uint8Array(finish.export_key);
                 tokenStore.clear();
                 appState.update((state) => ({
                     ...state,
                     currentUsername: username,
                     accessToken: null,
-                    preauthToken: finishResponse.preauth_token ?? null,
+                    totpContinuationToken:
+                        finishResponse.totp_continuation_token ?? null,
                 }));
-                setNotice(
-                    copy.totpRequired,
-                );
+                setNotice(copy.totpRequired);
                 return;
             }
 
@@ -224,6 +235,92 @@
             setNotice(`${copy.signInFailed}: ${message}`);
         } finally {
             clearLoading();
+        }
+    };
+
+    const completePasswordSignin = async (
+        username: string,
+        response: Awaited<ReturnType<typeof cloudApi.signinFinish>>,
+        exportKey: Uint8Array,
+    ) => {
+        if (!response.access_token) {
+            throw new Error(copy.passwordFailed);
+        }
+        if (!response.device_enrollment_token) {
+            throw new Error("Device enrollment capability is missing.");
+        }
+        const masterKey = await unwrapAccountMasterKey(
+            exportKey,
+            response.encrypted_master_key,
+        );
+        try {
+            const device = await unlockOrCreateWebVault(
+                $appState.cloudBaseUrl,
+                username,
+                masterKey,
+            );
+            if (allowLocalUnlock) {
+                await rememberMasterKeyForLocalUnlock(
+                    $appState.cloudBaseUrl,
+                    username,
+                    masterKey,
+                );
+            } else {
+                await forgetMasterKeyForLocalUnlock(
+                    $appState.cloudBaseUrl,
+                    username,
+                );
+            }
+            const encryptedDeviceName = await encryptVaultBytes(
+                masterKey,
+                new TextEncoder().encode("Web browser"),
+            );
+            await cloudApi.registerDevice(
+                $appState.cloudBaseUrl,
+                {
+                    enrollment_token: response.device_enrollment_token,
+                    device_id: device.deviceId,
+                    signing_public_key: device.identity.signing_public_key,
+                    hpke_public_key: device.identity.hpke_public_key,
+                    encrypted_name: encryptedDeviceName,
+                    platform: "web",
+                },
+                response.access_token,
+            );
+            tokenStore.setAccessToken(response.access_token);
+            appState.update((state) => ({
+                ...state,
+                currentUsername: username,
+                accessToken: response.access_token ?? null,
+                totpContinuationToken: null,
+                notice: copy.signedIn,
+            }));
+            pendingOpaqueExportKey?.fill(0);
+            pendingOpaqueExportKey = null;
+            loginPassword = "";
+            loginTotpCode = "";
+            onClose();
+        } catch (error) {
+            lockWebVault();
+            tokenStore.clear();
+            appState.update((state) => ({
+                ...state,
+                accessToken: null,
+                totpContinuationToken: null,
+            }));
+            try {
+                await cloudApi.logout(
+                    $appState.cloudBaseUrl,
+                    response.access_token,
+                );
+            } catch {
+                // Preserve the enrollment error; the access token is never
+                // installed locally and the refresh cookie will be handled by
+                // the next explicit authentication attempt.
+            }
+            throw error;
+        } finally {
+            masterKey.fill(0);
         }
     };
 
@@ -240,13 +337,11 @@
             !recoveryPasswordConfirm ||
             !recoveryPhrase.trim()
         ) {
-            setNotice(
-                "Username, 24-word data recovery kit, and new password are required.",
-            );
+            setNotice(copy.recoveryRequired);
             return;
         }
         if (nextPassword !== recoveryPasswordConfirm) {
-            setNotice("Password confirmation does not match.");
+            setNotice(copy.passwordMismatch);
             return;
         }
 
@@ -256,7 +351,7 @@
                 recoveryPhrase,
             );
         } catch {
-            setNotice("The 24-word data recovery kit is invalid.");
+            setNotice(copy.invalidRecoveryKit);
             return;
         }
 
@@ -288,14 +383,18 @@
                 opaque_finish_request: finish.opaque_finish_request,
                 encrypted_master_key: encryptedMasterKey,
             });
-            await unlockOrCreateWebVault(username, recoveredMasterKey);
+            await unlockWebVaultForRecovery(
+                $appState.cloudBaseUrl,
+                username,
+                recoveredMasterKey,
+            );
             for (const packageEntry of recovered.space_key_packages) {
-                const spaceKey = await decryptVaultBytes(
+                const spaceKey = await unwrapSpaceKeyFromAccountRecovery(
                     recoveredMasterKey,
-                    packageEntry.encrypted_key_package,
+                    decode(packageEntry.encrypted_key_package),
                 );
                 if (spaceKey.length !== 32) {
-                    throw new Error("A recovered space key has an invalid length.");
+                    throw new Error(copy.invalidRecoveredSpaceKey);
                 }
                 await storeSpaceKey(
                     packageEntry.space_id,
@@ -304,15 +403,18 @@
                 );
                 spaceKey.fill(0);
             }
-            await resetWebCredentialsAfterRecovery(username);
+            await resetWebCredentialsAfterRecovery(
+                $appState.cloudBaseUrl,
+                username,
+            );
             lockWebVault();
 
             tokenStore.clear();
             appState.update((state) => ({
                 ...state,
                 accessToken: null,
-                preauthToken: null,
-                notice: "Account recovery completed: password reset and TOTP disabled. Sign in with your new password or passkey.",
+                totpContinuationToken: null,
+                notice: copy.recoveryCompleted,
             }));
             loginPassword = "";
             loginTotpCode = "";
@@ -322,9 +424,10 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Account recovery failed: ${message}`);
+            setNotice(`${copy.recoveryFailed}: ${message}`);
         } finally {
             recoveredMasterKey.fill(0);
+            lockWebVault();
             clearLoading();
         }
     };
@@ -351,7 +454,7 @@
             })) as PublicKeyCredential | null;
 
             if (!credential) {
-                throw new Error("Passkey request was cancelled.");
+                throw new Error(copy.passkeyCancelled);
             }
 
             const payload = toUtf8Bytes(
@@ -363,24 +466,78 @@
                 start.flow_id,
             );
 
-            const localDevice = await unlockWebVaultFromLocalPasskey(
+            const localDevice = await unlockWebVaultFromLocalUnlock(
+                $appState.cloudBaseUrl,
                 finish.username,
             );
+            if (!localDevice) {
+                // A passkey proves the account identity, but a clean browser
+                // still has no E2EE master key or registered device. Do not
+                // present the enrollment-only session as an unlocked login.
+                try {
+                    await cloudApi.logout(
+                        $appState.cloudBaseUrl,
+                        finish.access_token,
+                    );
+                } catch {
+                    // The access token is intentionally not retained. A
+                    // cookie that could not be revoked remains unable to use
+                    // normal endpoints because it is not device-bound.
+                }
+                tokenStore.clear();
+                appState.update((state) => ({
+                    ...state,
+                    currentUsername: finish.username,
+                    accessToken: null,
+                    totpContinuationToken: null,
+                    notice: copy.passkeyApprove,
+                }));
+                allowLocalUnlock = true;
+                return;
+            }
 
+            const encryptedDeviceName = await withActiveMasterKey((masterKey) =>
+                encryptVaultBytes(
+                    masterKey,
+                    new TextEncoder().encode("Web browser"),
+                ),
+            );
+            try {
+                await cloudApi.registerDevice(
+                    $appState.cloudBaseUrl,
+                    {
+                        enrollment_token: finish.device_enrollment_token,
+                        device_id: localDevice.deviceId,
+                        signing_public_key:
+                            localDevice.identity.signing_public_key,
+                        hpke_public_key: localDevice.identity.hpke_public_key,
+                        encrypted_name: encryptedDeviceName,
+                        platform: "web",
+                    },
+                    finish.access_token,
+                );
+            } catch (error) {
+                try {
+                    await cloudApi.logout(
+                        $appState.cloudBaseUrl,
+                        finish.access_token,
+                    );
+                } catch {
+                    // The original enrollment error is the actionable one.
+                }
+                throw error;
+            }
             tokenStore.setAccessToken(finish.access_token);
             appState.update((state) => ({
                 ...state,
                 currentUsername: finish.username,
                 accessToken: finish.access_token,
-                preauthToken: null,
-                notice: localDevice
-                    ? copy.passkeyUnlocked
-                    : copy.passkeyApprove,
+                totpContinuationToken: null,
+                notice: copy.passkeyUnlocked,
             }));
-            if (localDevice) {
-                onClose();
-            }
+            onClose();
         } catch (error) {
+            lockWebVault();
             const message =
                 error instanceof Error ? error.message : String(error);
             setNotice(`${copy.passkeyFailed}: ${message}`);
@@ -403,6 +560,13 @@
         recoveryPasswordConfirm = "";
         recoveryPhrase = "";
         loadingAction = "";
+        pendingOpaqueExportKey?.fill(0);
+        pendingOpaqueExportKey = null;
+        allowLocalUnlock = false;
+        appState.update((state) => ({
+            ...state,
+            totpContinuationToken: null,
+        }));
         wasOpen = false;
     }
 </script>
@@ -415,6 +579,17 @@
             type="password"
             placeholder={copy.password}
         />
+        <label class="flex items-start gap-2 text-xs text-slate/80">
+            <input
+                class="mt-0.5"
+                type="checkbox"
+                bind:checked={allowLocalUnlock}
+            />
+            <span>
+                <span class="block font-medium text-ink">{copy.localUnlock}</span>
+                <span class="mt-1 block text-slate/65">{copy.localUnlockBody}</span>
+            </span>
+        </label>
         <Input
             bind:value={loginTotpCode}
             placeholder={copy.totp}

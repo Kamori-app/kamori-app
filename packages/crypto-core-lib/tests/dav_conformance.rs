@@ -16,6 +16,7 @@ const DAV_USERNAME: &str = "kamori-dav";
 const DAV_PASSWORD: &str = "local-only-test-secret";
 const CALENDAR_V1: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Initial\r\nDTSTART:20260817T120000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 const CALENDAR_V2: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Updated\r\nDTSTART:20260817T120000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+const CALENDAR_V3: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Concurrent\r\nDTSTART:20260817T120000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 const CONTACT: &str =
     "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:contact-1\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n";
 
@@ -230,6 +231,23 @@ async fn applies_calendar_preconditions_reports_and_sync_tombstones() {
     let collection_path = format!("/caldav/{}/", bridge.space_id);
     let resource_path = format!("{collection_path}event-1.ics");
 
+    let oversized = bridge
+        .request("PUT", &resource_path)
+        .body(vec![b'x'; 1024 * 1024 + 1])
+        .send()
+        .await
+        .expect("send oversized resource");
+    assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let impossible_update = bridge
+        .request("PUT", &resource_path)
+        .header(IF_MATCH, "\"missing\"")
+        .body(CALENDAR_V1)
+        .send()
+        .await
+        .expect("send update for absent resource");
+    assert_eq!(impossible_update.status(), StatusCode::PRECONDITION_FAILED);
+
     let invalid = bridge
         .request("PUT", &resource_path)
         .body("not a calendar")
@@ -373,6 +391,53 @@ async fn applies_calendar_preconditions_reports_and_sync_tombstones() {
             .await
             .expect("invalid-token body")
             .contains("valid-sync-token")
+    );
+
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn serializes_concurrent_writes_against_the_same_etag() {
+    let bridge = TestBridge::start().await;
+    let resource_path = format!("/caldav/{}/event-1.ics", bridge.space_id);
+    let created = bridge
+        .request("PUT", &resource_path)
+        .header(IF_NONE_MATCH, "*")
+        .body(CALENDAR_V1)
+        .send()
+        .await
+        .expect("create calendar resource");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let etag = header_string(&created, ETAG);
+
+    let first = bridge
+        .request("PUT", &resource_path)
+        .header(IF_MATCH, etag.as_str())
+        .body(CALENDAR_V2)
+        .send();
+    let second = bridge
+        .request("PUT", &resource_path)
+        .header(IF_MATCH, etag.as_str())
+        .body(CALENDAR_V3)
+        .send();
+    let (first, second) = tokio::join!(first, second);
+    let statuses = [
+        first.expect("first concurrent response").status(),
+        second.expect("second concurrent response").status(),
+    ];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::NO_CONTENT)
+            .count(),
+        1
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::PRECONDITION_FAILED)
+            .count(),
+        1
     );
 
     bridge.stop().await;

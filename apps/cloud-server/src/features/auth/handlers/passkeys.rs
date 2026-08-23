@@ -17,10 +17,10 @@ use crate::{
 pub async fn passkey_add_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    MsgPack(_payload): MsgPack<PasskeyAddStartRequest>,
+    MsgPack(payload): MsgPack<PasskeyAddStartRequest>,
 ) -> Result<MsgPack<PasskeyAddStartResponse>, ApiError> {
     Ok(MsgPack(
-        auth_services::passkey_add_start(&state, &headers).await?,
+        auth_services::passkey_add_start(&state, &headers, payload).await?,
     ))
 }
 

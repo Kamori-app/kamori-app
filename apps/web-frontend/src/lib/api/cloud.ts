@@ -1,50 +1,49 @@
 import { deleteMsgpack, getMsgpack, postMsgpack } from "./msgpack";
 import {
-  DEFAULT_CSRF_COOKIE_NAME,
+  CSRF_HEADER,
   REFRESH_TRANSPORT_HEADER,
-  buildCookieRefreshTransportOptions,
 } from "$lib/auth/cookie-csrf.js";
 import type { OperationEnvelopeV1 } from "$lib/opaqueClient";
-
-const CSRF_COOKIE_NAME =
-  (
-    import.meta.env.VITE_KAMORI_WEB_CSRF_COOKIE_NAME as string | undefined
-  )?.trim() || DEFAULT_CSRF_COOKIE_NAME;
+import {
+  clearRefreshAttempt,
+  loadOrCreateRefreshAttempt,
+} from "$lib/auth/refresh-attempt.js";
 
 const COOKIE_REFRESH_TRANSPORT_OPTIONS = {
   headers: { [REFRESH_TRANSPORT_HEADER]: "cookie" },
   credentials: "include" as const,
 };
 
-const cookieRefreshWithCsrfOptions = () => {
-  const cookieString =
-    typeof document === "undefined" ? "" : (document.cookie ?? "");
-  const options = buildCookieRefreshTransportOptions(
-    cookieString,
-    CSRF_COOKIE_NAME,
-  );
-  return {
-    ...options,
-    credentials: "include" as const,
-  };
+let browserCsrfToken: string | null = null;
+let browserCsrfScope: string | null = null;
+
+const rememberBrowserCsrf = (baseUrl: string, token?: string | null) => {
+  browserCsrfScope = token ? baseUrl : null;
+  browserCsrfToken = token || null;
 };
 
-const refreshRotationRequestId = async (): Promise<string> => {
-  const csrf = (document.cookie ?? "")
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${CSRF_COOKIE_NAME}=`))
-    ?.slice(CSRF_COOKIE_NAME.length + 1);
-  if (!csrf) return crypto.randomUUID();
-  const input = new TextEncoder().encode(`kamori.refresh-request.v1\0${csrf}`);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
-  digest[6] = (digest[6] & 0x0f) | 0x40;
-  digest[8] = (digest[8] & 0x3f) | 0x80;
-  const hex = Array.from(digest.slice(0, 16), (value) =>
-    value.toString(16).padStart(2, "0"),
-  ).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+const browserCsrf = async (baseUrl: string): Promise<string> => {
+  if (browserCsrfScope === baseUrl && browserCsrfToken) {
+    return browserCsrfToken;
+  }
+  const response = await postMsgpack<
+    Record<string, never>,
+    { csrf_token: string }
+  >(baseUrl, "/auth/csrf", {}, undefined, COOKIE_REFRESH_TRANSPORT_OPTIONS);
+  if (!response.csrf_token) {
+    throw new Error("CSRF bootstrap returned an empty token.");
+  }
+  rememberBrowserCsrf(baseUrl, response.csrf_token);
+  return response.csrf_token;
 };
+
+const cookieRefreshWithCsrfOptions = async (baseUrl: string) => ({
+  headers: {
+    [REFRESH_TRANSPORT_HEADER]: "cookie",
+    [CSRF_HEADER]: await browserCsrf(baseUrl),
+  },
+  credentials: "include" as const,
+});
 
 /**
  * Cloud API request/response contracts for MessagePack endpoints.
@@ -61,6 +60,7 @@ export interface OpaqueSignupStartResponse {
 }
 
 export interface OpaqueSignupFinishRequest {
+  signup_request_id: string;
   username: string;
   opaque_finish_request: Uint8Array;
   encrypted_master_key: Uint8Array;
@@ -128,7 +128,6 @@ export interface OpaqueSigninStartResponse {
   opaque_flow_id: string;
   opaque_server_message: Uint8Array;
   next_step: OpaqueSigninNextStep;
-  preauth_token?: string | null;
 }
 
 export interface OpaqueSigninFinishRequest {
@@ -136,7 +135,6 @@ export interface OpaqueSigninFinishRequest {
   opaque_flow_id: string;
   opaque_finish_request: Uint8Array;
   totp_code?: string | null;
-  preauth_token?: string | null;
 }
 
 export interface OpaqueSigninFinishResponse {
@@ -146,7 +144,14 @@ export interface OpaqueSigninFinishResponse {
   totp_verified: boolean;
   encrypted_master_key: Uint8Array;
   public_key_bundle: Uint8Array;
-  preauth_token?: string | null;
+  totp_continuation_token?: string | null;
+  device_enrollment_token?: string | null;
+  csrf_token?: string | null;
+}
+
+export interface SigninTotpRequest {
+  continuation_token: string;
+  totp_code: string;
 }
 
 export interface PasskeyLoginStartResponse {
@@ -160,6 +165,8 @@ export interface PasskeyLoginFinishResponse {
   access_token: string;
   refresh_token?: string | null;
   refresh_token_id?: string | null;
+  device_enrollment_token: string;
+  csrf_token?: string | null;
 }
 
 export interface RefreshRequest {
@@ -169,8 +176,10 @@ export interface RefreshRequest {
 
 export interface RefreshResponse {
   access_token: string;
+  username: string;
   refresh_token?: string | null;
   refresh_token_id?: string | null;
+  csrf_token?: string | null;
 }
 
 export interface LogoutRequest {
@@ -183,14 +192,26 @@ export interface LogoutResponse {
 
 export interface DeviceAuthorizationApproveRequest {
   user_code: string;
+  encrypted_master_key_package: Uint8Array;
 }
 
 export interface DeviceAuthorizationApproveResponse {
   approved: boolean;
 }
 
+export interface DeviceAuthorizationInspectRequest {
+  user_code: string;
+}
+
+export interface DeviceAuthorizationInspectResponse {
+  flow_id: string;
+  hpke_public_key: Uint8Array;
+}
+
 export interface SessionSummary {
   refresh_token_id: string;
+  device_id?: string | null;
+  is_current: boolean;
   user_agent?: string | null;
   ip_address?: string | null;
   created_at_unix_ms: number;
@@ -206,6 +227,7 @@ export interface TotpStatusResponse {
 }
 
 export interface TotpSetupStartResponse {
+  flow_id: string;
   manual_entry_key: string;
   otpauth_uri: string;
 }
@@ -254,6 +276,7 @@ export interface PasskeyDeleteResponse {
 export type DevicePlatform = "web" | "desktop" | "android" | "ios";
 
 export interface RegisterDeviceRequest {
+  enrollment_token: string;
   device_id: string;
   signing_public_key: Uint8Array;
   hpke_public_key: Uint8Array;
@@ -261,13 +284,19 @@ export interface RegisterDeviceRequest {
   platform: DevicePlatform;
 }
 
-export interface DeviceSummary extends RegisterDeviceRequest {
+export interface DeviceSummary extends Omit<RegisterDeviceRequest, "enrollment_token"> {
   created_at_unix_ms: number;
   last_seen_at_unix_ms?: number | null;
 }
 
 export interface DeviceKeyPackage {
   device_id: string;
+  key_epoch: number;
+  encrypted_key_package: Uint8Array;
+}
+
+export interface RecoverySpaceKeyPackage {
+  space_id: string;
   key_epoch: number;
   encrypted_key_package: Uint8Array;
 }
@@ -285,6 +314,8 @@ export interface SpaceSummary {
   workspace_id: string;
   role: "owner" | "editor" | "reader";
   key_epoch: number;
+  history_start_seq: number;
+  current_state_start_seq: number;
   encrypted_metadata: Uint8Array;
   device_key_packages: DeviceKeyPackage[];
   created_at_unix_ms: number;
@@ -292,7 +323,10 @@ export interface SpaceSummary {
 
 export interface SpaceDeviceSummary {
   device_id: string;
+  user_id: string;
+  active: boolean;
   signing_public_key: Uint8Array;
+  hpke_public_key: Uint8Array;
 }
 
 export interface SpaceMemberSummary {
@@ -300,7 +334,28 @@ export interface SpaceMemberSummary {
   username: string;
   role: "owner" | "editor" | "reader";
   key_epoch: number;
+  public_key_bundle: Uint8Array;
 }
+
+export interface MemberRecoveryKeyPackage {
+  user_id: string;
+  key_epoch: number;
+  encrypted_key_package: Uint8Array;
+}
+
+export interface RotateSpaceKeyRequest {
+  rotation_id: string;
+  expected_key_epoch: number;
+  new_key_epoch: number;
+  base_space_seq: number;
+  new_encrypted_metadata: Uint8Array;
+  remaining_device_packages: DeviceKeyPackage[];
+  remaining_recovery_packages: MemberRecoveryKeyPackage[];
+  snapshots: OperationEnvelopeV1[];
+  quarantined_streams: string[];
+}
+
+export type RevokeSpaceMemberRequest = RotateSpaceKeyRequest;
 
 export interface WorkspaceSummary {
   workspace_id: string;
@@ -340,7 +395,11 @@ export interface ReauthStartResponse {
   totp_required: boolean;
 }
 
-export type ReauthAction = "change_password" | "delete_account" | "recovery_settings";
+export type ReauthAction =
+  | "change_password"
+  | "delete_account"
+  | "recovery_settings"
+  | "security_settings";
 
 export interface StoredOperation {
   space_seq: number;
@@ -350,6 +409,7 @@ export interface StoredOperation {
 
 export interface CreateInviteCodeRequest {
   space_id: string;
+  rotation_id: string;
   role: "editor" | "reader";
   invite_code_hash: Uint8Array;
   encrypted_key_package: Uint8Array;
@@ -365,6 +425,8 @@ export interface RedeemInviteCodeResponse {
   space_id: string;
   role: "editor" | "reader";
   key_epoch: number;
+  history_start_seq: number;
+  current_state_start_seq: number;
   encrypted_key_package: Uint8Array;
   encrypted_note?: Uint8Array;
 }
@@ -452,36 +514,96 @@ export const cloudApi = {
       payload,
     ),
 
-  signinFinish: (baseUrl: string, payload: OpaqueSigninFinishRequest) =>
-    postMsgpack<OpaqueSigninFinishRequest, OpaqueSigninFinishResponse>(
+  signinFinish: async (baseUrl: string, payload: OpaqueSigninFinishRequest) => {
+    const response = await postMsgpack<
+      OpaqueSigninFinishRequest,
+      OpaqueSigninFinishResponse
+    >(
       baseUrl,
       "/auth/signin/finish",
       payload,
       undefined,
       COOKIE_REFRESH_TRANSPORT_OPTIONS,
-    ),
+    );
+    rememberBrowserCsrf(baseUrl, response.csrf_token);
+    return response;
+  },
 
-  refresh: async (baseUrl: string) =>
-    postMsgpack<RefreshRequest, RefreshResponse>(
+  signinTotp: async (baseUrl: string, payload: SigninTotpRequest) => {
+    const response = await postMsgpack<
+      SigninTotpRequest,
+      OpaqueSigninFinishResponse
+    >(
       baseUrl,
-      "/auth/refresh",
-      { rotation_request_id: await refreshRotationRequestId() },
+      "/auth/signin/totp",
+      payload,
       undefined,
-      cookieRefreshWithCsrfOptions(),
-    ),
+      COOKIE_REFRESH_TRANSPORT_OPTIONS,
+    );
+    rememberBrowserCsrf(baseUrl, response.csrf_token);
+    return response;
+  },
 
-  logout: (baseUrl: string, accessToken: string) =>
-    postMsgpack<LogoutRequest, LogoutResponse>(
+  refresh: async (baseUrl: string) => {
+    const csrfToken = await browserCsrf(baseUrl);
+    const attempt = await loadOrCreateRefreshAttempt(baseUrl, csrfToken);
+    try {
+      const response = await postMsgpack<RefreshRequest, RefreshResponse>(
+        baseUrl,
+        "/auth/refresh",
+        { rotation_request_id: attempt.requestId },
+        undefined,
+        await cookieRefreshWithCsrfOptions(baseUrl),
+      );
+      rememberBrowserCsrf(baseUrl, response.csrf_token);
+      try {
+        await clearRefreshAttempt(attempt.scope);
+      } catch {
+        // The old scope is inert after CSRF rotation. Cleanup failure must not
+        // turn an already-successful session rotation into an application error.
+      }
+      return response;
+    } catch (error) {
+      // The response headers may already have advanced the HttpOnly refresh
+      // and CSRF cookies. Force a fresh bootstrap before any retry.
+      rememberBrowserCsrf(baseUrl, null);
+      throw error;
+    }
+  },
+
+  logout: async (baseUrl: string, accessToken: string) => {
+    try {
+      return await postMsgpack<LogoutRequest, LogoutResponse>(
+        baseUrl,
+        "/auth/logout",
+        {},
+        accessToken,
+        await cookieRefreshWithCsrfOptions(baseUrl),
+      );
+    } finally {
+      rememberBrowserCsrf(baseUrl, null);
+    }
+  },
+
+  inspectDeviceAuthorization: (
+    baseUrl: string,
+    userCode: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<
+      DeviceAuthorizationInspectRequest,
+      DeviceAuthorizationInspectResponse
+    >(
       baseUrl,
-      "/auth/logout",
-      {},
+      "/auth/device-authorization/inspect",
+      { user_code: userCode },
       accessToken,
-      cookieRefreshWithCsrfOptions(),
     ),
 
   approveDeviceAuthorization: (
     baseUrl: string,
     userCode: string,
+    encryptedMasterKeyPackage: Uint8Array,
     accessToken: string,
   ) =>
     postMsgpack<
@@ -490,7 +612,10 @@ export const cloudApi = {
     >(
       baseUrl,
       "/auth/device-authorization/approve",
-      { user_code: userCode },
+      {
+        user_code: userCode,
+        encrypted_master_key_package: encryptedMasterKeyPackage,
+      },
       accessToken,
     ),
 
@@ -504,12 +629,16 @@ export const cloudApi = {
   revokeSession: (
     baseUrl: string,
     refreshTokenId: string,
+    reauthToken: string,
     accessToken: string,
   ) =>
-    postMsgpack<{ refresh_token_id: string }, { revoked: boolean }>(
+    postMsgpack<
+      { refresh_token_id: string; reauth_token: string },
+      { revoked: boolean }
+    >(
       baseUrl,
       "/auth/revoke",
-      { refresh_token_id: refreshTokenId },
+      { refresh_token_id: refreshTokenId, reauth_token: reauthToken },
       accessToken,
     ),
 
@@ -521,41 +650,49 @@ export const cloudApi = {
       accessToken,
     ),
 
-  totpSetupStart: (baseUrl: string, accessToken: string) =>
-    postMsgpack<Record<string, never>, TotpSetupStartResponse>(
+  totpSetupStart: (
+    baseUrl: string,
+    reauthToken: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<{ reauth_token: string }, TotpSetupStartResponse>(
       baseUrl,
       "/auth/totp/setup/start",
-      {},
+      { reauth_token: reauthToken },
       accessToken,
     ),
 
   totpSetupFinish: (
     baseUrl: string,
-    payload: { manual_entry_key: string; code: string },
+    payload: { flow_id: string; code: string },
     accessToken: string,
   ) =>
     postMsgpack<
-      { manual_entry_key: string; code: string },
+      { flow_id: string; code: string },
       TotpSetupFinishResponse
     >(baseUrl, "/auth/totp/setup/finish", payload, accessToken),
 
   totpDisable: (
     baseUrl: string,
-    payload: { code?: string },
+    payload: { reauth_token: string; code?: string },
     accessToken: string,
   ) =>
-    postMsgpack<{ code?: string }, TotpDisableResponse>(
+    postMsgpack<{ reauth_token: string; code?: string }, TotpDisableResponse>(
       baseUrl,
       "/auth/totp/disable",
       payload,
       accessToken,
     ),
 
-  accountRecoveryCodesRegenerate: (baseUrl: string, accessToken: string) =>
-    postMsgpack<Record<string, never>, AccountRecoveryCodesRegenerateResponse>(
+  accountRecoveryCodesRegenerate: (
+    baseUrl: string,
+    reauthToken: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<{ reauth_token: string }, AccountRecoveryCodesRegenerateResponse>(
       baseUrl,
       "/auth/account-recovery/codes/regenerate",
-      {},
+      { reauth_token: reauthToken },
       accessToken,
     ),
 
@@ -566,12 +703,12 @@ export const cloudApi = {
       {},
     ),
 
-  passkeyLoginFinish: (
+  passkeyLoginFinish: async (
     baseUrl: string,
     credential: Uint8Array,
     flowId: string | Uint8Array,
-  ) =>
-    postMsgpack<
+  ) => {
+    const response = await postMsgpack<
       { flow_id: string | Uint8Array; credential: Uint8Array },
       PasskeyLoginFinishResponse
     >(
@@ -583,13 +720,16 @@ export const cloudApi = {
       },
       undefined,
       COOKIE_REFRESH_TRANSPORT_OPTIONS,
-    ),
+    );
+    rememberBrowserCsrf(baseUrl, response.csrf_token);
+    return response;
+  },
 
-  passkeyAddStart: (baseUrl: string, accessToken: string) =>
-    postMsgpack<Record<string, never>, PasskeyAddStartResponse>(
+  passkeyAddStart: (baseUrl: string, reauthToken: string, accessToken: string) =>
+    postMsgpack<{ reauth_token: string }, PasskeyAddStartResponse>(
       baseUrl,
       "/auth/passkey/add/start",
-      {},
+      { reauth_token: reauthToken },
       accessToken,
     ),
 
@@ -637,11 +777,16 @@ export const cloudApi = {
       accessToken,
     ),
 
-  deletePasskey: (baseUrl: string, passkeyId: string, accessToken: string) =>
-    postMsgpack<{ passkey_id: string }, PasskeyDeleteResponse>(
+  deletePasskey: (
+    baseUrl: string,
+    passkeyId: string,
+    reauthToken: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<{ passkey_id: string; reauth_token: string }, PasskeyDeleteResponse>(
       baseUrl,
       "/auth/passkey/delete",
-      { passkey_id: passkeyId },
+      { passkey_id: passkeyId, reauth_token: reauthToken },
       accessToken,
     ),
 
@@ -659,6 +804,19 @@ export const cloudApi = {
 
   listDevices: (baseUrl: string, accessToken: string) =>
     getMsgpack<{ devices: DeviceSummary[] }>(baseUrl, "/devices", accessToken),
+
+  revokeDevice: (
+    baseUrl: string,
+    deviceId: string,
+    reauthToken: string,
+    accessToken: string,
+  ) =>
+    postMsgpack<{ reauth_token: string }, { revoked: boolean }>(
+      baseUrl,
+      `/devices/${encodeURIComponent(deviceId)}/revoke`,
+      { reauth_token: reauthToken },
+      accessToken,
+    ),
 
   createSpace: (
     baseUrl: string,
@@ -685,6 +843,13 @@ export const cloudApi = {
       accessToken,
     ),
 
+  listRecoveryKeyPackages: (baseUrl: string, accessToken: string) =>
+    getMsgpack<{ packages: RecoverySpaceKeyPackage[] }>(
+      baseUrl,
+      "/spaces/recovery-key-packages",
+      accessToken,
+    ),
+
   restoreSpace: (baseUrl: string, spaceId: string, accessToken: string) =>
     postMsgpack<Record<string, never>, { changed: boolean }>(
       baseUrl,
@@ -704,6 +869,39 @@ export const cloudApi = {
     getMsgpack<{ members: SpaceMemberSummary[] }>(
       baseUrl,
       `/spaces/${encodeURIComponent(spaceId)}/members`,
+      accessToken,
+    ),
+
+  revokeSpaceMember: (
+    baseUrl: string,
+    spaceId: string,
+    userId: string,
+    payload: RevokeSpaceMemberRequest,
+    accessToken: string,
+  ) =>
+    postMsgpack<
+      RevokeSpaceMemberRequest,
+      { revoked: boolean; key_epoch: number }
+    >(
+      baseUrl,
+      `/spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(userId)}/revoke`,
+      payload,
+      accessToken,
+    ),
+
+  rotateSpaceKey: (
+    baseUrl: string,
+    spaceId: string,
+    payload: RotateSpaceKeyRequest,
+    accessToken: string,
+  ) =>
+    postMsgpack<
+      RotateSpaceKeyRequest,
+      { rotated: boolean; key_epoch: number }
+    >(
+      baseUrl,
+      `/spaces/${encodeURIComponent(spaceId)}/rotate-key`,
+      payload,
       accessToken,
     ),
 

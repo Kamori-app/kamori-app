@@ -2,6 +2,21 @@ name: Deploy cloud server
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: Release action for the selected Git ref
+        required: true
+        default: publish
+        type: choice
+        options:
+          - publish
+          - deploy-app-1
+          - deploy-app-2
+      run_migrations:
+        description: Run backward-compatible database migrations before activating this node
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: cloud-server-production
@@ -12,7 +27,8 @@ permissions:
 
 jobs:
   image:
-    name: Build immutable image
+    name: Publish immutable release
+    if: inputs.action == 'publish'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,9 +107,50 @@ jobs:
           echo "admin-image=$ADMIN_REPOSITORY@$ADMIN_DIGEST" >> "$GITHUB_OUTPUT"
           echo "edge-image=$EDGE_REPOSITORY@$EDGE_DIGEST" >> "$GITHUB_OUTPUT"
 
+  resolve:
+    name: Resolve published release
+    if: inputs.action != 'publish'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      cloud-image: ${{ steps.reference.outputs.cloud-image }}
+      web-image: ${{ steps.reference.outputs.web-image }}
+      admin-image: ${{ steps.reference.outputs.admin-image }}
+      edge-image: ${{ steps.reference.outputs.edge-image }}
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: reference
+        env:
+          OWNER: ${{ github.repository_owner }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          resolve_image() {
+            output_name=$1
+            repository=$2
+            tagged="ghcr.io/$owner/$repository:$RELEASE_SHA"
+            manifest_file="$RUNNER_TEMP/$repository-manifest.json"
+            docker buildx imagetools inspect "$tagged" --raw > "$manifest_file"
+            digest="sha256:$(sha256sum "$manifest_file" | cut -d ' ' -f 1)"
+            echo "$output_name=ghcr.io/$owner/$repository@$digest" >> "$GITHUB_OUTPUT"
+          }
+          resolve_image cloud-image kamori-cloud
+          resolve_image web-image kamori-web
+          resolve_image admin-image kamori-admin
+          resolve_image edge-image kamori-edge
+
   deploy:
-    name: Rolling beta deployment
-    needs: image
+    name: Activate selected beta node
+    if: inputs.action != 'publish'
+    needs: resolve
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -111,10 +168,12 @@ jobs:
           HOST_CA: ${{ vars.BETA_SSH_HOST_CA_PUBLIC_KEY }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_USER: ${{ github.actor }}
-          CLOUD_IMAGE: ${{ needs.image.outputs.cloud-image }}
-          WEB_IMAGE: ${{ needs.image.outputs.web-image }}
-          ADMIN_IMAGE: ${{ needs.image.outputs.admin-image }}
-          EDGE_IMAGE: ${{ needs.image.outputs.edge-image }}
+          CLOUD_IMAGE: ${{ needs.resolve.outputs.cloud-image }}
+          WEB_IMAGE: ${{ needs.resolve.outputs.web-image }}
+          ADMIN_IMAGE: ${{ needs.resolve.outputs.admin-image }}
+          EDGE_IMAGE: ${{ needs.resolve.outputs.edge-image }}
+          DEPLOY_ACTION: ${{ inputs.action }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
         run: |
           install -d -m 0700 "$RUNNER_TEMP/kamori-ssh"
           key_file="$RUNNER_TEMP/kamori-ssh/deploy-key"
@@ -159,12 +218,21 @@ jobs:
           EOF
           chmod 0600 "$ssh_config"
 
-          for host in kamori-beta-app-1 kamori-beta-app-2; do
-            printf '%s' "$REGISTRY_TOKEN" | ssh -F "$ssh_config" "$host" \
-              "sudo /usr/local/sbin/kamori-registry-login '$REGISTRY_USER'"
-          done
-
-          ssh -F "$ssh_config" kamori-beta-app-1 \
-            "sudo /usr/local/sbin/kamori-deploy-migrate '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
-          ssh -F "$ssh_config" kamori-beta-app-2 \
-            "sudo /usr/local/sbin/kamori-deploy '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          case "$DEPLOY_ACTION" in
+            deploy-app-1) target=kamori-beta-app-1 ;;
+            deploy-app-2) target=kamori-beta-app-2 ;;
+            *) echo "unsupported deployment action" >&2; exit 2 ;;
+          esac
+          if [[ "$RUN_MIGRATIONS" == "true" && "$DEPLOY_ACTION" != "deploy-app-1" ]]; then
+            echo "database migrations may only run before activating app-1" >&2
+            exit 2
+          fi
+          printf '%s' "$REGISTRY_TOKEN" | ssh -F "$ssh_config" "$target" \
+            "sudo /usr/local/sbin/kamori-registry-login '$REGISTRY_USER'"
+          if [[ "$RUN_MIGRATIONS" == "true" ]]; then
+            ssh -F "$ssh_config" "$target" \
+              "sudo /usr/local/sbin/kamori-deploy-migrate '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          else
+            ssh -F "$ssh_config" "$target" \
+              "sudo /usr/local/sbin/kamori-deploy '$CLOUD_IMAGE' '$WEB_IMAGE' '$ADMIN_IMAGE' '$EDGE_IMAGE'"
+          fi

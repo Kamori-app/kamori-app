@@ -8,7 +8,7 @@ void main() {
 
     expect(state.isBusy, isFalse);
     expect(state.isAuthenticated, isFalse);
-    expect(state.cloudBaseUrl, 'http://127.0.0.1:3000');
+    expect(state.cloudBaseUrl, 'https://api.kamori.app');
     expect(state.sqlitePath, kDefaultMobileSqlitePath);
     expect(state.collections, isEmpty);
   });

@@ -1,4 +1,4 @@
-//! JWT utilities for access, preauth, and account-recovery tokens.
+//! JWT utilities for access, reauthentication, and account-recovery tokens.
 
 use crate::platform::config::Config;
 use anyhow::{Result, anyhow};
@@ -11,8 +11,6 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenKind {
-    /// Pre-auth token used for TOTP.
-    PreAuth,
     /// Session token used for authenticated requests.
     Session,
     /// Account-recovery token used for password reset finish.
@@ -36,9 +34,15 @@ pub struct JwtClaims {
     pub exp: usize,
     /// Issued-at time (unix seconds).
     pub iat: usize,
+    /// Unique token id prevents equal claims issued in the same second from
+    /// producing the same bearer token.
+    pub jti: Uuid,
     /// Optional username snapshot embedded into token for hot-path auth flows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
+    /// Refresh-session id to which a session access token is bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
 }
 
 /// JWT encoder/decoder for server tokens.
@@ -68,6 +72,7 @@ impl JwtManager {
         kind: TokenKind,
         user_id: Uuid,
         username: Option<&str>,
+        session_id: Option<Uuid>,
         ttl_seconds: i64,
     ) -> Result<String> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -78,8 +83,10 @@ impl JwtManager {
             iss: self.issuer.clone(),
             aud: self.audience.clone(),
             iat: now as usize,
+            jti: Uuid::new_v4(),
             exp,
             username: username.map(ToOwned::to_owned),
+            session_id,
         };
 
         let token = jsonwebtoken::encode(&Header::default(), &claims, &self.encoding)
@@ -113,7 +120,13 @@ mod tests {
         let jwt = JwtManager::new(&cfg).expect("jwt");
         let user_id = Uuid::new_v4();
         let token = jwt
-            .issue_token(TokenKind::Session, user_id, Some("alice"), 60)
+            .issue_token(
+                TokenKind::Session,
+                user_id,
+                Some("alice"),
+                Some(Uuid::new_v4()),
+                60,
+            )
             .expect("issue");
 
         let claims = jwt.validate_token(&token).expect("validate");
@@ -134,7 +147,13 @@ mod tests {
         let jwt = JwtManager::new(&cfg).expect("jwt");
         let user_id = Uuid::new_v4();
         let token = jwt
-            .issue_token(TokenKind::AccountRecovery, user_id, Some("alice"), 120)
+            .issue_token(
+                TokenKind::AccountRecovery,
+                user_id,
+                Some("alice"),
+                None,
+                120,
+            )
             .expect("issue");
 
         let claims = jwt.validate_token(&token).expect("validate");
@@ -155,7 +174,7 @@ mod tests {
         let jwt = JwtManager::new(&cfg).expect("jwt");
         let user_id = Uuid::new_v4();
         let token = jwt
-            .issue_token(TokenKind::Session, user_id, None, 60)
+            .issue_token(TokenKind::Session, user_id, None, Some(Uuid::new_v4()), 60)
             .expect("issue");
 
         let claims = jwt.validate_token(&token).expect("validate");

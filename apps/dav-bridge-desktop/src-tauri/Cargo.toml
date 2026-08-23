@@ -20,11 +20,13 @@ tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-opener = "2.5.4"
 tokio = { version = "1.53", features = ["rt", "sync", "time"] }
 uuid = { version = "1.24", features = ["v4", "serde"] }
+url = "2.5.8"
 opaque-ke = { version = "4.0.1", features = ["argon2", "std"] }
 sha2 = "0.11"
 sha2_opaque = { package = "sha2", version = "0.10.9" }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ed25519-dalek = "3.0.0"
+zeroize = "1.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = "4.1.6"

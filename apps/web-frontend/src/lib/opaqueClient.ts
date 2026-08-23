@@ -1,5 +1,7 @@
 import initOpaqueWasm, {
   decrypt_vault_bytes,
+  derive_account_recovery_keypair,
+  encrypt_account_master_key_for_device,
   encrypt_vault_bytes,
   generate_web_device_identity,
   generate_qr_svg,
@@ -11,12 +13,15 @@ import initOpaqueWasm, {
   opaque_signup_start,
   open_operation_envelope,
   master_key_to_recovery_phrase,
+  materialize_pim_operation,
+  assign_pim_branch_graph,
   recovery_phrase_to_master_key,
   seal_operation_envelope,
   unwrap_account_master_key,
   verify_operation_envelope,
   wrap_account_master_key,
 } from "$lib/wasm/crypto-core-lib/crypto_core_lib.js";
+import { normalizeByteArray } from "$lib/binary";
 
 /**
  * Browser-side OPAQUE helpers backed by generated wasm-bindgen exports.
@@ -134,6 +139,28 @@ export const generateWebDeviceIdentity = async (): Promise<WebDeviceIdentity> =>
   return generate_web_device_identity() as WebDeviceIdentity;
 };
 
+export const deriveAccountRecoveryKeypair = async (
+  masterKey: Uint8Array,
+): Promise<{ private_key: Uint8Array; public_key: Uint8Array }> => {
+  await ensureOpaqueRuntime();
+  const identity = derive_account_recovery_keypair(masterKey) as {
+    private_key?: unknown;
+    public_key?: unknown;
+  };
+  return {
+    private_key: normalizeByteArray(
+      identity.private_key,
+      32,
+      "Account recovery private key",
+    ),
+    public_key: normalizeByteArray(
+      identity.public_key,
+      32,
+      "Account recovery public key",
+    ),
+  };
+};
+
 export const encryptVaultBytes = async (
   masterKey: Uint8Array,
   plaintext: Uint8Array,
@@ -166,6 +193,19 @@ export const unwrapAccountMasterKey = async (
   return unwrap_account_master_key(exportKey, encryptedMasterKey);
 };
 
+export const encryptAccountMasterKeyForDevice = async (
+  masterKey: Uint8Array,
+  hpkePublicKey: Uint8Array,
+  flowId: string,
+): Promise<Uint8Array> => {
+  await ensureOpaqueRuntime();
+  return encrypt_account_master_key_for_device(
+    masterKey,
+    hpkePublicKey,
+    flowId,
+  );
+};
+
 export const masterKeyToRecoveryPhrase = async (
   masterKey: Uint8Array,
 ): Promise<string> => {
@@ -194,6 +234,30 @@ export const unwrapSpaceKeyForDevice = async (
 ): Promise<Uint8Array> => {
   await ensureOpaqueRuntime();
   return decrypt_group_key_from_peer(encryptedPackage, hpkePrivateKey);
+};
+
+export const wrapSpaceKeyForAccountRecovery = async (
+  masterKey: Uint8Array,
+  spaceKey: Uint8Array,
+): Promise<unknown> => {
+  const identity = await deriveAccountRecoveryKeypair(masterKey);
+  try {
+    return await wrapSpaceKeyForDevice(spaceKey, identity.public_key);
+  } finally {
+    identity.private_key.fill(0);
+  }
+};
+
+export const unwrapSpaceKeyFromAccountRecovery = async (
+  masterKey: Uint8Array,
+  encryptedPackage: unknown,
+): Promise<Uint8Array> => {
+  const identity = await deriveAccountRecoveryKeypair(masterKey);
+  try {
+    return await unwrapSpaceKeyForDevice(encryptedPackage, identity.private_key);
+  } finally {
+    identity.private_key.fill(0);
+  }
 };
 
 export const sealOperationEnvelope = async (input: {
@@ -235,4 +299,32 @@ export const verifyOperationEnvelope = async (
 ): Promise<void> => {
   await ensureOpaqueRuntime();
   verify_operation_envelope(envelope, signingPublicKey);
+};
+
+export const materializePimOperation = async (
+  operation: unknown,
+  existingProjection?: string,
+): Promise<string> => {
+  await ensureOpaqueRuntime();
+  return materialize_pim_operation(operation, existingProjection);
+};
+
+export interface PimBranchNode {
+  operation_id: string;
+  parent_operation_id?: string | null;
+  seed_projection_resource_id?: string | null;
+}
+
+export interface PimBranchAssignment {
+  operation_id: string;
+  projection_resource_id: string;
+  head: boolean;
+}
+
+export const assignPimBranchGraph = async (
+  defaultProjectionResourceId: string,
+  nodes: PimBranchNode[],
+): Promise<PimBranchAssignment[]> => {
+  await ensureOpaqueRuntime();
+  return assign_pim_branch_graph(defaultProjectionResourceId, nodes);
 };

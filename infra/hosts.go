@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/pulumi/pulumi-hcloud/sdk/go/hcloud"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
@@ -141,6 +144,7 @@ func provisionAutomatedHosts(
 	}).(pulumi.StringOutput)
 
 	userData := make(map[string]pulumi.StringOutput, len(nodes))
+	hostConfiguration := make(map[string]pulumi.StringOutput, len(nodes))
 	for _, spec := range nodes {
 		hostName := "kamori-beta-" + spec.name
 		hostIdentity := sshIdentity.hosts[hostName]
@@ -149,7 +153,15 @@ func provisionAutomatedHosts(
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
 				hostIdentity.publicKey,
+				sshIdentity.configPublicKey,
+			).ApplyT(func(values []interface{}) (string, error) {
+				return renderAppCloudInit(appCloudInitMaterial{commonHostMaterial: commonHostMaterial{
+					hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), configPublicKey: values[2].(string),
+				}})
+			}).(pulumi.StringOutput)
+			hostConfiguration[spec.name] = pulumi.All(
 				hostIdentity.certificate,
+				sshIdentity.configPublicKey,
 				sshIdentity.deployPublicKey,
 				appRuntimeEnv,
 				cfg.RequireSecret("opaqueServerSetup"),
@@ -158,17 +170,25 @@ func provisionAutomatedHosts(
 				postgresIdentity.appClientCertificate,
 				postgresIdentity.appClientPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
-				return renderAppCloudInit(appCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
-					deployPublicKey:    values[3].(string), cloudEnvironment: values[4].(string), opaqueServerSetup: values[5].(string), refreshRotationKey: values[6].(string),
-					postgresCACertificate: values[7].(string), postgresClientCertificate: values[8].(string), postgresClientPrivateKey: values[9].(string),
+				return renderAppHostConfiguration(appCloudInitMaterial{
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostCertificate: values[0].(string), configPublicKey: values[1].(string)},
+					deployPublicKey:    values[2].(string), cloudEnvironment: values[3].(string), opaqueServerSetup: values[4].(string), refreshRotationKey: values[5].(string),
+					postgresCACertificate: values[6].(string), postgresClientCertificate: values[7].(string), postgresClientPrivateKey: values[8].(string),
 				})
 			}).(pulumi.StringOutput)
 		case "ops":
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
 				hostIdentity.publicKey,
+				sshIdentity.configPublicKey,
+			).ApplyT(func(values []interface{}) (string, error) {
+				return renderOpsCloudInit(opsCloudInitMaterial{commonHostMaterial: commonHostMaterial{
+					hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), configPublicKey: values[2].(string),
+				}})
+			}).(pulumi.StringOutput)
+			hostConfiguration[spec.name] = pulumi.All(
 				hostIdentity.certificate,
+				sshIdentity.configPublicKey,
 				sshIdentity.deployPublicKey,
 				cfg.RequireSecret("valkeyPassword"),
 				passwords.grafanaAdmin,
@@ -178,26 +198,35 @@ func provisionAutomatedHosts(
 				postgresIdentity.jobsClientCertificate,
 				postgresIdentity.jobsClientPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
-				return renderOpsCloudInit(opsCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
-					deployPublicKey:    values[3].(string), valkeyPassword: values[4].(string), grafanaAdminPassword: values[5].(string), metricsBearerToken: values[6].(string), backupEnvironment: values[7].(string),
-					postgresCACertificate: values[8].(string), postgresJobsCertificate: values[9].(string), postgresJobsPrivateKey: values[10].(string),
+				return renderOpsHostConfiguration(opsCloudInitMaterial{
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostCertificate: values[0].(string), configPublicKey: values[1].(string)},
+					deployPublicKey:    values[2].(string), valkeyPassword: values[3].(string), grafanaAdminPassword: values[4].(string), metricsBearerToken: values[5].(string), backupEnvironment: values[6].(string),
+					postgresCACertificate: values[7].(string), postgresJobsCertificate: values[8].(string), postgresJobsPrivateKey: values[9].(string),
 				})
 			}).(pulumi.StringOutput)
 		case "db-primary":
 			userData[spec.name] = pulumi.All(
 				hostIdentity.privateKey,
 				hostIdentity.publicKey,
-				hostIdentity.certificate,
+				sshIdentity.configPublicKey,
 				dataVolume.ID(),
+			).ApplyT(func(values []interface{}) (string, error) {
+				return renderDatabaseCloudInit(databaseCloudInitMaterial{
+					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), configPublicKey: values[2].(string)},
+					volumeID:           string(values[3].(pulumi.ID)),
+				})
+			}).(pulumi.StringOutput)
+			hostConfiguration[spec.name] = pulumi.All(
+				hostIdentity.certificate,
+				sshIdentity.configPublicKey,
 				postgresEnvironment,
 				postgresIdentity.caCertificate,
 				postgresIdentity.serverCertificate,
 				postgresIdentity.serverPrivateKey,
 			).ApplyT(func(values []interface{}) (string, error) {
-				return renderDatabaseCloudInit(databaseCloudInitMaterial{
-					commonHostMaterial: commonHostMaterial{hostName: hostName, hostPrivateKey: values[0].(string), hostPublicKey: values[1].(string), hostCertificate: values[2].(string)},
-					volumeID:           string(values[3].(pulumi.ID)), postgresEnvironment: values[4].(string), postgresCACertificate: values[5].(string), postgresServerCertificate: values[6].(string), postgresServerPrivateKey: values[7].(string),
+				return renderDatabaseHostConfiguration(databaseCloudInitMaterial{
+					commonHostMaterial:  commonHostMaterial{hostName: hostName, hostCertificate: values[0].(string), configPublicKey: values[1].(string)},
+					postgresEnvironment: values[2].(string), postgresCACertificate: values[3].(string), postgresServerCertificate: values[4].(string), postgresServerPrivateKey: values[5].(string),
 				})
 			}).(pulumi.StringOutput)
 		}
@@ -279,11 +308,30 @@ func provisionAutomatedHosts(
 	}
 
 	ctx.Export("deploySshPrivateKey", sshIdentity.deployPrivateKey)
+	ctx.Export("configSshPrivateKey", sshIdentity.configPrivateKey)
 	ctx.Export("sshHostCaPublicKey", sshIdentity.caPublicKey)
+	ctx.Export("sshRawKnownHosts", pulumi.All(
+		sshIdentity.hosts["kamori-beta-ops"].publicKey,
+		sshIdentity.hosts["kamori-beta-app-1"].publicKey,
+		sshIdentity.hosts["kamori-beta-app-2"].publicKey,
+		sshIdentity.hosts["kamori-beta-db-primary"].publicKey,
+	).ApplyT(func(values []interface{}) string {
+		names := []string{"kamori-beta-ops", "kamori-beta-app-1", "kamori-beta-app-2", "kamori-beta-db-primary"}
+		var result strings.Builder
+		for index, name := range names {
+			fmt.Fprintf(&result, "%s,[%s]:2022 %s", name, name, strings.TrimSpace(values[index].(string)))
+			result.WriteByte('\n')
+		}
+		return result.String()
+	}).(pulumi.StringOutput))
 	ctx.Export("sshKnownHostsCertificateAuthority", sshIdentity.caPublicKey.ApplyT(func(key string) string {
 		return "@cert-authority kamori-beta-ops,kamori-beta-app-1,kamori-beta-app-2,[kamori-beta-ops]:2022,[kamori-beta-app-1]:2022,[kamori-beta-app-2]:2022 " + key
 	}).(pulumi.StringOutput))
 	ctx.Export("grafanaAdminPassword", passwords.grafanaAdmin)
+	ctx.Export("appOneHostConfiguration", hostConfiguration["app-1"])
+	ctx.Export("appTwoHostConfiguration", hostConfiguration["app-2"])
+	ctx.Export("databaseHostConfiguration", hostConfiguration["db-primary"])
+	ctx.Export("opsHostConfiguration", hostConfiguration["ops"])
 	ctx.Export("drBlobBucketConfiguredForOps", pulumi.String(drBucketName))
 	return &hostResources{servers: servers, sshPKI: sshIdentity}, nil
 }

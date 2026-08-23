@@ -10,6 +10,8 @@ use crate::features::spaces::dto::SpaceRole;
 pub struct CreateInviteCodeRequest {
     /// Independently shared security-space id.
     pub space_id: Uuid,
+    /// The just-committed current-state rotation that prepared this invite.
+    pub rotation_id: Uuid,
     /// Role granted when the invite is redeemed. Owner cannot be invited.
     pub role: SpaceRole,
     /// Domain-separated SHA-256 lookup hash of normalized invite code (`A-Z0-9`, 16 chars).
@@ -49,6 +51,10 @@ pub struct RedeemInviteCodeResponse {
     pub role: SpaceRole,
     /// Current space key epoch represented by the package.
     pub key_epoch: u32,
+    /// Transport cursor immediately before the first operation this membership may read.
+    pub history_start_seq: u64,
+    /// Cursor immediately before the first decryptable current-state snapshot.
+    pub current_state_start_seq: u64,
     /// Encrypted group key payload bound to the invite code.
     #[serde(with = "serde_bytes")]
     pub encrypted_key_package: Vec<u8>,
@@ -65,6 +71,7 @@ mod tests {
     fn invite_code_requests_msgpack_roundtrip() {
         let create = CreateInviteCodeRequest {
             space_id: Uuid::new_v4(),
+            rotation_id: Uuid::new_v4(),
             role: SpaceRole::Editor,
             invite_code_hash: vec![7; 32],
             encrypted_key_package: vec![1, 2, 3],
@@ -91,6 +98,7 @@ mod tests {
     fn invite_role_roundtrips() {
         let request = CreateInviteCodeRequest {
             space_id: Uuid::new_v4(),
+            rotation_id: Uuid::new_v4(),
             role: SpaceRole::Reader,
             invite_code_hash: vec![7; 32],
             encrypted_key_package: vec![1],

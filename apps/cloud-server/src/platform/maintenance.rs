@@ -23,6 +23,11 @@ pub async fn run(state: AppState) {
             let _ = record_heartbeat(&state, "failed", false, Some(&error.to_string())).await;
             continue;
         }
+        if let Err(error) = cleanup_stale_downloads(&state).await {
+            tracing::error!(%error, "stale blob reservation cleanup failed");
+            let _ = record_heartbeat(&state, "failed", false, Some(&error.to_string())).await;
+            continue;
+        }
         let mut failed = None;
         for _ in 0..100 {
             match delete_one_object(&state).await {
@@ -43,6 +48,45 @@ pub async fn run(state: AppState) {
             tracing::warn!(%error, "maintenance heartbeat completion failed");
         }
     }
+}
+
+async fn cleanup_stale_downloads(state: &AppState) -> anyhow::Result<()> {
+    let mut coordinator = state.pool.acquire().await?;
+    let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(44200620)")
+        .fetch_one(&mut *coordinator)
+        .await?;
+    if !locked {
+        return Ok(());
+    }
+    let cleanup = async {
+        crate::features::cas::repositories::expire_stale_download_reservations(&state.pool).await?;
+        sqlx::query(
+            r#"
+            WITH expired AS (
+                SELECT token_hash
+                FROM account_recovery_attempts
+                WHERE (completed_at IS NULL AND expires_at < now() - interval '1 day')
+                   OR completed_at < now() - interval '30 days'
+                ORDER BY COALESCE(completed_at, expires_at)
+                LIMIT 1000
+            )
+            DELETE FROM account_recovery_attempts attempt
+            USING expired
+            WHERE attempt.token_hash = expired.token_hash
+            "#,
+        )
+        .execute(&state.pool)
+        .await?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    let unlock = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock(44200620)")
+        .fetch_one(&mut *coordinator)
+        .await;
+    if let Err(error) = unlock {
+        tracing::warn!(%error, "stale reservation cleanup lock release failed");
+    }
+    cleanup
 }
 
 async fn record_heartbeat(
@@ -108,19 +152,22 @@ async fn prepare_deletions(state: &AppState) -> anyhow::Result<()> {
     .execute(&mut *tx)
     .await?;
 
+    // Delete metadata and enqueue its exact, never-reused object key as one
+    // statement. A concurrent retry refreshes the row lease under a row lock,
+    // causing PostgreSQL to re-evaluate the DELETE predicate after waiting.
     sqlx::query(
         r#"
+        WITH expired AS (
+            DELETE FROM space_blobs
+            WHERE status = 'pending'
+              AND created_at <= now() - interval '24 hours'
+              AND COALESCE(upload_lease_until, created_at) <= now()
+            RETURNING object_key
+        )
         INSERT INTO object_deletion_queue (id, object_key)
-        SELECT gen_random_uuid(), object_key
-        FROM space_blobs
-        WHERE status = 'pending' AND created_at <= now() - interval '24 hours'
+        SELECT gen_random_uuid(), object_key FROM expired
         ON CONFLICT (object_key) DO NOTHING
         "#,
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query(
-        "DELETE FROM space_blobs WHERE status = 'pending' AND created_at <= now() - interval '24 hours'",
     )
     .execute(&mut *tx)
     .await?;

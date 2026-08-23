@@ -4,23 +4,28 @@ use crate::{
     state::DesktopState,
 };
 use crypto_core_lib::local_bridge_runner::{LocalBridgeConfig, LocalBridgeRunner};
+use std::collections::BTreeMap;
 use tauri::State;
 use tokio::time::{Duration, MissedTickBehavior};
 use tracing::warn;
 
+use super::auth::reconcile_device_and_spaces;
 use super::common::{
     ensure_parent_dir, load_or_create_sqlite_key, load_refresh_token_secure,
     rotate_dav_credentials as rotate_dav_credentials_secure, store_refresh_token_secure,
     to_ui_error, with_sqlite_key,
 };
 
-async fn sync_runtime_refresh_token(
+async fn sync_runtime_tokens(
     state: &DesktopState,
     runner: &LocalBridgeRunner,
 ) -> Result<(), String> {
     let Some(refresh_token) = runner.current_refresh_token().await else {
         return Ok(());
     };
+    state
+        .set_access_token(Some(runner.current_access_token().await))
+        .await;
     let cloud_base_url = state.cloud_base_url().await;
     store_refresh_token_secure(&cloud_base_url, &refresh_token)?;
     state.set_refresh_token(Some(refresh_token)).await;
@@ -34,6 +39,25 @@ async fn stop_sync_task(state: &DesktopState) {
     }
 }
 
+async fn sync_once_with_reconciliation(
+    state: &DesktopState,
+    runner: &LocalBridgeRunner,
+) -> Result<BTreeMap<uuid::Uuid, u64>, String> {
+    let result = async {
+        reconcile_device_and_spaces(state, runner).await?;
+        runner.sync_once_by_space().await.map_err(to_ui_error)
+    }
+    .await;
+    // Rotation persistence is independent from application-request success.
+    // A refresh response may have been committed before a later request failed.
+    let token_result = sync_runtime_tokens(state, runner).await;
+    match (result, token_result) {
+        (Ok(applied), Ok(())) => Ok(applied),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
 async fn start_sync_task(state: &DesktopState, runner: LocalBridgeRunner) {
     stop_sync_task(state).await;
     let task_state = state.clone();
@@ -42,12 +66,9 @@ async fn start_sync_task(state: &DesktopState, runner: LocalBridgeRunner) {
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            match runner.sync_once().await {
-                Ok(applied) => {
-                    task_state.increment_synced_items(applied).await;
-                    if let Err(error) = sync_runtime_refresh_token(&task_state, &runner).await {
-                        warn!(%error, "failed to persist rotated desktop refresh token");
-                    }
+            match sync_once_with_reconciliation(&task_state, &runner).await {
+                Ok(applied_by_space) => {
+                    task_state.record_sync_results(&applied_by_space).await;
                 }
                 Err(error) => warn!(?error, "desktop background sync failed"),
             }
@@ -110,16 +131,18 @@ pub async fn start_local_server(
 
     for collection in state.collections.read().await.values() {
         runner
-            .register_collection_key_epoch(
+            .register_collection_key_epoch_from(
                 collection.id.clone(),
                 collection.key_epoch,
                 collection.cmk,
+                collection.sync_start_seq,
             )
-            .await;
+            .await
+            .map_err(to_ui_error)?;
     }
 
     runner.start().await.map_err(to_ui_error)?;
-    sync_runtime_refresh_token(state.inner(), &runner).await?;
+    sync_runtime_tokens(state.inner(), &runner).await?;
     *state.bridge.lock().await = Some(runner.clone());
     start_sync_task(state.inner(), runner.clone()).await;
 
@@ -137,7 +160,7 @@ pub async fn stop_local_server(
     stop_sync_task(state.inner()).await;
     let mut guard = state.bridge.lock().await;
     if let Some(runner) = guard.take() {
-        sync_runtime_refresh_token(state.inner(), &runner).await?;
+        sync_runtime_tokens(state.inner(), &runner).await?;
         runner.stop().await.map_err(to_ui_error)?;
     }
 
@@ -154,7 +177,7 @@ pub async fn local_server_status(
 ) -> Result<LocalServerStatus, String> {
     let runner = state.bridge.lock().await.clone();
     if let Some(runner) = runner.as_ref() {
-        sync_runtime_refresh_token(state.inner(), runner).await?;
+        sync_runtime_tokens(state.inner(), runner).await?;
     }
 
     Ok(LocalServerStatus {
@@ -230,8 +253,10 @@ pub async fn sync_now(state: State<'_, DesktopState>) -> Result<u64, String> {
         return Err("local server is not running".to_string());
     }
 
-    let applied = runner.sync_once().await.map_err(to_ui_error)?;
-    sync_runtime_refresh_token(state.inner(), &runner).await?;
-    state.increment_synced_items(applied).await;
-    Ok(applied)
+    let applied_by_space = sync_once_with_reconciliation(state.inner(), &runner).await?;
+    state.record_sync_results(&applied_by_space).await;
+    Ok(applied_by_space
+        .values()
+        .copied()
+        .fold(0_u64, u64::saturating_add))
 }

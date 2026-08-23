@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -45,11 +46,13 @@ func TestSignSSHHostCertificatePinsTheExpectedPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	issuedAt := time.Now().UTC().Truncate(time.Hour)
 	encoded, err := signSSHHostCertificate(
 		string(pem.EncodeToMemory(caBlock)),
 		string(ssh.MarshalAuthorizedKey(hostKey)),
 		"kamori-beta-app-1",
 		1,
+		issuedAt,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -81,11 +84,15 @@ func TestSignSSHHostCertificatePinsTheExpectedPrincipal(t *testing.T) {
 		string(ssh.MarshalAuthorizedKey(hostKey)),
 		"kamori-beta-app-1",
 		1,
+		issuedAt,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repeated != encoded {
 		t.Fatal("identical host identity produced a different certificate")
+	}
+	if certificate.ValidBefore == ssh.CertTimeInfinity || certificate.ValidBefore <= certificate.ValidAfter {
+		t.Fatalf("host certificate must have a finite validity window: %#v", certificate)
 	}
 }

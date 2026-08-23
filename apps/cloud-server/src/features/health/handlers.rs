@@ -58,9 +58,13 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
             (SELECT count(*)::bigint FROM users WHERE deleted_at IS NULL) AS active_accounts,
             (SELECT COALESCE(sum(size_padded), 0)::bigint FROM space_blobs WHERE status = 'ready') AS stored_blob_bytes,
             (SELECT count(*)::bigint FROM space_blobs WHERE status = 'pending') AS pending_blobs,
-            (SELECT COALESCE(sum(bytes_reserved), 0)::bigint
-             FROM blob_egress_reservations
-             WHERE reserved_at >= date_trunc('month', now())) AS monthly_blob_egress,
+            COALESCE((SELECT bytes_pending + bytes_delivered
+             FROM blob_egress_usage_buckets
+             WHERE scope_kind = 'global'
+               AND scope_id = '00000000-0000-0000-0000-000000000000'
+               AND window_kind = 'month'
+               AND window_start = date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'), 0)::bigint
+                AS monthly_blob_egress,
             (SELECT COALESCE(extract(epoch FROM last_succeeded_at), 0)::bigint
              FROM operator_job_heartbeats WHERE job_name = 'object_cleanup') AS cleanup_success_epoch,
             (SELECT COALESCE(extract(epoch FROM last_succeeded_at), 0)::bigint
@@ -78,44 +82,35 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }
     };
-    let beta_account_limit = match crate::features::admin::services::effective_u64(
+    let runtime_limits = match crate::features::admin::services::effective_u64_values(
         &state,
-        "beta_account_limit",
-        state.config.beta_account_limit,
+        &[
+            ("beta_account_limit", state.config.beta_account_limit),
+            (
+                "global_nonessential_egress_stop_bytes",
+                state.config.global_nonessential_egress_stop_bytes,
+            ),
+            (
+                "global_emergency_egress_breaker_bytes",
+                state.config.global_emergency_egress_breaker_bytes,
+            ),
+        ],
     )
     .await
     {
         Ok(value) => value,
         Err(error) => {
-            tracing::error!(?error, "effective beta limit query failed");
+            tracing::error!(?error, "effective metrics limits query failed");
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }
     };
-    let nonessential_stop = match crate::features::admin::services::effective_u64(
-        &state,
-        "global_nonessential_egress_stop_bytes",
-        state.config.global_nonessential_egress_stop_bytes,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(?error, "effective egress stop query failed");
-            return StatusCode::SERVICE_UNAVAILABLE.into_response();
-        }
-    };
-    let emergency_breaker = match crate::features::admin::services::effective_u64(
-        &state,
-        "global_emergency_egress_breaker_bytes",
-        state.config.global_emergency_egress_breaker_bytes,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(?error, "effective emergency breaker query failed");
-            return StatusCode::SERVICE_UNAVAILABLE.into_response();
-        }
+    let (Some(&beta_account_limit), Some(&nonessential_stop), Some(&emergency_breaker)) = (
+        runtime_limits.get("beta_account_limit"),
+        runtime_limits.get("global_nonessential_egress_stop_bytes"),
+        runtime_limits.get("global_emergency_egress_breaker_bytes"),
+    ) else {
+        tracing::error!("effective metrics limits are incomplete");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let mut output = state.http_metrics.render();
     output.push_str(&format!(

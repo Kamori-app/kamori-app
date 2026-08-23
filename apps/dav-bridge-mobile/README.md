@@ -4,6 +4,27 @@ Kamori for Android and iOS is an offline-first encrypted client. It does not
 run CalDAV or CardDAV on localhost. Calendar and contact integration is an
 optional native projection described in
 [`docs/whitepapers/mobile-system-integration.md`](../../docs/whitepapers/mobile-system-integration.md).
+Calendar and Contacts projection is enabled explicitly for each space; enabling
+one space never exposes another space to the operating-system data stores.
+
+The mobile client signs into an existing account, provisions an independent
+device identity, hydrates current space keys from recovery packages, stores its
+SQLCipher runtime snapshot for background work, and edits calendars, tasks,
+and contacts through the signed encrypted operation log. Owner-created invite
+codes first perform a full sync and atomic current-state key rotation; the
+rotated key and recovery cursor are persisted before the code is shown.
+Device identities and account master keys are stored in platform secure storage
+under a scope derived from both the normalized server origin and username.
+Signing into another account can therefore never overwrite an existing
+account's device identity, including when the new device enrollment fails.
+The current refresh token and a random per-generation retry id are stored
+together in Android Keystore/iOS Keychain-backed storage before authenticated
+background work. SQLCipher persists the same retry state for the shared sync
+runner, so a process restart or lost response cannot turn a legitimate retry
+into token-reuse revocation.
+
+Native mobile passkeys are intentionally post-MVP. Current mobile sign-in is
+OPAQUE password plus optional TOTP; registration remains web-only.
 
 ## Development
 

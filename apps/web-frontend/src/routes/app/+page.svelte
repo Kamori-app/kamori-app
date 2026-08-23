@@ -6,7 +6,7 @@
     import { appState } from "$lib/stores/app";
     import {
         lockWebVault,
-        unlockWebVaultFromLocalPasskey,
+        unlockWebVaultFromLocalUnlock,
     } from "$lib/cryptoVault";
     import Badge from "$lib/components/ui/Badge.svelte";
     import Button from "$lib/components/ui/Button.svelte";
@@ -98,7 +98,7 @@
             ...state,
             currentUsername: "",
             accessToken: null,
-            preauthToken: null,
+            totpContinuationToken: null,
             notice: copy.loggedOut,
         }));
     };
@@ -111,13 +111,17 @@
                     const rotated = await cloudApi.refresh(
                         $appState.cloudBaseUrl,
                     );
-                    const username = $appState.currentUsername.trim();
+                    const username = rotated.username.trim();
                     const unlocked = username
-                        ? await unlockWebVaultFromLocalPasskey(username)
+                        ? await unlockWebVaultFromLocalUnlock(
+                              $appState.cloudBaseUrl,
+                              username,
+                          )
                         : null;
                     if (!unlocked) {
                         appState.update((state) => ({
                             ...state,
+                            currentUsername: username,
                             accessToken: null,
                             notice: copy.lockedSession,
                         }));
@@ -126,6 +130,7 @@
                     tokenStore.setAccessToken(rotated.access_token);
                     appState.update((state) => ({
                         ...state,
+                        currentUsername: username,
                         accessToken: rotated.access_token,
                         notice: state.notice || copy.restored,
                     }));

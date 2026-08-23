@@ -15,7 +15,7 @@
     "nanoid": "3.3.18",
     "picomatch": "4.0.5",
     "postcss": "8.5.26",
-    "vite": "8.2.1"
+    "vite": "8.2.2"
   },
   "scripts": {
     "dev": "turbo run dev",
@@ -33,6 +33,6 @@
     "acceptance:full": "bash scripts/acceptance.sh full"
   },
   "devDependencies": {
-    "turbo": "^2.10.10"
+    "turbo": "^2.10.11"
   }
 }

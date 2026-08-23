@@ -12,7 +12,10 @@ use sha2_opaque::Sha512;
 use std::{cell::RefCell, collections::HashMap};
 use wasm_bindgen::prelude::*;
 
-use crate::operation_envelope::{EnvelopeKind, OperationEnvelopeV1};
+use crate::{
+    operation_envelope::{EnvelopeKind, OperationEnvelopeV1},
+    pim::{PimBranchNodeV1, PimOperationV1, assign_pim_branches, materialize_projection},
+};
 
 pub struct WebOpaqueSuite;
 
@@ -348,9 +351,50 @@ pub fn verify_operation_envelope(
 }
 
 #[wasm_bindgen]
-pub fn generate_x25519_keypair() -> JsValue {
+pub fn materialize_pim_operation(
+    operation: JsValue,
+    existing_projection: Option<String>,
+) -> Result<String, JsValue> {
+    let operation: PimOperationV1 = serde_wasm_bindgen::from_value(operation)
+        .map_err(|error| js_error(format!("decode PIM operation failed: {error}")))?;
+    operation
+        .validate()
+        .map_err(|error| js_error(format!("validate PIM operation failed: {error}")))?;
+    let PimOperationV1::Upsert(upsert) = operation else {
+        return Err(js_error("only PIM upserts have a materialized projection"));
+    };
+    materialize_projection(&upsert, existing_projection.as_deref())
+        .map_err(|error| js_error(format!("materialize PIM projection failed: {error}")))
+}
+
+#[wasm_bindgen]
+pub fn assign_pim_branch_graph(
+    default_projection_resource_id: String,
+    nodes: JsValue,
+) -> Result<JsValue, JsValue> {
+    let nodes: Vec<PimBranchNodeV1> = serde_wasm_bindgen::from_value(nodes)
+        .map_err(|error| js_error(format!("decode PIM branch graph failed: {error}")))?;
+    let assignments = assign_pim_branches(&default_projection_resource_id, &nodes)
+        .map_err(|error| js_error(format!("assign PIM branches failed: {error}")))?;
+    serde_wasm_bindgen::to_value(&assignments)
+        .map_err(|error| js_error(format!("serialize PIM branch graph failed: {error}")))
+}
+
+#[wasm_bindgen]
+pub fn generate_x25519_keypair() -> Result<JsValue, JsValue> {
     let kp = CryptoEngine::generate_x25519_keypair();
-    serde_wasm_bindgen::to_value(&kp).expect("serialize keypair")
+    serde_wasm_bindgen::to_value(&kp)
+        .map_err(|error| js_error(format!("serialize keypair failed: {error}")))
+}
+
+#[wasm_bindgen]
+pub fn derive_account_recovery_keypair(master_key: Vec<u8>) -> Result<JsValue, JsValue> {
+    let master_key: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| js_error("account master key must be 32 bytes"))?;
+    let keypair = CryptoEngine::derive_account_recovery_keypair(&master_key);
+    serde_wasm_bindgen::to_value(&keypair)
+        .map_err(|error| js_error(format!("serialize recovery keypair failed: {error}")))
 }
 
 #[wasm_bindgen]
@@ -360,49 +404,92 @@ pub fn encrypt_payload(
     nonce: Vec<u8>,
     plaintext: Vec<u8>,
     aad: Vec<u8>,
-) -> JsValue {
-    let alg: CipherAlgorithm = serde_wasm_bindgen::from_value(algorithm).expect("alg");
-    let key: [u8; 32] = key.try_into().expect("key length");
+) -> Result<JsValue, JsValue> {
+    let alg: CipherAlgorithm = serde_wasm_bindgen::from_value(algorithm)
+        .map_err(|error| js_error(format!("decode cipher algorithm failed: {error}")))?;
+    let key: [u8; 32] = key
+        .try_into()
+        .map_err(|_| js_error("encryption key must be 32 bytes"))?;
     let aad_opt = if aad.is_empty() {
         None
     } else {
         Some(aad.as_slice())
     };
-    let encrypted =
-        CryptoEngine::encrypt_payload(alg, &key, &nonce, &plaintext, aad_opt).expect("encrypt");
-    serde_wasm_bindgen::to_value(&encrypted).expect("serialize")
+    let encrypted = CryptoEngine::encrypt_payload(alg, &key, &nonce, &plaintext, aad_opt)
+        .map_err(|error| js_error(format!("encrypt payload failed: {error}")))?;
+    serde_wasm_bindgen::to_value(&encrypted)
+        .map_err(|error| js_error(format!("serialize encrypted payload failed: {error}")))
 }
 
 #[wasm_bindgen]
-pub fn decrypt_payload(encrypted: JsValue, key: Vec<u8>, aad: Vec<u8>) -> Vec<u8> {
-    let encrypted: EncryptedPayload = serde_wasm_bindgen::from_value(encrypted).expect("encrypted");
-    let key: [u8; 32] = key.try_into().expect("key length");
+pub fn decrypt_payload(encrypted: JsValue, key: Vec<u8>, aad: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+    let encrypted: EncryptedPayload = serde_wasm_bindgen::from_value(encrypted)
+        .map_err(|error| js_error(format!("decode encrypted payload failed: {error}")))?;
+    let key: [u8; 32] = key
+        .try_into()
+        .map_err(|_| js_error("decryption key must be 32 bytes"))?;
     let aad_opt = if aad.is_empty() {
         None
     } else {
         Some(aad.as_slice())
     };
-    CryptoEngine::decrypt_payload(&encrypted, &key, aad_opt).expect("decrypt")
+    CryptoEngine::decrypt_payload(&encrypted, &key, aad_opt)
+        .map_err(|error| js_error(format!("decrypt payload failed: {error}")))
 }
 
 #[wasm_bindgen]
-pub fn encrypt_group_key_for_peer(cmk: Vec<u8>, peer_public_key: Vec<u8>) -> JsValue {
-    let cmk: [u8; 32] = cmk.try_into().expect("cmk length");
-    let peer_public_key: [u8; 32] = peer_public_key.try_into().expect("peer public key length");
-    let encrypted =
-        CryptoEngine::encrypt_group_key_for_peer(&cmk, &peer_public_key).expect("encrypt");
-    serde_wasm_bindgen::to_value(&encrypted).expect("serialize")
+pub fn encrypt_group_key_for_peer(
+    cmk: Vec<u8>,
+    peer_public_key: Vec<u8>,
+) -> Result<JsValue, JsValue> {
+    let cmk: [u8; 32] = cmk
+        .try_into()
+        .map_err(|_| js_error("space key must be 32 bytes"))?;
+    let peer_public_key: [u8; 32] = peer_public_key
+        .try_into()
+        .map_err(|_| js_error("peer public key must be 32 bytes"))?;
+    let encrypted = CryptoEngine::encrypt_group_key_for_peer(&cmk, &peer_public_key)
+        .map_err(|error| js_error(format!("encrypt group key failed: {error}")))?;
+    serde_wasm_bindgen::to_value(&encrypted)
+        .map_err(|error| js_error(format!("serialize encrypted group key failed: {error}")))
 }
 
 #[wasm_bindgen]
-pub fn decrypt_group_key_from_peer(encrypted: JsValue, recipient_private_key: Vec<u8>) -> Vec<u8> {
-    let encrypted: EncryptedGroupKey =
-        serde_wasm_bindgen::from_value(encrypted).expect("encrypted");
-    let recipient_private_key: [u8; 32] =
-        recipient_private_key.try_into().expect("priv key length");
+pub fn decrypt_group_key_from_peer(
+    encrypted: JsValue,
+    recipient_private_key: Vec<u8>,
+) -> Result<Vec<u8>, JsValue> {
+    let encrypted: EncryptedGroupKey = serde_wasm_bindgen::from_value(encrypted)
+        .map_err(|error| js_error(format!("decode encrypted group key failed: {error}")))?;
+    let recipient_private_key: [u8; 32] = recipient_private_key
+        .try_into()
+        .map_err(|_| js_error("recipient private key must be 32 bytes"))?;
     CryptoEngine::decrypt_group_key_from_peer(&encrypted, &recipient_private_key)
-        .expect("decrypt")
-        .to_vec()
+        .map(|key| key.to_vec())
+        .map_err(|error| js_error(format!("decrypt group key failed: {error}")))
+}
+
+#[wasm_bindgen]
+pub fn encrypt_account_master_key_for_device(
+    master_key: Vec<u8>,
+    peer_public_key: Vec<u8>,
+    flow_id: String,
+) -> Result<Vec<u8>, JsValue> {
+    let master_key: [u8; 32] = master_key
+        .try_into()
+        .map_err(|_| js_error("account master key must be 32 bytes"))?;
+    let peer_public_key: [u8; 32] = peer_public_key
+        .try_into()
+        .map_err(|_| js_error("device HPKE public key must be 32 bytes"))?;
+    let flow_id = uuid::Uuid::parse_str(&flow_id)
+        .map_err(|_| js_error("device authorization flow id is invalid"))?;
+    let encrypted = CryptoEngine::encrypt_device_bootstrap(&master_key, &peer_public_key, flow_id)
+        .map_err(|error| js_error(format!("device bootstrap encryption failed: {error}")))?;
+    rmp_serde::to_vec_named(&encrypted).map_err(|error| {
+        js_error(format!(
+            "serialize device bootstrap package failed: {error}"
+        ))
+    })
 }
 
 #[wasm_bindgen]

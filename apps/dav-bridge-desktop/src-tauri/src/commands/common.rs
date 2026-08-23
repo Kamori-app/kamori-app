@@ -58,11 +58,19 @@ pub(super) struct OpaqueSigninFinishRequest {
     #[serde(with = "serde_bytes")]
     pub(super) opaque_finish_request: Vec<u8>,
     pub(super) totp_code: Option<String>,
-    pub(super) preauth_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct BrowserLoginStartRequest {}
+pub(super) struct SigninTotpRequest {
+    pub(super) continuation_token: String,
+    pub(super) totp_code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct BrowserLoginStartRequest {
+    #[serde(with = "serde_bytes")]
+    pub(super) hpke_public_key: Vec<u8>,
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct BrowserLoginPollRequest {
@@ -345,6 +353,49 @@ fn refresh_token_entry(cloud_base_url: &str) -> Result<Entry, String> {
         .map_err(|error| format!("failed to initialize refresh token keychain entry: {error}"))
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredRefreshCredential {
+    version: u8,
+    refresh_token: String,
+    rotation_request_id: Uuid,
+}
+
+fn encode_refresh_credential(token: &str, rotation_request_id: Uuid) -> Result<String, String> {
+    serde_json::to_string(&StoredRefreshCredential {
+        version: 1,
+        refresh_token: token.to_string(),
+        rotation_request_id,
+    })
+    .map_err(|error| format!("failed to encode refresh credential: {error}"))
+}
+
+fn decode_refresh_credential(value: &str) -> Result<Option<StoredRefreshCredential>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if !trimmed.starts_with('{') {
+        return Ok(Some(StoredRefreshCredential {
+            version: 1,
+            refresh_token: trimmed.to_string(),
+            rotation_request_id: Uuid::new_v4(),
+        }));
+    }
+    let credential: StoredRefreshCredential = serde_json::from_str(trimmed)
+        .map_err(|error| format!("failed to decode refresh credential: {error}"))?;
+    if credential.version != 1 || credential.refresh_token.trim().is_empty() {
+        return Err("stored refresh credential is invalid".to_string());
+    }
+    Ok(Some(credential))
+}
+
+fn session_username_entry(cloud_base_url: &str) -> Result<Entry, String> {
+    const KEYCHAIN_SERVICE: &str = "app.kamori.davbridge.session-username";
+    let account = refresh_token_account(cloud_base_url);
+    Entry::new(KEYCHAIN_SERVICE, &account)
+        .map_err(|error| format!("failed to initialize session username keychain entry: {error}"))
+}
+
 /// Stores refresh token in OS secure keychain storage.
 pub(super) fn store_refresh_token_secure(cloud_base_url: &str, token: &str) -> Result<(), String> {
     let token = token.trim();
@@ -353,24 +404,52 @@ pub(super) fn store_refresh_token_secure(cloud_base_url: &str, token: &str) -> R
     }
     let entry = refresh_token_entry(cloud_base_url)?;
     entry
-        .set_password(token)
-        .map_err(|error| format!("failed to store refresh token in keychain: {error}"))
+        .set_password(&encode_refresh_credential(token, Uuid::new_v4())?)
+        .map_err(|error| format!("failed to store refresh credential in keychain: {error}"))
 }
 
 /// Loads refresh token from OS secure keychain storage.
 pub(super) fn load_refresh_token_secure(cloud_base_url: &str) -> Result<Option<String>, String> {
     let entry = refresh_token_entry(cloud_base_url)?;
     match entry.get_password() {
+        Ok(value) => Ok(decode_refresh_credential(&value)?.map(|value| value.refresh_token)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(format!(
+            "failed to read refresh credential from keychain: {error}"
+        )),
+    }
+}
+
+/// Loads the token and its crash-stable random rotation identity atomically.
+/// Legacy plain-token entries are upgraded before the caller sends a request.
+pub(super) fn load_refresh_credential_secure(
+    cloud_base_url: &str,
+) -> Result<Option<(String, Uuid)>, String> {
+    let entry = refresh_token_entry(cloud_base_url)?;
+    match entry.get_password() {
         Ok(value) => {
-            let token = value.trim().to_string();
-            if token.is_empty() {
+            let was_legacy = !value.trim_start().starts_with('{');
+            let Some(credential) = decode_refresh_credential(&value)? else {
                 return Ok(None);
+            };
+            if was_legacy {
+                entry
+                    .set_password(&encode_refresh_credential(
+                        &credential.refresh_token,
+                        credential.rotation_request_id,
+                    )?)
+                    .map_err(|error| {
+                        format!("failed to upgrade refresh credential in keychain: {error}")
+                    })?;
             }
-            Ok(Some(token))
+            Ok(Some((
+                credential.refresh_token,
+                credential.rotation_request_id,
+            )))
         }
         Err(KeyringError::NoEntry) => Ok(None),
         Err(error) => Err(format!(
-            "failed to read refresh token from keychain: {error}"
+            "failed to read refresh credential from keychain: {error}"
         )),
     }
 }
@@ -382,6 +461,41 @@ pub(super) fn clear_refresh_token_secure(cloud_base_url: &str) -> Result<(), Str
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
         Err(error) => Err(format!(
             "failed to remove refresh token from keychain: {error}"
+        )),
+    }
+}
+
+pub(super) fn store_session_username_secure(
+    cloud_base_url: &str,
+    username: &str,
+) -> Result<(), String> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err("session username must not be empty".to_string());
+    }
+    session_username_entry(cloud_base_url)?
+        .set_password(username)
+        .map_err(|error| format!("failed to store session username in keychain: {error}"))
+}
+
+pub(super) fn load_session_username_secure(cloud_base_url: &str) -> Result<Option<String>, String> {
+    match session_username_entry(cloud_base_url)?.get_password() {
+        Ok(value) => {
+            let username = value.trim().to_string();
+            Ok((!username.is_empty()).then_some(username))
+        }
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(format!(
+            "failed to read session username from keychain: {error}"
+        )),
+    }
+}
+
+pub(super) fn clear_session_username_secure(cloud_base_url: &str) -> Result<(), String> {
+    match session_username_entry(cloud_base_url)?.delete_credential() {
+        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove session username from keychain: {error}"
         )),
     }
 }
@@ -426,5 +540,25 @@ mod tests {
         let two = refresh_token_account("http://localhost:3000/");
         assert_eq!(one, two);
         assert!(one.starts_with("refresh-token:"));
+    }
+
+    #[test]
+    fn refresh_credential_roundtrips_token_and_random_attempt_id() {
+        let request_id = Uuid::new_v4();
+        let encoded = encode_refresh_credential("refresh-token", request_id).expect("encode");
+        let decoded = decode_refresh_credential(&encoded)
+            .expect("decode")
+            .expect("credential");
+        assert_eq!(decoded.refresh_token, "refresh-token");
+        assert_eq!(decoded.rotation_request_id, request_id);
+    }
+
+    #[test]
+    fn legacy_refresh_token_receives_a_random_attempt_id() {
+        let decoded = decode_refresh_credential("legacy-refresh-token")
+            .expect("decode")
+            .expect("credential");
+        assert_eq!(decoded.refresh_token, "legacy-refresh-token");
+        assert_eq!(decoded.rotation_request_id.get_version_num(), 4);
     }
 }

@@ -1,7 +1,9 @@
 /// Configuration loading for the cloud server.
 use anyhow::{Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use ipnet::IpNet;
 use std::env;
+use url::Host;
 
 #[derive(Clone)]
 /// Runtime configuration values.
@@ -44,8 +46,6 @@ pub struct Config {
     pub access_token_ttl_seconds: i64,
     /// Refresh token TTL in seconds.
     pub refresh_token_ttl_seconds: i64,
-    /// Pre-auth JWT TTL in seconds.
-    pub jwt_preauth_ttl_seconds: i64,
     /// Account-recovery JWT TTL in seconds.
     pub jwt_account_recovery_ttl_seconds: i64,
     /// Web refresh cookie name.
@@ -70,8 +70,16 @@ pub struct Config {
     pub auth_rate_limit_per_minute: u64,
     /// Maximum total API requests per source IP per minute.
     pub api_rate_limit_per_minute: u64,
+    /// Weighted authenticated request units allowed per session per minute.
+    pub session_rate_limit_units_per_minute: u64,
+    /// Proxy source networks allowed to supply forwarding headers.
+    pub trusted_proxy_cidrs: Vec<IpNet>,
     /// Allowed CORS origins (`*` or explicit origin list).
     pub cors_allow_origins: Vec<String>,
+    /// Exact browser origins allowed to use refresh/CSRF cookies.
+    pub web_cookie_origins: Vec<String>,
+    /// Exact operator-console origins allowed to call `/admin-api`.
+    pub admin_cors_allow_origins: Vec<String>,
     /// Allowed CORS methods (`*` or explicit HTTP methods).
     pub cors_allow_methods: Vec<String>,
     /// Allowed CORS headers (`*` or explicit header names).
@@ -82,6 +90,20 @@ pub struct Config {
     pub registration_enabled: bool,
     /// Strict active-account admission ceiling for the beta.
     pub beta_account_limit: u64,
+    /// Maximum normal encrypted operation payload.
+    pub max_operation_bytes: u64,
+    /// Maximum encrypted snapshot payload.
+    pub max_snapshot_bytes: u64,
+    /// Maximum encoded bytes returned by one operation-log page.
+    pub max_operation_page_bytes: u64,
+    /// Maximum operation-log bytes charged to one security space.
+    pub space_operation_storage_bytes: u64,
+    /// Maximum operation-log bytes charged to one account.
+    pub account_operation_storage_bytes: u64,
+    /// Maximum concurrent large authenticated request bodies per process.
+    pub max_concurrent_large_requests: u64,
+    /// Maximum aggregate bytes admitted for large request bodies per process.
+    pub max_inflight_request_bytes: u64,
     /// Maximum padded ciphertext blob size.
     pub max_blob_bytes: u64,
     /// Maximum stored ciphertext charged to an owning account.
@@ -92,6 +114,8 @@ pub struct Config {
     pub owner_rolling_24h_egress_bytes: u64,
     /// Maximum simultaneous blob streams charged to one owning account.
     pub owner_concurrent_blob_downloads: u64,
+    /// Cross-node cap for simultaneous blob streams, independent of owner.
+    pub global_concurrent_blob_downloads: u64,
     /// Per-stream delivery rate; two default streams remain below 20 Mbit/s per owner.
     pub blob_download_bytes_per_second: u64,
     /// Global monthly point where nonessential blob delivery stops.
@@ -117,6 +141,59 @@ pub struct Config {
 }
 
 impl Config {
+    fn validate_cookie_name(name: &str, env_name: &str) -> Result<()> {
+        if name.is_empty()
+            || !name.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'!' | b'#'
+                            | b'$'
+                            | b'%'
+                            | b'&'
+                            | b'\''
+                            | b'*'
+                            | b'+'
+                            | b'-'
+                            | b'.'
+                            | b'^'
+                            | b'_'
+                            | b'`'
+                            | b'|'
+                            | b'~'
+                    )
+            })
+        {
+            bail!("{env_name} must be a non-empty HTTP cookie token");
+        }
+        Ok(())
+    }
+
+    fn validate_cookie_path(path: &str) -> Result<()> {
+        if !path.starts_with('/')
+            || path
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || matches!(byte, b';' | b','))
+        {
+            bail!(
+                "KAMORI_WEB_REFRESH_COOKIE_PATH must start with '/' and contain no control, comma, or semicolon characters"
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_cookie_domain(domain: &str) -> Result<()> {
+        if domain.starts_with('.') || domain.ends_with('.') {
+            bail!(
+                "KAMORI_WEB_REFRESH_COOKIE_DOMAIN must be a canonical hostname without leading or trailing dots"
+            );
+        }
+        match Host::parse(domain) {
+            Ok(Host::Domain(_)) => Ok(()),
+            _ => bail!("KAMORI_WEB_REFRESH_COOKIE_DOMAIN must be a valid hostname"),
+        }
+    }
+
     fn parse_csv_env(name: &str, default: &[&str]) -> Vec<String> {
         match env::var(name) {
             Ok(value) => value
@@ -127,6 +204,21 @@ impl Config {
                 .collect(),
             Err(_) => default.iter().map(|item| (*item).to_owned()).collect(),
         }
+    }
+
+    fn parse_cidr_env(name: &str) -> Result<Vec<IpNet>> {
+        let Some(value) = env::var(name).ok() else {
+            return Ok(Vec::new());
+        };
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                item.parse::<IpNet>()
+                    .map_err(|_| anyhow::anyhow!("{name} contains invalid CIDR {item:?}"))
+            })
+            .collect()
     }
 
     fn parse_positive_i64_env(name: &str, default: i64) -> Result<i64> {
@@ -155,14 +247,15 @@ impl Config {
         Ok(value)
     }
 
-    fn parse_bool_env(name: &str, default: bool) -> bool {
-        env::var(name)
-            .ok()
-            .map(|value| {
-                let normalized = value.trim().to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-            })
-            .unwrap_or(default)
+    fn parse_bool_env(name: &str, default: bool) -> Result<bool> {
+        let Ok(value) = env::var(name) else {
+            return Ok(default);
+        };
+        match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => bail!("{name} must be a boolean (true/false, yes/no, on/off, or 1/0)"),
+        }
     }
 
     fn required_env(name: &str) -> Result<String> {
@@ -212,18 +305,20 @@ impl Config {
 
         let database_url = env::var("KAMORI_DATABASE_URL")
             .unwrap_or_else(|_| "postgres://localhost:5432/kamori".to_string());
-        let database_max_connections: u32 = env::var("KAMORI_DATABASE_MAX_CONNECTIONS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(10);
+        let database_max_connections = match env::var("KAMORI_DATABASE_MAX_CONNECTIONS") {
+            Ok(value) => value.parse::<u32>().map_err(|_| {
+                anyhow::anyhow!("KAMORI_DATABASE_MAX_CONNECTIONS must be a valid unsigned integer")
+            })?,
+            Err(_) => 10,
+        };
+        if database_max_connections == 0 {
+            bail!("KAMORI_DATABASE_MAX_CONNECTIONS must be > 0");
+        }
 
         let bind_addr =
             env::var("KAMORI_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
 
-        let enable_totp = env::var("KAMORI_ENABLE_TOTP")
-            .ok()
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+        let enable_totp = Self::parse_bool_env("KAMORI_ENABLE_TOTP", false)?;
 
         let webauthn_rp_id =
             env::var("KAMORI_WEBAUTHN_RP_ID").unwrap_or_else(|_| "localhost".to_string());
@@ -242,7 +337,7 @@ impl Config {
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
         let allow_ephemeral_opaque_setup =
-            Self::parse_bool_env("KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP", cfg!(test));
+            Self::parse_bool_env("KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP", cfg!(test))?;
         if opaque_server_setup_path.is_none() && !allow_ephemeral_opaque_setup {
             bail!(
                 "KAMORI_OPAQUE_SERVER_SETUP_FILE must point to a persistent setup; ephemeral OPAQUE is allowed only with KAMORI_ALLOW_EPHEMERAL_OPAQUE_SETUP=true"
@@ -259,8 +354,8 @@ impl Config {
             Err(_) if cfg!(test) => "test-jwt-secret-not-for-production".to_string(),
             Err(_) => bail!("KAMORI_JWT_SECRET must be set"),
         };
-        if jwt_secret.trim().is_empty() {
-            bail!("KAMORI_JWT_SECRET must not be empty");
+        if jwt_secret.trim().len() < 32 {
+            bail!("KAMORI_JWT_SECRET must contain at least 32 bytes");
         }
         if !cfg!(test) && jwt_secret == "change-me" {
             bail!("KAMORI_JWT_SECRET uses insecure placeholder value");
@@ -272,10 +367,6 @@ impl Config {
             Self::parse_positive_i64_env("KAMORI_ACCESS_TOKEN_TTL_SECONDS", 5 * 60)?;
         let refresh_token_ttl_seconds =
             Self::parse_positive_i64_env("KAMORI_REFRESH_TOKEN_TTL_SECONDS", 30 * 24 * 60 * 60)?;
-        let jwt_preauth_ttl_seconds: i64 = env::var("KAMORI_JWT_PREAUTH_TTL_SECONDS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(5 * 60);
         let jwt_account_recovery_ttl_seconds =
             Self::parse_positive_i64_env("KAMORI_JWT_ACCOUNT_RECOVERY_TTL_SECONDS", 10 * 60)?;
         let web_refresh_cookie_name = env::var("KAMORI_WEB_REFRESH_COOKIE_NAME")
@@ -287,18 +378,28 @@ impl Config {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         let web_refresh_cookie_secure =
-            Self::parse_bool_env("KAMORI_WEB_REFRESH_COOKIE_SECURE", true);
-        let web_refresh_cookie_same_site =
-            env::var("KAMORI_WEB_REFRESH_COOKIE_SAMESITE").unwrap_or_else(|_| "lax".to_string());
+            Self::parse_bool_env("KAMORI_WEB_REFRESH_COOKIE_SECURE", true)?;
+        let web_refresh_cookie_same_site = env::var("KAMORI_WEB_REFRESH_COOKIE_SAMESITE")
+            .unwrap_or_else(|_| "lax".to_string())
+            .trim()
+            .to_ascii_lowercase();
         let web_csrf_cookie_name = env::var("KAMORI_WEB_CSRF_COOKIE_NAME")
             .unwrap_or_else(|_| "__Host-kamori_csrf".to_string());
-        match web_refresh_cookie_same_site
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
+        Self::validate_cookie_name(&web_refresh_cookie_name, "KAMORI_WEB_REFRESH_COOKIE_NAME")?;
+        Self::validate_cookie_name(&web_csrf_cookie_name, "KAMORI_WEB_CSRF_COOKIE_NAME")?;
+        Self::validate_cookie_path(&web_refresh_cookie_path)?;
+        if let Some(domain) = &web_refresh_cookie_domain {
+            Self::validate_cookie_domain(domain)?;
+        }
+        if web_refresh_cookie_name == web_csrf_cookie_name {
+            bail!("refresh and CSRF cookie names must be different");
+        }
+        match web_refresh_cookie_same_site.as_str() {
             "lax" | "strict" | "none" => {}
             _ => bail!("KAMORI_WEB_REFRESH_COOKIE_SAMESITE must be one of: lax, strict, none"),
+        }
+        if web_refresh_cookie_same_site == "none" && !web_refresh_cookie_secure {
+            bail!("KAMORI_WEB_REFRESH_COOKIE_SAMESITE=none requires a Secure cookie");
         }
         if web_refresh_cookie_name.starts_with("__Host-")
             && (web_refresh_cookie_domain.is_some()
@@ -323,21 +424,14 @@ impl Config {
             .unwrap_or_else(|_| "valkey://127.0.0.1:6379/0".to_string());
         let valkey_key_prefix =
             env::var("KAMORI_VALKEY_KEY_PREFIX").unwrap_or_else(|_| "kamori:".to_string());
-        let valkey_ttl_seconds: u64 = env::var("KAMORI_VALKEY_TTL_SECONDS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(300);
-        let auth_rate_limit_per_minute = env::var("KAMORI_AUTH_RATE_LIMIT_PER_MINUTE")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(30);
-        let api_rate_limit_per_minute = env::var("KAMORI_API_RATE_LIMIT_PER_MINUTE")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(1200);
-        if auth_rate_limit_per_minute == 0 || api_rate_limit_per_minute == 0 {
-            bail!("rate limits must be greater than zero");
-        }
+        let valkey_ttl_seconds = Self::parse_positive_u64_env("KAMORI_VALKEY_TTL_SECONDS", 300)?;
+        let auth_rate_limit_per_minute =
+            Self::parse_positive_u64_env("KAMORI_AUTH_RATE_LIMIT_PER_MINUTE", 30)?;
+        let api_rate_limit_per_minute =
+            Self::parse_positive_u64_env("KAMORI_API_RATE_LIMIT_PER_MINUTE", 1200)?;
+        let session_rate_limit_units_per_minute =
+            Self::parse_positive_u64_env("KAMORI_SESSION_RATE_LIMIT_UNITS_PER_MINUTE", 6000)?;
+        let trusted_proxy_cidrs = Self::parse_cidr_env("KAMORI_TRUSTED_PROXY_CIDRS")?;
 
         let cors_allow_origins = Self::parse_csv_env(
             "KAMORI_CORS_ALLOW_ORIGINS",
@@ -348,6 +442,14 @@ impl Config {
                 "http://127.0.0.1:1420",
                 "tauri://localhost",
             ],
+        );
+        let web_cookie_origins = Self::parse_csv_env(
+            "KAMORI_WEB_COOKIE_ORIGINS",
+            &["http://localhost:4173", "http://127.0.0.1:4173"],
+        );
+        let admin_cors_allow_origins = Self::parse_csv_env(
+            "KAMORI_ADMIN_CORS_ALLOW_ORIGINS",
+            &["https://admin.kamori.app"],
         );
         let cors_allow_methods = Self::parse_csv_env(
             "KAMORI_CORS_ALLOW_METHODS",
@@ -363,12 +465,36 @@ impl Config {
                 "x-kamori-csrf-token",
             ],
         );
-        let cors_allow_credentials = env::var("KAMORI_CORS_ALLOW_CREDENTIALS")
-            .ok()
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(true);
-        let registration_enabled = Self::parse_bool_env("KAMORI_REGISTRATION_ENABLED", false);
+        let cors_allow_credentials = Self::parse_bool_env("KAMORI_CORS_ALLOW_CREDENTIALS", true)?;
+        let registration_enabled = Self::parse_bool_env("KAMORI_REGISTRATION_ENABLED", false)?;
         let beta_account_limit = Self::parse_positive_u64_env("KAMORI_BETA_ACCOUNT_LIMIT", 1_000)?;
+        let max_operation_bytes =
+            Self::parse_positive_u64_env("KAMORI_MAX_OPERATION_BYTES", 1024 * 1024)?;
+        let max_snapshot_bytes =
+            Self::parse_positive_u64_env("KAMORI_MAX_SNAPSHOT_BYTES", 4 * 1024 * 1024)?;
+        let max_operation_page_bytes =
+            Self::parse_positive_u64_env("KAMORI_MAX_OPERATION_PAGE_BYTES", 8 * 1024 * 1024)?;
+        let space_operation_storage_bytes =
+            Self::parse_positive_u64_env("KAMORI_SPACE_OPERATION_STORAGE_BYTES", 250_000_000)?;
+        let account_operation_storage_bytes =
+            Self::parse_positive_u64_env("KAMORI_ACCOUNT_OPERATION_STORAGE_BYTES", 1_000_000_000)?;
+        if max_operation_bytes > max_snapshot_bytes
+            || max_snapshot_bytes > max_operation_page_bytes
+            || space_operation_storage_bytes > account_operation_storage_bytes
+        {
+            bail!(
+                "operation, snapshot, page, space, and account limits must be monotonically increasing"
+            );
+        }
+        let max_concurrent_large_requests =
+            Self::parse_positive_u64_env("KAMORI_MAX_CONCURRENT_LARGE_REQUESTS", 16)?;
+        let max_inflight_request_bytes =
+            Self::parse_positive_u64_env("KAMORI_MAX_INFLIGHT_REQUEST_BYTES", 128 * 1024 * 1024)?;
+        if max_concurrent_large_requests > 1024
+            || max_inflight_request_bytes > 4 * 1024 * 1024 * 1024
+        {
+            bail!("large request process limits exceed their safety ceilings");
+        }
         let max_blob_bytes =
             Self::parse_positive_u64_env("KAMORI_MAX_BLOB_BYTES", 25 * 1024 * 1024)?;
         let account_storage_bytes =
@@ -379,8 +505,24 @@ impl Config {
             Self::parse_positive_u64_env("KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES", 2_000_000_000)?;
         let owner_concurrent_blob_downloads =
             Self::parse_positive_u64_env("KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS", 2)?;
+        let global_concurrent_blob_downloads =
+            Self::parse_positive_u64_env("KAMORI_GLOBAL_CONCURRENT_BLOB_DOWNLOADS", 64)?;
+        if owner_concurrent_blob_downloads > 100 {
+            bail!("KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS must not exceed 100");
+        }
+        if global_concurrent_blob_downloads > 4096 {
+            bail!("KAMORI_GLOBAL_CONCURRENT_BLOB_DOWNLOADS must not exceed 4096");
+        }
+        if owner_concurrent_blob_downloads > global_concurrent_blob_downloads {
+            bail!(
+                "KAMORI_OWNER_CONCURRENT_BLOB_DOWNLOADS cannot exceed KAMORI_GLOBAL_CONCURRENT_BLOB_DOWNLOADS"
+            );
+        }
         let blob_download_bytes_per_second =
             Self::parse_positive_u64_env("KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND", 1_250_000)?;
+        if !(102_400..=104_857_600).contains(&blob_download_bytes_per_second) {
+            bail!("KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND must be between 100 KiB/s and 100 MiB/s");
+        }
         let global_nonessential_egress_stop_bytes = Self::parse_positive_u64_env(
             "KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES",
             16_000_000_000_000,
@@ -389,6 +531,43 @@ impl Config {
             "KAMORI_GLOBAL_EMERGENCY_EGRESS_BREAKER_BYTES",
             19_000_000_000_000,
         )?;
+        if !(1024 * 1024..=25 * 1024 * 1024).contains(&max_blob_bytes)
+            || !max_blob_bytes.is_multiple_of(1024 * 1024)
+        {
+            bail!("KAMORI_MAX_BLOB_BYTES must be 1 MiB aligned and at most 25 MiB");
+        }
+        if max_blob_bytes > account_storage_bytes {
+            bail!("KAMORI_MAX_BLOB_BYTES cannot exceed KAMORI_ACCOUNT_STORAGE_BYTES");
+        }
+        if owner_rolling_24h_egress_bytes > owner_monthly_egress_bytes {
+            bail!(
+                "KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES cannot exceed KAMORI_OWNER_MONTHLY_EGRESS_BYTES"
+            );
+        }
+        for (name, value) in [
+            ("KAMORI_MAX_BLOB_BYTES", max_blob_bytes),
+            ("KAMORI_ACCOUNT_STORAGE_BYTES", account_storage_bytes),
+            (
+                "KAMORI_OWNER_MONTHLY_EGRESS_BYTES",
+                owner_monthly_egress_bytes,
+            ),
+            (
+                "KAMORI_OWNER_ROLLING_24H_EGRESS_BYTES",
+                owner_rolling_24h_egress_bytes,
+            ),
+            (
+                "KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES",
+                global_nonessential_egress_stop_bytes,
+            ),
+            (
+                "KAMORI_GLOBAL_EMERGENCY_EGRESS_BREAKER_BYTES",
+                global_emergency_egress_breaker_bytes,
+            ),
+        ] {
+            if value > i64::MAX as u64 {
+                bail!("{name} exceeds the PostgreSQL BIGINT range");
+            }
+        }
         if global_nonessential_egress_stop_bytes >= global_emergency_egress_breaker_bytes {
             bail!("global nonessential egress stop must be below the emergency egress breaker");
         }
@@ -415,9 +594,10 @@ impl Config {
                 Self::required_env("KAMORI_OBJECT_STORE_SECRET_ACCESS_KEY")?,
             )
         };
-        let object_store_allow_http = Self::parse_bool_env("KAMORI_OBJECT_STORE_ALLOW_HTTP", false);
+        let object_store_allow_http =
+            Self::parse_bool_env("KAMORI_OBJECT_STORE_ALLOW_HTTP", false)?;
         let object_store_virtual_hosted_style =
-            Self::parse_bool_env("KAMORI_OBJECT_STORE_VIRTUAL_HOSTED_STYLE", false);
+            Self::parse_bool_env("KAMORI_OBJECT_STORE_VIRTUAL_HOSTED_STYLE", false)?;
         if !cfg!(test) && object_store_endpoint == "memory://" {
             bail!("memory object storage is test-only");
         }
@@ -454,7 +634,6 @@ impl Config {
             jwt_audience,
             access_token_ttl_seconds,
             refresh_token_ttl_seconds,
-            jwt_preauth_ttl_seconds,
             jwt_account_recovery_ttl_seconds,
             web_refresh_cookie_name,
             web_refresh_cookie_path,
@@ -467,17 +646,29 @@ impl Config {
             valkey_ttl_seconds,
             auth_rate_limit_per_minute,
             api_rate_limit_per_minute,
+            session_rate_limit_units_per_minute,
+            trusted_proxy_cidrs,
             cors_allow_origins,
+            web_cookie_origins,
+            admin_cors_allow_origins,
             cors_allow_methods,
             cors_allow_headers,
             cors_allow_credentials,
             registration_enabled,
             beta_account_limit,
+            max_operation_bytes,
+            max_snapshot_bytes,
+            max_operation_page_bytes,
+            space_operation_storage_bytes,
+            account_operation_storage_bytes,
+            max_concurrent_large_requests,
+            max_inflight_request_bytes,
             max_blob_bytes,
             account_storage_bytes,
             owner_monthly_egress_bytes,
             owner_rolling_24h_egress_bytes,
             owner_concurrent_blob_downloads,
+            global_concurrent_blob_downloads,
             blob_download_bytes_per_second,
             global_nonessential_egress_stop_bytes,
             global_emergency_egress_breaker_bytes,
@@ -490,5 +681,36 @@ impl Config {
             object_store_virtual_hosted_style,
             metrics_bearer_token,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn cookie_names_accept_tokens_and_reject_header_delimiters() {
+        assert!(Config::validate_cookie_name("__Host-kamori_rt", "TEST").is_ok());
+        assert!(Config::validate_cookie_name("kamori rt", "TEST").is_err());
+        assert!(Config::validate_cookie_name("kamori=rt", "TEST").is_err());
+        assert!(Config::validate_cookie_name("kamori;rt", "TEST").is_err());
+    }
+
+    #[test]
+    fn cookie_paths_reject_attribute_injection() {
+        assert!(Config::validate_cookie_path("/").is_ok());
+        assert!(Config::validate_cookie_path("/auth/refresh").is_ok());
+        assert!(Config::validate_cookie_path("auth").is_err());
+        assert!(Config::validate_cookie_path("/; Secure").is_err());
+        assert!(Config::validate_cookie_path("/\r\nX-Test: 1").is_err());
+    }
+
+    #[test]
+    fn cookie_domains_are_canonical_hostnames() {
+        assert!(Config::validate_cookie_domain("kamori.app").is_ok());
+        assert!(Config::validate_cookie_domain("api.kamori.app").is_ok());
+        assert!(Config::validate_cookie_domain(".kamori.app").is_err());
+        assert!(Config::validate_cookie_domain("https://kamori.app").is_err());
+        assert!(Config::validate_cookie_domain("127.0.0.1").is_err());
     }
 }

@@ -82,7 +82,7 @@ pub(crate) fn set_csrf_cookie(
     csrf_token: &str,
 ) -> Result<(), ApiError> {
     let mut cookie = format!(
-        "{}={}; Path={}; Max-Age={}; SameSite={}",
+        "{}={}; Path={}; Max-Age={}; HttpOnly; SameSite={}",
         config.web_csrf_cookie_name,
         csrf_token,
         config.web_refresh_cookie_path,
@@ -125,7 +125,7 @@ pub(crate) fn clear_refresh_cookie(
 
 pub(crate) fn clear_csrf_cookie(config: &Config, response: &mut Response) -> Result<(), ApiError> {
     let mut cookie = format!(
-        "{}=; Path={}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite={}",
+        "{}=; Path={}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite={}",
         config.web_csrf_cookie_name,
         config.web_refresh_cookie_path,
         refresh_cookie_same_site(config),

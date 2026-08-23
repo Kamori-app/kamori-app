@@ -31,6 +31,7 @@
         withActiveMasterKey,
     } from "$lib/cryptoVault";
     import { tokenStore } from "$lib/auth/tokenStore";
+    import { normalizeCloudBaseUrl } from "$lib/endpoint";
     import { appState } from "$lib/stores/app";
     import Button from "$lib/components/ui/Button.svelte";
     import Input from "$lib/components/ui/Input.svelte";
@@ -43,6 +44,7 @@
         "Pending offers": "Ожидающие предложения", "Cancel offer": "Отменить предложение", "Offer ownership": "Предложить владение",
         "Privacy choices": "Настройки приватности", "Product analytics": "Аналитика продукта", "Crash reports": "Отчёты о сбоях", "Product email": "Новости продукта",
         "Save privacy choices": "Сохранить выбор", "Security: Devices": "Безопасность: устройства", "Approve encrypted access": "Разрешить доступ к шифрованным данным",
+        "Revoke device": "Отозвать устройство", "Current device": "Текущее устройство",
         "Security: Sessions": "Безопасность: сессии", "Sign in to review sessions.": "Войдите, чтобы просмотреть сессии.", "No sessions found.": "Сессий нет.",
         "Last used": "Последнее использование", "Revoke": "Отозвать", "Security: Data Recovery Kit": "Безопасность: recovery kit данных",
         "Reveal 24-word kit": "Показать набор из 24 слов", "Copy kit": "Копировать набор", "Sign in to reveal it.": "Войдите, чтобы показать его.",
@@ -53,6 +55,8 @@
         "Refresh status": "Обновить статус", "Current TOTP code, if enabled": "Текущий TOTP-код, если включён",
     };
     const t = (english: string) => $locale === "ru" ? (ruCopy[english] ?? english) : english;
+    const localized = (english: string, russian: string) =>
+        $locale === "ru" ? russian : english;
 
     /**
      * Minimal settings modal used to override cloud API base URL.
@@ -72,11 +76,13 @@
     let totpEnabled = false;
     let totpRecoveryCodesRemaining = 0;
     let totpRecoveryCodes: string[] = [];
+    let totpSetupFlowId = "";
     let totpManualEntryKey = "";
     let totpOtpAuthUri = "";
     let totpQrDataUrl = "";
     let totpSetupCode = "";
-    let totpDisableCode = "";
+    let securityCurrentPassword = "";
+    let securityCurrentTotp = "";
     let passwordChangeNew = "";
     let passwordChangeConfirm = "";
     let passwordChangeCurrent = "";
@@ -106,6 +112,7 @@
     };
 
     const clearTotpSetupDraft = () => {
+        totpSetupFlowId = "";
         totpManualEntryKey = "";
         totpOtpAuthUri = "";
         totpQrDataUrl = "";
@@ -158,18 +165,62 @@
                 appState.update((state) => ({
                     ...state,
                     accessToken: null,
-                    preauthToken: null,
+                    totpContinuationToken: null,
                 }));
             },
         });
     }
 
+    const createSecurityReauth = async (): Promise<string> => {
+        if (!securityCurrentPassword) {
+            throw new Error(localized(
+                "Enter your current password to change security settings.",
+                "Введите текущий пароль, чтобы изменить настройки безопасности.",
+            ));
+        }
+
+        const opaqueStart = await opaqueSigninStart(securityCurrentPassword);
+        const started = await withAccessRetry((accessToken) =>
+            cloudApi.reauthStart(
+                $appState.cloudBaseUrl,
+                opaqueStart.opaque_start_request,
+                "security_settings",
+                accessToken,
+            ),
+        );
+        if (started.totp_required && !securityCurrentTotp.trim()) {
+            throw new Error(localized(
+                "Enter your current two-factor or backup code.",
+                "Введите текущий двухфакторный или backup-код.",
+            ));
+        }
+        const opaqueFinish = await opaqueSigninFinish(
+            opaqueStart.flow_id,
+            securityCurrentPassword,
+            started.opaque_server_message,
+        );
+        const finished = await withAccessRetry((accessToken) =>
+            cloudApi.reauthFinish(
+                $appState.cloudBaseUrl,
+                started.opaque_flow_id,
+                opaqueFinish.opaque_finish_request,
+                started.totp_required ? securityCurrentTotp.trim() : null,
+                "security_settings",
+                accessToken,
+            ),
+        );
+        return finished.reauth_token;
+    };
+
     const copyText = async (value: string, label: string) => {
         try {
             await navigator.clipboard.writeText(value);
-            setNotice(`${label} copied.`);
+            setNotice(localized(`${label} copied.`, `${label}: скопировано.`));
         } catch {
-            setNotice(`Unable to copy ${label.toLowerCase()}.`);
+            setNotice(localized(
+                `Unable to copy ${label.toLowerCase()}.`,
+                `Не удалось скопировать: ${label.toLowerCase()}.`,
+            ));
         }
     };
 
@@ -199,7 +250,7 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to load TOTP status: ${message}`);
+            setNotice(`${localized("Failed to load TOTP status", "Не удалось загрузить состояние TOTP")}: ${message}`);
         } finally {
             totpLoading = false;
         }
@@ -224,7 +275,7 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to load privacy choices: ${message}`);
+            setNotice(`${localized("Failed to load privacy choices", "Не удалось загрузить настройки приватности")}: ${message}`);
         } finally {
             consentLoading = false;
         }
@@ -232,7 +283,7 @@
 
     const saveConsents = async () => {
         if (!tokenStore.getAccessToken()) {
-            setNotice("Sign in to save privacy choices.");
+            setNotice(localized("Sign in to save privacy choices.", "Войдите, чтобы сохранить настройки приватности."));
             return;
         }
         setBusyAction("consents");
@@ -251,11 +302,14 @@
             consentProductAnalytics = settings.product_analytics;
             consentCrashReports = settings.crash_reports;
             consentMarketing = settings.marketing;
-            setNotice("Privacy choices saved. You can revoke them at any time.");
+            setNotice(localized(
+                "Privacy choices saved. You can revoke them at any time.",
+                "Настройки приватности сохранены. Вы можете отозвать согласие в любое время.",
+            ));
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to save privacy choices: ${message}`);
+            setNotice(`${localized("Failed to save privacy choices", "Не удалось сохранить настройки приватности")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -263,46 +317,55 @@
 
     const startTotpSetup = async () => {
         if (!tokenStore.getAccessToken()) {
-            setNotice("Sign in first.");
+            setNotice(localized("Sign in first.", "Сначала войдите."));
             return;
         }
         if (!totpAvailable) {
-            setNotice("TOTP is disabled on server.");
+            setNotice(localized("TOTP is disabled on server.", "TOTP отключён на сервере."));
             return;
         }
 
         setBusyAction("totp-start");
         try {
             clearTotpRecoveryCodes();
+            const reauthToken = await createSecurityReauth();
             const response = await withAccessRetry((accessToken) =>
-                cloudApi.totpSetupStart($appState.cloudBaseUrl, accessToken),
+                cloudApi.totpSetupStart(
+                    $appState.cloudBaseUrl,
+                    reauthToken,
+                    accessToken,
+                ),
             );
             const qrSvg = await generateQrSvg(response.otpauth_uri);
+            totpSetupFlowId = response.flow_id;
             totpManualEntryKey = response.manual_entry_key;
             totpOtpAuthUri = response.otpauth_uri;
             totpQrDataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`;
             totpSetupCode = "";
             setNotice(
-                "TOTP setup started. Scan QR code (or use manual key), then confirm with code.",
+                localized(
+                    "TOTP setup started. Scan QR code (or use manual key), then confirm with code.",
+                    "Настройка TOTP начата. Отсканируйте QR-код или введите ключ вручную, затем подтвердите кодом.",
+                ),
             );
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to start TOTP setup: ${message}`);
+            setNotice(`${localized("Failed to start TOTP setup", "Не удалось начать настройку TOTP")}: ${message}`);
         } finally {
             clearBusyAction();
         }
     };
 
     const finishTotpSetup = async () => {
-        if (!totpManualEntryKey) {
-            setNotice("Start TOTP setup first.");
+        if (!totpSetupFlowId) {
+            setNotice(localized("Start TOTP setup first.", "Сначала начните настройку TOTP."));
             return;
         }
 
         const code = totpSetupCode.trim();
         if (!code) {
-            setNotice("Enter TOTP code to confirm setup.");
+            setNotice(localized("Enter TOTP code to confirm setup.", "Введите TOTP-код для подтверждения настройки."));
             return;
         }
 
@@ -312,7 +375,7 @@
                 cloudApi.totpSetupFinish(
                     $appState.cloudBaseUrl,
                     {
-                        manual_entry_key: totpManualEntryKey,
+                        flow_id: totpSetupFlowId,
                         code,
                     },
                     accessToken,
@@ -322,40 +385,45 @@
             totpRecoveryCodes = response.recovery_codes ?? [];
             totpRecoveryCodesRemaining = totpRecoveryCodes.length;
             clearTotpSetupDraft();
-            setNotice("TOTP enabled. Save the one-time TOTP backup codes now.");
+            setNotice(localized(
+                "TOTP enabled. Save the one-time TOTP backup codes now.",
+                "TOTP включён. Сохраните одноразовые backup-коды прямо сейчас.",
+            ));
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to enable TOTP: ${message}`);
+            setNotice(`${localized("Failed to enable TOTP", "Не удалось включить TOTP")}: ${message}`);
         } finally {
             clearBusyAction();
         }
     };
 
     const disableTotp = async () => {
-        const code = totpDisableCode.trim();
+        const code = securityCurrentTotp.trim();
         if (!code) {
-            setNotice("Enter current TOTP code to disable.");
+            setNotice(localized("Enter current TOTP code to disable.", "Введите текущий TOTP-код для отключения."));
             return;
         }
 
         setBusyAction("totp-disable");
         try {
+            const reauthToken = await createSecurityReauth();
             const response = await withAccessRetry((accessToken) =>
                 cloudApi.totpDisable(
                     $appState.cloudBaseUrl,
-                    { code },
+                    { reauth_token: reauthToken, code },
                     accessToken,
                 ),
             );
             totpEnabled = Boolean(response.enabled);
-            totpDisableCode = "";
+            securityCurrentPassword = "";
+            securityCurrentTotp = "";
             clearTotpSetupDraft();
-            setNotice("TOTP disabled.");
+            setNotice(localized("TOTP disabled.", "TOTP отключён."));
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to disable TOTP: ${message}`);
+            setNotice(`${localized("Failed to disable TOTP", "Не удалось отключить TOTP")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -363,17 +431,20 @@
 
     const changePassword = async () => {
         if (!tokenStore.getAccessToken()) {
-            setNotice("Sign in first.");
+            setNotice(localized("Sign in first.", "Сначала войдите."));
             return;
         }
 
         const nextPassword = passwordChangeNew;
         if (!passwordChangeCurrent || !nextPassword || !passwordChangeConfirm) {
-            setNotice("Current password, new password, and confirmation are required.");
+            setNotice(localized(
+                "Current password, new password, and confirmation are required.",
+                "Введите текущий пароль, новый пароль и его подтверждение.",
+            ));
             return;
         }
         if (nextPassword !== passwordChangeConfirm) {
-            setNotice("Password confirmation does not match.");
+            setNotice(localized("Password confirmation does not match.", "Пароли не совпадают."));
             return;
         }
 
@@ -389,7 +460,7 @@
                 ),
             );
             if (reauthStartResponse.totp_required && !passwordChangeTotp.trim()) {
-                throw new Error("Current two-factor code is required.");
+                throw new Error(localized("Current two-factor code is required.", "Введите текущий код двухфакторной аутентификации."));
             }
             const reauthFinish = await opaqueSigninFinish(
                 reauthStart.flow_id,
@@ -450,8 +521,8 @@
             appState.update((state) => ({
                 ...state,
                 accessToken: null,
-                preauthToken: null,
-                notice: "Password changed. Sign in again.",
+                totpContinuationToken: null,
+                notice: localized("Password changed. Sign in again.", "Пароль изменён. Войдите снова."),
             }));
             clearPasswordChangeDraft();
             clearTotpRecoveryCodes();
@@ -460,7 +531,7 @@
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`Password change failed: ${message}`);
+            setNotice(`${localized("Password change failed", "Не удалось изменить пароль")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -469,22 +540,29 @@
     const regenerateRecoveryCodes = async () => {
         setBusyAction("account-recovery-regenerate");
         try {
+            const reauthToken = await createSecurityReauth();
             const response = await withAccessRetry((accessToken) =>
                 cloudApi.accountRecoveryCodesRegenerate(
                     $appState.cloudBaseUrl,
+                    reauthToken,
                     accessToken,
                 ),
             );
             totpRecoveryCodes = response.recovery_codes ?? [];
             totpRecoveryCodesRemaining = totpRecoveryCodes.length;
+            securityCurrentPassword = "";
+            securityCurrentTotp = "";
             setNotice(
-                "TOTP backup codes regenerated. Old unused codes are revoked.",
+                localized(
+                    "TOTP backup codes regenerated. Old unused codes are revoked.",
+                    "Backup-коды TOTP созданы заново. Старые неиспользованные коды отозваны.",
+                ),
             );
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
             setNotice(
-                `Failed to regenerate TOTP backup codes: ${message}`,
+                `${localized("Failed to regenerate TOTP backup codes", "Не удалось создать новые backup-коды TOTP")}: ${message}`,
             );
         } finally {
             clearBusyAction();
@@ -497,11 +575,14 @@
                 (masterKey) => masterKeyToRecoveryPhrase(masterKey),
             );
             setNotice(
-                "Data recovery kit revealed. Keep it private and store it offline.",
+                localized(
+                    "Data recovery kit revealed. Keep it private and store it offline.",
+                    "Recovery kit показан. Не передавайте его другим и храните офлайн.",
+                ),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Unable to reveal data recovery kit: ${message}`);
+            setNotice(`${localized("Unable to reveal data recovery kit", "Не удалось показать recovery kit")}: ${message}`);
         }
     };
 
@@ -517,25 +598,27 @@
             sessions = response.sessions;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to load sessions: ${message}`);
+            setNotice(`${localized("Failed to load sessions", "Не удалось загрузить сессии")}: ${message}`);
         }
     };
 
     const revokeSession = async (sessionId: string) => {
         setBusyAction(`session-${sessionId}`);
         try {
+            const reauthToken = await createSecurityReauth();
             await withAccessRetry((accessToken) =>
                 cloudApi.revokeSession(
                     $appState.cloudBaseUrl,
                     sessionId,
+                    reauthToken,
                     accessToken,
                 ),
             );
             await loadSessions();
-            setNotice("Session revoked.");
+            setNotice(localized("Session revoked.", "Сессия отозвана."));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to revoke session: ${message}`);
+            setNotice(`${localized("Failed to revoke session", "Не удалось отозвать сессию")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -588,7 +671,7 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to load devices: ${message}`);
+            setNotice(`${localized("Failed to load devices", "Не удалось загрузить устройства")}: ${message}`);
         }
     };
 
@@ -622,12 +705,52 @@
             await loadDevices();
             setNotice(
                 approved > 0
-                    ? `Approved ${entry.label} for ${approved} encrypted space(s).`
-                    : "No locally unlocked space keys were available.",
+                    ? localized(
+                          `Approved ${entry.label} for ${approved} encrypted space(s).`,
+                          `Устройство ${entry.label} получило доступ к зашифрованным пространствам: ${approved}.`,
+                      )
+                    : localized(
+                          "No locally unlocked space keys were available.",
+                          "На этом устройстве нет разблокированных ключей пространств.",
+                      ),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Device approval failed: ${message}`);
+            setNotice(`${localized("Device approval failed", "Не удалось одобрить устройство")}: ${message}`);
+        } finally {
+            clearBusyAction();
+        }
+    };
+
+    const revokeDevice = async (entry: (typeof deviceApprovals)[number]) => {
+        const activeDeviceId = getActiveWebDevice().deviceId;
+        if (entry.device.device_id === activeDeviceId) {
+            setNotice(localized(
+                "Revoke the current browser from another approved device.",
+                "Отзовите текущий браузер с другого одобренного устройства.",
+            ));
+            return;
+        }
+        if (!window.confirm(localized(
+            `Revoke ${entry.label}? Its sessions and encrypted key packages will be invalidated immediately.`,
+            `Отозвать ${entry.label}? Его сессии и пакеты ключей будут немедленно аннулированы.`,
+        ))) return;
+        setBusyAction(`revoke-device-${entry.device.device_id}`);
+        try {
+            const reauthToken = await createSecurityReauth();
+            await withAccessRetry((accessToken) =>
+                cloudApi.revokeDevice(
+                    $appState.cloudBaseUrl,
+                    entry.device.device_id,
+                    reauthToken,
+                    accessToken,
+                ),
+            );
+            await Promise.all([loadDevices(), loadSessions()]);
+            setNotice(localized("Device revoked.", "Устройство отозвано."));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice(`${localized("Failed to revoke device", "Не удалось отозвать устройство")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -711,7 +834,7 @@
             ownedResources = resources;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to load ownership controls: ${message}`);
+            setNotice(`${localized("Failed to load ownership controls", "Не удалось загрузить управление владением")}: ${message}`);
         }
     };
 
@@ -732,11 +855,14 @@
             );
             await loadOwnership();
             setNotice(
-                `Ownership offer sent to ${target.username}. It expires in 24 hours and only the recipient can accept it.`,
+                localized(
+                    `Ownership offer sent to ${target.username}. It expires in 24 hours and only the recipient can accept it.`,
+                    `Предложение владения отправлено пользователю ${target.username}. Оно действует 24 часа, принять его может только получатель.`,
+                ),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Ownership transfer failed: ${message}`);
+            setNotice(`${localized("Ownership transfer failed", "Не удалось передать владение")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -764,12 +890,12 @@
             await Promise.all([loadOwnership(), loadDeletionStatus()]);
             setNotice(
                 accept
-                    ? "Ownership transfer accepted."
-                    : "Ownership transfer declined.",
+                    ? localized("Ownership transfer accepted.", "Передача владения принята.")
+                    : localized("Ownership transfer declined.", "Передача владения отклонена."),
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Unable to resolve ownership offer: ${message}`);
+            setNotice(`${localized("Unable to resolve ownership offer", "Не удалось обработать предложение владения")}: ${message}`);
         } finally {
             clearBusyAction();
         }
@@ -789,22 +915,28 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Failed to check account deletion: ${message}`);
+            setNotice(`${localized("Failed to check account deletion", "Не удалось проверить возможность удаления аккаунта")}: ${message}`);
         }
     };
 
     const deleteAccount = async () => {
         const username = $appState.currentUsername;
         if (!username || !accountDeletePassword) {
-            setNotice("Password is required to delete the account.");
+            setNotice(localized("Password is required to delete the account.", "Для удаления аккаунта нужен пароль."));
             return;
         }
         if (accountDeleteConfirmation !== `DELETE ${username}`) {
-            setNotice(`Type DELETE ${username} exactly to confirm.`);
+            setNotice(localized(
+                `Type DELETE ${username} exactly to confirm.`,
+                `Для подтверждения введите без изменений: DELETE ${username}`,
+            ));
             return;
         }
         if (!deletionStatus?.can_delete) {
-            setNotice("Transfer shared resources before deleting the account.");
+            setNotice(localized(
+                "Transfer shared resources before deleting the account.",
+                "Перед удалением аккаунта передайте владение общими ресурсами.",
+            ));
             return;
         }
         setBusyAction("account-delete");
@@ -819,7 +951,7 @@
                 ),
             );
             if (startResponse.totp_required && !accountDeleteTotp.trim()) {
-                throw new Error("Current two-factor code is required.");
+                throw new Error(localized("Current two-factor code is required.", "Введите текущий код двухфакторной аутентификации."));
             }
             const finish = await opaqueSigninFinish(
                 start.flow_id,
@@ -846,17 +978,20 @@
                     accessToken,
                 ),
             );
-            await deleteWebVaultAccount(username);
+            await deleteWebVaultAccount($appState.cloudBaseUrl, username);
             tokenStore.clear();
             appState.update((state) => ({
                 ...state,
                 currentUsername: "",
                 accessToken: null,
-                preauthToken: null,
+                totpContinuationToken: null,
                 collections: [],
                 syncedItemsTotal: 0,
                 lastSyncedSeq: 0,
-                notice: "Account and local encrypted browser data deleted.",
+                notice: localized(
+                    "Account and local encrypted browser data deleted.",
+                    "Аккаунт и локальные зашифрованные данные браузера удалены.",
+                ),
             }));
             accountDeletePassword = "";
             accountDeleteTotp = "";
@@ -864,36 +999,62 @@
             onClose();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`Account deletion failed: ${message}`);
+            setNotice(`${localized("Account deletion failed", "Не удалось удалить аккаунт")}: ${message}`);
         } finally {
             clearBusyAction();
         }
     };
 
     const formatSessionTime = (unixMs?: number | null): string =>
-        unixMs ? new Date(unixMs).toLocaleString() : "Never";
+        unixMs
+            ? new Date(unixMs).toLocaleString($locale === "ru" ? "ru-RU" : "en-US")
+            : localized("Never", "Никогда");
 
     /**
      * Persists normalized base URL and notifies user.
      */
-    const saveCloudBaseUrl = () => {
-        const next = settingsCloudBaseUrl.trim() || "http://127.0.0.1:3000";
+    const saveCloudBaseUrl = async () => {
+        let next: string;
+        try {
+            next = normalizeCloudBaseUrl(
+                settingsCloudBaseUrl.trim() || "http://127.0.0.1:3000",
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice(`${localized("Invalid service address", "Некорректный адрес сервиса")}: ${message}`);
+            return;
+        }
+        if (tokenStore.getAccessToken()) {
+            setNotice(localized(
+                "Sign out before changing the Kamori service address.",
+                "Выйдите из аккаунта перед изменением адреса сервиса Kamori.",
+            ));
+            return;
+        }
+        // A cookie-backed session can exist while the local vault is locked.
+        // Revoke it on the old origin before switching; an unreachable old
+        // origin must not trap the user in a broken configuration.
+        await cloudApi.logout($appState.cloudBaseUrl, "").catch(() => undefined);
         tokenStore.clear();
         lockWebVault();
         appState.update((state) => ({
             ...state,
             cloudBaseUrl: next,
             accessToken: null,
-            preauthToken: null,
+            totpContinuationToken: null,
         }));
         settingsCloudBaseUrl = next;
         clearTotpSetupDraft();
         clearTotpRecoveryCodes();
         clearPasswordChangeDraft();
         totpRecoveryCodesRemaining = 0;
-        totpDisableCode = "";
+        securityCurrentPassword = "";
+        securityCurrentTotp = "";
         onClose();
-        setNotice("Cloud base URL updated. Sign in again.");
+        setNotice(localized(
+            "Cloud base URL updated. Sign in again.",
+            "Адрес сервиса Kamori обновлён. Войдите снова.",
+        ));
     };
 
     $: if (open && !wasOpen) {
@@ -912,7 +1073,8 @@
         clearTotpRecoveryCodes();
         clearPasswordChangeDraft();
         totpRecoveryCodesRemaining = 0;
-        totpDisableCode = "";
+        securityCurrentPassword = "";
+        securityCurrentTotp = "";
         clearBusyAction();
         dataRecoveryKit = "";
         sessions = [];
@@ -951,9 +1113,10 @@
                 {/if}
             </div>
             <p class="mt-2 text-xs text-slate/70">
-                Ownership never changes silently. An active member must accept
-                the offer within 24 hours. Space storage is charged to the new
-                owner only after acceptance.
+                {localized(
+                    "Ownership never changes silently. An active member must accept the offer within 24 hours. Space storage is charged to the new owner only after acceptance.",
+                    "Владелец никогда не меняется автоматически. Активный участник должен принять предложение в течение 24 часов. Хранилище пространства учитывается за новым владельцем только после принятия.",
+                )}
             </p>
             {#if incomingOwnershipOffers.length > 0}
                 <div class="mt-3 space-y-2">
@@ -963,15 +1126,14 @@
                         >
                             <p class="text-xs font-semibold text-slate">
                                 {offer.resource_kind === "security_space"
-                                    ? "Encrypted space"
-                                    : "Team workspace"}
+                                    ? localized("Encrypted space", "Зашифрованное пространство")
+                                    : localized("Team workspace", "Командное рабочее пространство")}
                                 · {offer.resource_id.slice(0, 8)}
                             </p>
                             <p class="mt-1 text-xs text-slate/65">
-                                Offered by {offer.current_owner_username} · expires
-                                {new Date(
-                                    offer.expires_at_unix_ms,
-                                ).toLocaleString()}
+                                {localized("Offered by", "Предложил")}
+                                {offer.current_owner_username} · {localized("expires", "истекает")}
+                                {formatSessionTime(offer.expires_at_unix_ms)}
                             </p>
                             <div class="mt-2 flex flex-wrap gap-2">
                                 <Button
@@ -1002,13 +1164,11 @@
                         >
                             <span class="text-xs text-slate">
                                 {offer.resource_kind === "security_space"
-                                    ? "Encrypted space"
-                                    : "Team workspace"}
-                                {offer.resource_id.slice(0, 8)} · recipient
-                                {offer.target_user_id.slice(0, 8)} · expires
-                                {new Date(
-                                    offer.expires_at_unix_ms,
-                                ).toLocaleString()}
+                                    ? localized("Encrypted space", "Зашифрованное пространство")
+                                    : localized("Team workspace", "Командное рабочее пространство")}
+                                {offer.resource_id.slice(0, 8)} · {localized("recipient", "получатель")}
+                                {offer.target_user_id.slice(0, 8)} · {localized("expires", "истекает")}
+                                {formatSessionTime(offer.expires_at_unix_ms)}
                             </span>
                             <Button
                                 variant="ghost"
@@ -1032,7 +1192,10 @@
                             </p>
                             {#if resource.members.length === 0}
                                 <p class="mt-1 text-xs text-slate/65">
-                                    Invite a member before transferring ownership.
+                                    {localized(
+                                        "Invite a member before transferring ownership.",
+                                        "Сначала пригласите участника, затем передайте владение.",
+                                    )}
                                 </p>
                             {:else}
                                 <div class="mt-2 space-y-2">
@@ -1041,7 +1204,10 @@
                                             class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sand/50 p-2"
                                         >
                                             <span class="text-xs text-slate">
-                                                {member.username} · {member.role}
+                                                {member.username} · {localized(
+                                                    member.role,
+                                                    member.role === "owner" ? "владелец" : member.role === "editor" ? "редактор" : "чтение",
+                                                )}
                                             </span>
                                             <Button
                                                 variant="ghost"
@@ -1074,7 +1240,10 @@
             </p>
             {#if !$appState.accessToken}
                 <p class="mt-2 text-xs text-slate/70">
-                    Sign in to review or change these choices.
+                    {localized(
+                        "Sign in to review or change these choices.",
+                        "Войдите, чтобы просмотреть или изменить этот выбор.",
+                    )}
                 </p>
             {:else}
                 <div class="mt-3 space-y-3">
@@ -1088,8 +1257,10 @@
                         <span>
                             <strong>{t("Product analytics")}</strong><br />
                             <span class="text-xs text-slate/70">
-                                Share privacy-filtered feature usage and
-                                performance counters.
+                                {localized(
+                                    "Share privacy-filtered feature usage and performance counters.",
+                                    "Передавать очищенные от личных данных сведения об использовании функций и производительности.",
+                                )}
                             </span>
                         </span>
                     </label>
@@ -1103,8 +1274,10 @@
                         <span>
                             <strong>{t("Crash reports")}</strong><br />
                             <span class="text-xs text-slate/70">
-                                Send redacted crash diagnostics without content,
-                                keys, or tokens.
+                                {localized(
+                                    "Send redacted crash diagnostics without content, keys, or tokens.",
+                                    "Отправлять обезличенную диагностику сбоев без содержимого, ключей и токенов.",
+                                )}
                             </span>
                         </span>
                     </label>
@@ -1118,8 +1291,10 @@
                         <span>
                             <strong>{t("Product email")}</strong><br />
                             <span class="text-xs text-slate/70">
-                                Receive optional product news. Security notices
-                                remain operational.
+                                {localized(
+                                    "Receive optional product news. Security notices remain operational.",
+                                    "Получать необязательные новости продукта. Уведомления безопасности остаются служебными.",
+                                )}
                             </span>
                         </span>
                     </label>
@@ -1145,8 +1320,10 @@
                 {/if}
             </div>
             <p class="mt-2 text-xs text-slate/70">
-                New devices authenticate first, then require explicit encrypted
-                key approval from an already unlocked device.
+                {localized(
+                    "New devices authenticate first, then require explicit encrypted key approval from an already unlocked device.",
+                    "Новое устройство сначала входит в аккаунт, а затем получает явное разрешение на зашифрованные ключи с уже разблокированного устройства.",
+                )}
             </p>
             {#if deviceApprovals.length > 0}
                 <div class="mt-2 space-y-2">
@@ -1159,18 +1336,38 @@
                             </p>
                             <p class="mt-1 text-xs text-slate/65">
                                 {entry.missingSpaces.length === 0
-                                    ? "Encrypted access is current."
-                                    : `${entry.missingSpaces.length} space(s) await approval.`}
+                                    ? localized("Encrypted access is current.", "Доступ к зашифрованным данным актуален.")
+                                    : localized(
+                                          `${entry.missingSpaces.length} space(s) await approval.`,
+                                          `${entry.missingSpaces.length} пространств ожидают одобрения.`,
+                                      )}
                             </p>
                             {#if entry.missingSpaces.length > 0}
-                                <div class="mt-2">
+                                <div class="mt-2 flex flex-wrap gap-2">
                                     <Button
                                         variant="secondary"
                                         on:click={() => approveDevice(entry)}
                                         disabled={totpBusyAction ===
                                             `device-${entry.device.device_id}`}
                                     >{t("Approve encrypted access")}</Button>
+                                    {#if entry.device.device_id !== getActiveWebDevice().deviceId}
+                                        <Button
+                                            variant="ghost"
+                                            on:click={() => revokeDevice(entry)}
+                                            disabled={totpBusyAction === `revoke-device-${entry.device.device_id}`}
+                                        >{t("Revoke device")}</Button>
+                                    {/if}
                                 </div>
+                            {:else if entry.device.device_id !== getActiveWebDevice().deviceId}
+                                <div class="mt-2">
+                                    <Button
+                                        variant="ghost"
+                                        on:click={() => revokeDevice(entry)}
+                                        disabled={totpBusyAction === `revoke-device-${entry.device.device_id}`}
+                                    >{t("Revoke device")}</Button>
+                                </div>
+                            {:else}
+                                <p class="mt-2 text-xs text-slate/55">{t("Current device")}</p>
                             {/if}
                         </div>
                     {/each}
@@ -1202,17 +1399,18 @@
                             class="rounded-xl border border-slate/15 bg-white/70 p-3"
                         >
                             <p class="break-all text-xs font-semibold text-slate">
-                                {session.user_agent || "Unknown client"}
+                                {session.user_agent || localized("Unknown client", "Неизвестный клиент")}
+                                {session.is_current ? ` · ${localized("Current", "Текущая")}` : ""}
                             </p>
                             <p class="mt-1 text-xs text-slate/65">
-                                IP {session.ip_address || "unknown"} · Created
+                                IP {session.ip_address || localized("unknown", "неизвестен")} · {localized("Created", "Создана")}
                                 {formatSessionTime(session.created_at_unix_ms)} ·
                                 {t("Last used")}
                                 {formatSessionTime(session.last_used_at_unix_ms)}
                             </p>
                             {#if session.revoked_at_unix_ms}
                                 <p class="mt-1 text-xs text-coral">
-                                    Revoked {formatSessionTime(session.revoked_at_unix_ms)}
+                                    {localized("Revoked", "Отозвана")} {formatSessionTime(session.revoked_at_unix_ms)}
                                 </p>
                             {:else}
                                 <div class="mt-2">
@@ -1240,9 +1438,10 @@
                 {t("Security: Data Recovery Kit")}
             </p>
             <p class="mt-2 text-xs text-slate/70">
-                These 24 words restore your encrypted data key. They are
-                different from the one-time TOTP backup codes below.
-                Kamori support cannot recreate them.
+                {localized(
+                    "These 24 words restore your encrypted data key. They are different from the one-time TOTP backup codes below. Kamori support cannot recreate them.",
+                    "Эти 24 слова восстанавливают ключ зашифрованных данных. Это не одноразовые резервные коды TOTP ниже. Поддержка Kamori не сможет восстановить эту фразу.",
+                )}
             </p>
             {#if $appState.accessToken}
                 <div class="mt-2 space-y-2">
@@ -1279,16 +1478,47 @@
                     {t("Sign in to manage TOTP.")}
                 </p>
             {:else}
+                <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                    <Input
+                        bind:value={securityCurrentPassword}
+                        type="password"
+                        placeholder={localized(
+                            "Current password for security changes",
+                            "Текущий пароль для изменений безопасности",
+                        )}
+                    />
+                    {#if totpEnabled}
+                        <Input
+                            bind:value={securityCurrentTotp}
+                            placeholder={localized(
+                                "Current TOTP or backup code",
+                                "Текущий TOTP или backup-код",
+                            )}
+                        />
+                    {/if}
+                </div>
+                <p class="mt-2 text-xs text-slate/70">
+                    {localized(
+                        "Changing two-factor settings requires a fresh password check. Credentials stay in this dialog and are never persisted.",
+                        "Изменение двухфакторных настроек требует свежей проверки пароля. Данные остаются только в этом окне и не сохраняются.",
+                    )}
+                </p>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                     <span class="rounded-lg bg-sand/70 px-2 py-1 text-slate">
                         {totpLoading
-                            ? "Status: loading..."
-                            : `Status: ${totpEnabled ? "enabled" : "disabled"}`}
+                            ? localized("Status: loading…", "Статус: загрузка…")
+                            : localized(
+                                  `Status: ${totpEnabled ? "enabled" : "disabled"}`,
+                                  `Статус: ${totpEnabled ? "включено" : "отключено"}`,
+                              )}
                     </span>
                     <span class="rounded-lg bg-sand/70 px-2 py-1 text-slate">
                         {totpLoading
-                            ? "TOTP backup codes: ..."
-                            : `TOTP backup codes: ${totpRecoveryCodesRemaining} left`}
+                            ? localized("TOTP backup codes: …", "Резервные коды TOTP: …")
+                            : localized(
+                                  `TOTP backup codes: ${totpRecoveryCodesRemaining} left`,
+                                  `Резервных кодов TOTP осталось: ${totpRecoveryCodesRemaining}`,
+                              )}
                     </span>
                     <Button
                         variant="ghost"
@@ -1303,15 +1533,17 @@
                         disabled={Boolean(totpBusyAction)}
                     >
                         {totpBusyAction === "account-recovery-regenerate"
-                            ? "Regenerating..."
-                            : "Regenerate TOTP Backup Codes"}
+                            ? localized("Regenerating…", "Создаём новые…")
+                            : localized("Regenerate TOTP Backup Codes", "Создать новые резервные коды TOTP")}
                     </Button>
                 </div>
 
                 {#if !totpLoading && !totpAvailable}
                     <p class="mt-2 text-xs text-slate/70">
-                        TOTP is disabled in server config
-                        (`KAMORI_ENABLE_TOTP`).
+                        {localized(
+                            "TOTP is disabled by the service operator.",
+                            "TOTP отключён оператором сервиса.",
+                        )}
                     </p>
                 {/if}
 
@@ -1325,19 +1557,22 @@
                                 disabled={Boolean(totpBusyAction)}
                             >
                                 {totpBusyAction === "totp-start"
-                                    ? "Preparing..."
-                                    : "Start TOTP Setup"}
+                                    ? localized("Preparing…", "Подготовка…")
+                                    : localized("Start TOTP Setup", "Настроить TOTP")}
                             </Button>
                         </div>
 
                         {#if totpQrDataUrl}
                             <img
                                 src={totpQrDataUrl}
-                                alt="TOTP QR code"
+                                alt={localized("TOTP QR code", "QR-код TOTP")}
                                 class="mx-auto mt-2 h-56 w-56 rounded-lg border border-slate/15 bg-white p-2"
                             />
                             <p class="text-center text-xs text-slate/70">
-                                Scan QR code with authenticator app.
+                                {localized(
+                                    "Scan the QR code with an authenticator app.",
+                                    "Отсканируйте QR-код в приложении-аутентификаторе.",
+                                )}
                             </p>
 
                             <div class="space-y-2 rounded-lg bg-sand/50 p-2">
@@ -1392,8 +1627,8 @@
                                 disabled={Boolean(totpBusyAction)}
                             >
                                 {totpBusyAction === "totp-finish"
-                                    ? "Verifying..."
-                                    : "Enable TOTP"}
+                                    ? localized("Verifying…", "Проверка…")
+                                    : localized("Enable TOTP", "Включить TOTP")}
                             </Button>
                         {/if}
                     </div>
@@ -1404,21 +1639,19 @@
                         class="mt-3 space-y-2 rounded-xl border border-slate/15 p-3"
                     >
                         <p class="text-xs text-slate/80">
-                            To disable TOTP, confirm with a current code from
-                            your authenticator.
+                            {localized(
+                                "Use the current password and authenticator code above to disable TOTP.",
+                                "Чтобы отключить TOTP, введите выше текущий пароль и код из аутентификатора.",
+                            )}
                         </p>
-                        <Input
-                            bind:value={totpDisableCode}
-                            placeholder={$locale === "ru" ? "Введите текущий 6-значный TOTP-код" : "Enter current 6-digit TOTP code"}
-                        />
                         <Button
                             variant="danger"
                             on:click={disableTotp}
                             disabled={Boolean(totpBusyAction)}
                         >
                             {totpBusyAction === "totp-disable"
-                                ? "Disabling..."
-                                : "Disable TOTP"}
+                                ? localized("Disabling…", "Отключение…")
+                                : localized("Disable TOTP", "Отключить TOTP")}
                         </Button>
                     </div>
                 {/if}
@@ -1428,8 +1661,10 @@
                         class="mt-3 space-y-2 rounded-xl border border-coral/30 bg-coral/10 p-3"
                     >
                         <p class="text-xs font-semibold text-slate">
-                            Save these TOTP backup codes now. Each code can be
-                            used only once in place of a TOTP code.
+                            {localized(
+                                "Save these TOTP backup codes now. Each code can be used only once in place of a TOTP code.",
+                                "Сохраните резервные коды TOTP сейчас. Каждый код можно использовать только один раз вместо кода TOTP.",
+                            )}
                         </p>
                         <div class="grid gap-1 sm:grid-cols-2">
                             {#each totpRecoveryCodes as recoveryCode}
@@ -1448,7 +1683,7 @@
                                     "TOTP backup codes",
                                 )}
                         >
-                            Copy TOTP Backup Codes
+                            {localized("Copy TOTP Backup Codes", "Копировать резервные коды TOTP")}
                         </Button>
                     </div>
                 {/if}
@@ -1497,12 +1732,14 @@
                         disabled={Boolean(totpBusyAction)}
                     >
                         {totpBusyAction === "password-change"
-                            ? "Updating..."
-                            : "Change Password"}
+                            ? localized("Updating…", "Обновление…")
+                            : localized("Change Password", "Изменить пароль")}
                     </Button>
                     <p class="text-xs text-slate/70">
-                        After password change, all refresh sessions are revoked
-                        and you will need to sign in again.
+                        {localized(
+                            "After a password change, all refresh sessions are revoked and you must sign in again.",
+                            "После смены пароля все сессии будут отозваны, и потребуется войти снова.",
+                        )}
                     </p>
                 </div>
             {/if}
@@ -1522,19 +1759,19 @@
                 {/if}
             </div>
             <p class="mt-2 text-xs text-slate/70">
-                This permanently removes credentials, keys stored for your
-                account, personal resources, and this browser's encrypted
-                cache. Public device verification keys are retained only where
-                needed to verify signed history shared with other members.
+                {localized(
+                    "This permanently removes credentials, keys stored for your account, personal resources, and this browser's encrypted cache. Public device verification keys are retained only where needed to verify signed history shared with other members.",
+                    "Это безвозвратно удалит учётные данные, сохранённые для аккаунта ключи, личные ресурсы и зашифрованный кеш этого браузера. Публичные ключи проверки устройств сохраняются только там, где они нужны для проверки подписанной истории, доступной другим участникам.",
+                )}
             </p>
             {#if deletionStatus && !deletionStatus.can_delete}
                 <p
                     class="mt-2 rounded-xl border border-coral/30 bg-coral/10 p-3 text-xs text-slate"
                 >
-                    Before deletion, transfer or remove
-                    {deletionStatus.shared_workspaces_owned} shared workspace(s)
-                    and {deletionStatus.shared_spaces_owned} shared encrypted
-                    space(s).
+                    {localized(
+                        `Before deletion, transfer or remove ${deletionStatus.shared_workspaces_owned} shared workspace(s) and ${deletionStatus.shared_spaces_owned} shared encrypted space(s).`,
+                        `Перед удалением передайте или удалите общие рабочие пространства (${deletionStatus.shared_workspaces_owned}) и зашифрованные пространства (${deletionStatus.shared_spaces_owned}).`,
+                    )}
                 </p>
             {/if}
             {#if $appState.accessToken}
@@ -1552,7 +1789,10 @@
                     />
                     <Input
                         bind:value={accountDeleteConfirmation}
-                        placeholder={`Type DELETE ${$appState.currentUsername}`}
+                        placeholder={localized(
+                            `Type DELETE ${$appState.currentUsername}`,
+                            `Введите DELETE ${$appState.currentUsername}`,
+                        )}
                     />
                     <Button
                         variant="danger"
@@ -1561,8 +1801,8 @@
                             deletionStatus?.can_delete === false}
                     >
                         {totpBusyAction === "account-delete"
-                            ? "Deleting..."
-                            : "Permanently delete account"}
+                            ? localized("Deleting…", "Удаление…")
+                            : localized("Permanently delete account", "Удалить аккаунт безвозвратно")}
                     </Button>
                 </div>
             {/if}

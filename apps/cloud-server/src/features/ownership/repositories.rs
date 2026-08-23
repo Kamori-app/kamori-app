@@ -19,7 +19,8 @@ pub(crate) enum AcceptOfferResult {
     Accepted,
     NotFound,
     NoLongerValid,
-    StorageQuotaExceeded,
+    BlobStorageQuotaExceeded,
+    OperationStorageQuotaExceeded,
 }
 
 async fn lock_quota(tx: &mut Transaction<'_, Postgres>, owner_id: Uuid) -> anyhow::Result<()> {
@@ -66,6 +67,7 @@ pub(crate) async fn create_offer(
                              AND member.user_id = $3
                              AND member.status = 'active'
                              AND target.deleted_at IS NULL
+                             AND target.suspended_at IS NULL
                        ) AS target_valid
                 FROM workspaces workspace
                 WHERE workspace.id = $1 AND workspace.owner_user_id = $2
@@ -93,6 +95,7 @@ pub(crate) async fn create_offer(
                       AND member.user_id = $3
                       AND member.status = 'active'
                       AND target.deleted_at IS NULL
+                      AND target.suspended_at IS NULL
                 ) AS target_valid
                 FROM security_spaces space
                 WHERE space.id = $1 AND space.owner_user_id = $2
@@ -257,6 +260,7 @@ pub(crate) async fn accept_offer(
     actor_id: Uuid,
     transfer_id: Uuid,
     account_storage_limit: i64,
+    account_operation_storage_limit: i64,
 ) -> anyhow::Result<AcceptOfferResult> {
     let mut tx = pool.begin().await?;
     let offer = sqlx::query(
@@ -290,23 +294,26 @@ pub(crate) async fn accept_offer(
 
     let valid = match kind {
         OwnershipResourceKind::Workspace => {
-            let valid: bool = sqlx::query_scalar(
+            let valid = sqlx::query_scalar::<_, Uuid>(
                 r#"
-                SELECT EXISTS(
-                    SELECT 1 FROM workspaces workspace
-                    JOIN workspace_members target
-                      ON target.workspace_id = workspace.id
-                     AND target.user_id = $3 AND target.status = 'active'
-                    WHERE workspace.id = $1 AND workspace.owner_user_id = $2
-                      AND workspace.kind = 'team' AND workspace.deleted_at IS NULL
-                )
+                SELECT workspace.id
+                FROM workspaces workspace
+                JOIN workspace_members target
+                  ON target.workspace_id = workspace.id
+                 AND target.user_id = $3 AND target.status = 'active'
+                JOIN users recipient ON recipient.id = target.user_id
+                WHERE workspace.id = $1 AND workspace.owner_user_id = $2
+                  AND workspace.kind = 'team' AND workspace.deleted_at IS NULL
+                  AND recipient.deleted_at IS NULL AND recipient.suspended_at IS NULL
+                FOR UPDATE OF workspace, recipient
                 "#,
             )
             .bind(resource_id)
             .bind(current_owner_id)
             .bind(actor_id)
-            .fetch_one(&mut *tx)
-            .await?;
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
             if valid {
                 sqlx::query("UPDATE workspaces SET owner_user_id = $2 WHERE id = $1")
                     .bind(resource_id)
@@ -332,8 +339,10 @@ pub(crate) async fn accept_offer(
                 JOIN security_space_members target
                   ON target.space_id = space.id
                  AND target.user_id = $3 AND target.status = 'active'
+                JOIN users recipient ON recipient.id = target.user_id
                 WHERE space.id = $1 AND space.owner_user_id = $2 AND space.status = 'active'
-                FOR UPDATE OF space
+                  AND recipient.deleted_at IS NULL AND recipient.suspended_at IS NULL
+                FOR UPDATE OF space, recipient
                 "#,
             )
             .bind(resource_id)
@@ -345,13 +354,19 @@ pub(crate) async fn accept_offer(
                 false
             } else {
                 lock_quota(&mut tx, actor_id).await?;
-                let target_bytes: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(sum(size_padded), 0)::bigint FROM space_blobs WHERE owner_user_id = $1 AND space_id <> $2",
-                )
-                .bind(actor_id)
-                .bind(resource_id)
-                .fetch_one(&mut *tx)
-                .await?;
+                // Lock both account counters while the space owner row is
+                // locked. Operation appends cannot charge either side midway
+                // through a transfer.
+                sqlx::query("SELECT id FROM users WHERE id IN ($1, $2) ORDER BY id FOR UPDATE")
+                    .bind(current_owner_id)
+                    .bind(actor_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+                let target_bytes: i64 =
+                    sqlx::query_scalar("SELECT blob_storage_bytes FROM users WHERE id = $1")
+                        .bind(actor_id)
+                        .fetch_one(&mut *tx)
+                        .await?;
                 let transferred_bytes: i64 = sqlx::query_scalar(
                     "SELECT COALESCE(sum(size_padded), 0)::bigint FROM space_blobs WHERE space_id = $1",
                 )
@@ -360,25 +375,34 @@ pub(crate) async fn accept_offer(
                 .await?;
                 if target_bytes.saturating_add(transferred_bytes) > account_storage_limit {
                     tx.rollback().await?;
-                    return Ok(AcceptOfferResult::StorageQuotaExceeded);
+                    return Ok(AcceptOfferResult::BlobStorageQuotaExceeded);
+                }
+                let target_operation_bytes: i64 =
+                    sqlx::query_scalar("SELECT operation_bytes FROM users WHERE id = $1")
+                        .bind(actor_id)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                let transferred_operation_bytes: i64 =
+                    sqlx::query_scalar("SELECT operation_bytes FROM security_spaces WHERE id = $1")
+                        .bind(resource_id)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                if target_operation_bytes.saturating_add(transferred_operation_bytes)
+                    > account_operation_storage_limit
+                {
+                    tx.rollback().await?;
+                    return Ok(AcceptOfferResult::OperationStorageQuotaExceeded);
                 }
                 sqlx::query("UPDATE security_spaces SET owner_user_id = $2 WHERE id = $1")
                     .bind(resource_id)
                     .bind(actor_id)
                     .execute(&mut *tx)
                     .await?;
-                sqlx::query("UPDATE space_blobs SET owner_user_id = $2 WHERE space_id = $1")
-                    .bind(resource_id)
-                    .bind(actor_id)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query(
-                    "UPDATE blob_egress_reservations SET owner_user_id = $2 WHERE space_id = $1",
-                )
-                .bind(resource_id)
-                .bind(actor_id)
-                .execute(&mut *tx)
-                .await?;
+                // The security-space owner trigger atomically transfers both
+                // account operation usage and denormalized blob ownership.
+                // Historical egress remains charged to the owner who controlled
+                // the space when each download was admitted. Reassigning it here
+                // would make both monthly quotas and the immutable usage ledger lie.
                 sqlx::query(
                     "UPDATE security_space_members SET role = CASE WHEN user_id = $2 THEN 'owner' ELSE 'editor' END WHERE space_id = $1 AND user_id IN ($2, $3) AND status = 'active'",
                 )

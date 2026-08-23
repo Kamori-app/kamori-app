@@ -79,6 +79,7 @@ services:
       KAMORI_AUTH_RATE_LIMIT_PER_MINUTE: "1000"
       KAMORI_API_RATE_LIMIT_PER_MINUTE: "10000"
       KAMORI_CORS_ALLOW_ORIGINS: http://127.0.0.1:14173,http://localhost:14173,http://127.0.0.1:14174,http://localhost:14174
+      KAMORI_WEB_COOKIE_ORIGINS: http://127.0.0.1:14173,http://localhost:14173
       KAMORI_CORS_ALLOW_CREDENTIALS: "true"
       KAMORI_WEBAUTHN_RP_ID: localhost
       KAMORI_WEBAUTHN_RP_ORIGIN: http://localhost:14173
@@ -122,7 +123,6 @@ services:
       dockerfile: apps/web-frontend/Dockerfile
       args:
         VITE_KAMORI_API_BASE_URL: http://127.0.0.1:18080
-        VITE_KAMORI_WEB_CSRF_COOKIE_NAME: kamori_csrf
     environment:
       ORIGIN: http://127.0.0.1:14173
       HOST: 0.0.0.0

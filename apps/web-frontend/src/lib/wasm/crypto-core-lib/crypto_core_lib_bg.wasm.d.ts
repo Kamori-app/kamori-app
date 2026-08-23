@@ -1,16 +1,20 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const decrypt_group_key_from_peer: (a: any, b: number, c: number) => [number, number];
-export const decrypt_payload: (a: any, b: number, c: number, d: number, e: number) => [number, number];
+export const assign_pim_branch_graph: (a: number, b: number, c: any) => [number, number, number];
+export const decrypt_group_key_from_peer: (a: any, b: number, c: number) => [number, number, number, number];
+export const decrypt_payload: (a: any, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const decrypt_vault_bytes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-export const encrypt_group_key_for_peer: (a: number, b: number, c: number, d: number) => any;
-export const encrypt_payload: (a: any, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => any;
+export const derive_account_recovery_keypair: (a: number, b: number) => [number, number, number];
+export const encrypt_account_master_key_for_device: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const encrypt_group_key_for_peer: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const encrypt_payload: (a: any, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
 export const encrypt_vault_bytes: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const generate_qr_svg: (a: number, b: number) => [number, number, number, number];
 export const generate_web_device_identity: () => [number, number, number];
-export const generate_x25519_keypair: () => any;
+export const generate_x25519_keypair: () => [number, number, number];
 export const master_key_to_recovery_phrase: (a: number, b: number) => [number, number, number, number];
+export const materialize_pim_operation: (a: any, b: number, c: number) => [number, number, number, number];
 export const opaque_signin_finish: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const opaque_signin_start: (a: number, b: number) => [number, number, number];
 export const opaque_signup_finish: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
@@ -26,6 +30,6 @@ export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) =>
 export const __wbindgen_exn_store: (a: number) => void;
 export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
-export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_start: () => void;

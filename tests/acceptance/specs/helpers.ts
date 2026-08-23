@@ -43,6 +43,7 @@ export const signup = async (
 export const signIn = async (
   page: Page,
   account: Pick<AcceptanceAccount, "username" | "password">,
+  options: { allowLocalUnlock?: boolean } = {},
 ): Promise<void> => {
   let dialog = page.getByRole("dialog", { name: "Sign in" });
   if (!(await dialog.isVisible())) {
@@ -51,6 +52,9 @@ export const signIn = async (
   }
   await dialog.getByPlaceholder("Username").fill(account.username);
   await dialog.getByPlaceholder("Password", { exact: true }).fill(account.password);
+  if (options.allowLocalUnlock) {
+    await dialog.getByRole("checkbox").check();
+  }
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByText("Authenticated", { exact: true })).toBeVisible();
 };
@@ -71,14 +75,13 @@ export const createCollection = async (
   await page.getByPlaceholder("Collection name").fill(name);
   await page.getByRole("button", { name: "Create Collection" }).click();
   await expect(page.getByText(`Collection "${name}" created.`)).toBeVisible();
-  return page.evaluate(() => {
-    const raw = localStorage.getItem("kamori.web-frontend.app-state.v1");
-    if (!raw) throw new Error("web state was not persisted");
-    const parsed = JSON.parse(raw) as { collections?: Array<{ id?: string }> };
-    const id = parsed.collections?.at(-1)?.id;
-    if (!id) throw new Error("collection id was not persisted");
-    return id;
-  });
+  const collection = page
+    .locator("[data-space-id]")
+    .filter({ has: page.getByText(name, { exact: true }) });
+  await expect(collection).toHaveCount(1);
+  const id = await collection.getAttribute("data-space-id");
+  if (!id) throw new Error("created collection has no space id");
+  return id;
 };
 
 export const captureAccessToken = (page: Page): (() => string) => {

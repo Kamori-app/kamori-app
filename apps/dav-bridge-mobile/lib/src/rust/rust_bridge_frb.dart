@@ -69,10 +69,17 @@ class FrbRustBridgeApi implements RustBridgeApi {
     return LoginResult(
       username: result.username,
       accessToken: result.accessToken,
-      preauthToken: result.preauthToken,
+      totpContinuationToken: result.totpContinuationToken,
+      deviceEnrollmentToken: result.deviceEnrollmentToken,
       totpVerified: result.totpVerified,
       accountMasterKey: result.accountMasterKey?.toList(growable: false),
     );
+  }
+
+  @override
+  Future<DeviceSecrets> generateDeviceSecrets() async {
+    await _ensureInitialized();
+    return _fromFrbDevice(await frb_api.mobileGenerateDeviceSecrets());
   }
 
   @override
@@ -81,6 +88,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> accountMasterKey,
     required String platform,
+    String? deviceEnrollmentToken,
     DeviceSecrets? existingDevice,
   }) async {
     await _ensureInitialized();
@@ -92,6 +100,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
         accountMasterKey,
       ),
       platform: platform,
+      deviceEnrollmentToken: deviceEnrollmentToken,
       existingDevice:
           existingDevice == null ? null : _toFrbDevice(existingDevice),
     );
@@ -105,6 +114,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
               name: collection.name,
               cmk: collection.collectionKey.toList(growable: false),
               keyEpoch: collection.keyEpoch,
+              historyStartSeq: collection.historyStartSeq.toInt(),
+              currentStateStartSeq: collection.currentStateStartSeq.toInt(),
               role: collection.role,
             ),
           )
@@ -114,9 +125,15 @@ class FrbRustBridgeApi implements RustBridgeApi {
 
   /// Imports refresh token into Rust runtime memory.
   @override
-  Future<void> importRefreshToken({required String refreshToken}) async {
+  Future<void> importRefreshToken({
+    required String refreshToken,
+    required String rotationRequestId,
+  }) async {
     await _ensureInitialized();
-    await frb_api.mobileImportRefreshToken(refreshToken: refreshToken);
+    await frb_api.mobileImportRefreshToken(
+      refreshToken: refreshToken,
+      rotationRequestId: rotationRequestId,
+    );
   }
 
   /// Exports refresh token from Rust runtime memory.
@@ -124,6 +141,12 @@ class FrbRustBridgeApi implements RustBridgeApi {
   Future<String?> exportRefreshToken() async {
     await _ensureInitialized();
     return frb_api.mobileExportRefreshToken();
+  }
+
+  @override
+  Future<String?> exportRefreshRotationRequestId() async {
+    await _ensureInitialized();
+    return frb_api.mobileExportRefreshRotationRequestId();
   }
 
   /// Clears refresh token from Rust runtime memory.
@@ -172,9 +195,11 @@ class FrbRustBridgeApi implements RustBridgeApi {
     return synced.toInt();
   }
 
-  PimItem _fromFrbPimItem(frb_types.MobilePimItem item) => PimItem(
+      PimItem _fromFrbPimItem(frb_types.MobilePimItem item) => PimItem(
         spaceId: item.spaceId,
         resourceId: item.resourceId,
+        projectionId: item.projectionId,
+        headOperationId: item.headOperationId,
         kind: PimItemKind.fromWireName(item.resourceKind),
         title: item.title,
         completed: item.completed,
@@ -196,6 +221,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
   Future<PimItem> upsertPimItem({
     required String spaceId,
     String? resourceId,
+    String? projectionId,
+    String? headOperationId,
     required PimItemKind kind,
     required String title,
     bool completed = false,
@@ -208,6 +235,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
     final item = await frb_api.mobileUpsertPimItem(
       spaceId: spaceId,
       resourceId: resourceId,
+      projectionId: projectionId,
+      headOperationId: headOperationId,
       resourceKind: kind.wireName,
       title: title,
       completed: completed,
@@ -225,6 +254,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
     await frb_api.mobileDeletePimItem(
       spaceId: item.spaceId,
       resourceId: item.resourceId,
+      projectionId: item.projectionId,
+      headOperationId: item.headOperationId,
       resourceKind: item.kind.wireName,
     );
   }
@@ -238,6 +269,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
       name: collection.name,
       cmk: collection.collectionKey.toList(growable: false),
       keyEpoch: collection.keyEpoch,
+      historyStartSeq: collection.historyStartSeq.toInt(),
+      currentStateStartSeq: collection.currentStateStartSeq.toInt(),
       role: collection.role,
     );
   }
@@ -253,12 +286,14 @@ class FrbRustBridgeApi implements RustBridgeApi {
   Future<void> registerCollectionKey({
     required String collectionId,
     required int keyEpoch,
+    required int syncStartSeq,
     required List<int> cmk,
   }) async {
     await _ensureInitialized();
     await frb_api.mobileRegisterCollectionKey(
       collectionId: collectionId,
       keyEpoch: keyEpoch,
+      syncStartSeq: BigInt.from(syncStartSeq),
       cmk: _asFixed32Bytes('cmk', cmk),
     );
   }
@@ -286,6 +321,9 @@ class FrbRustBridgeApi implements RustBridgeApi {
     return IssuedInviteCode(
       code: issued.code,
       ttlMinutes: issued.ttlMinutes.toInt(),
+      keyEpoch: issued.keyEpoch.toInt(),
+      currentStateStartSeq: issued.currentStateStartSeq.toInt(),
+      collectionKey: issued.collectionKey.toList(growable: false),
     );
   }
 
@@ -299,6 +337,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
       collectionId: redeemed.collectionId,
       role: redeemed.role,
       keyEpoch: redeemed.keyEpoch.toInt(),
+      historyStartSeq: redeemed.historyStartSeq.toInt(),
+      currentStateStartSeq: redeemed.currentStateStartSeq.toInt(),
       collectionKey: redeemed.collectionKey.toList(growable: false),
     );
   }

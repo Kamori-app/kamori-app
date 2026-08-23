@@ -13,7 +13,8 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   LoginResult passwordLoginResult = const LoginResult(
     username: 'alice',
     accessToken: 'session-1',
-    preauthToken: null,
+    totpContinuationToken: null,
+    deviceEnrollmentToken: 'device-enrollment',
     totpVerified: true,
     accountMasterKey: <int>[
       1,
@@ -50,8 +51,46 @@ class _FakeRustBridgeApi implements RustBridgeApi {
       1,
     ],
   );
-  IssuedInviteCode issuedInviteCode =
-      const IssuedInviteCode(code: 'ABCD-EFGH-JKLM-NPQR', ttlMinutes: 60);
+  IssuedInviteCode issuedInviteCode = const IssuedInviteCode(
+    code: 'ABCD-EFGH-JKLM-NPQR',
+    ttlMinutes: 60,
+    keyEpoch: 2,
+    currentStateStartSeq: 4,
+    collectionKey: <int>[
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+    ],
+  );
   RedeemedInvite redeemedInvite = const RedeemedInvite(
     collectionId: 'collection-shared-1',
     role: 'editor',
@@ -92,13 +131,28 @@ class _FakeRustBridgeApi implements RustBridgeApi {
     ],
   );
 
+  @override
+  Future<DeviceSecrets> generateDeviceSecrets() async => DeviceSecrets(
+        deviceId: '00000000-0000-4000-8000-000000000001',
+        signingPrivateKey: List<int>.filled(32, 2),
+        hpkePrivateKey: List<int>.filled(32, 3),
+        hpkePublicKey: List<int>.filled(32, 4),
+      );
+
   int syncResult = 1;
   int registerCollectionKeyCalls = 0;
   int unregisterCollectionKeyCalls = 0;
   int moveCollectionToTrashCalls = 0;
   int configureCalls = 0;
+  int provisionCalls = 0;
+  int revokeCalls = 0;
+  int createCollectionCalls = 0;
+  bool failProvisioning = false;
+  Future<void> Function()? beforeProvision;
   String lastAccessToken = '';
   String? _refreshToken = 'mock-refresh-token';
+  String? _refreshRotationRequestId = '00000000-0000-4000-8000-000000000099';
+  List<CollectionEntry> provisionedCollections = const <CollectionEntry>[];
 
   @override
   Future<LoginResult> passwordLogin({
@@ -116,8 +170,14 @@ class _FakeRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> accountMasterKey,
     required String platform,
+    String? deviceEnrollmentToken,
     DeviceSecrets? existingDevice,
   }) async {
+    provisionCalls += 1;
+    await beforeProvision?.call();
+    if (failProvisioning) {
+      throw StateError('simulated provisioning failure');
+    }
     return ProvisionResult(
       accessToken: accessToken,
       device: existingDevice ??
@@ -127,13 +187,17 @@ class _FakeRustBridgeApi implements RustBridgeApi {
             hpkePrivateKey: List<int>.filled(32, 3),
             hpkePublicKey: List<int>.filled(32, 4),
           ),
-      collections: const <CollectionEntry>[],
+      collections: provisionedCollections,
     );
   }
 
   @override
-  Future<void> importRefreshToken({required String refreshToken}) async {
+  Future<void> importRefreshToken({
+    required String refreshToken,
+    required String rotationRequestId,
+  }) async {
     _refreshToken = refreshToken;
+    _refreshRotationRequestId = rotationRequestId;
   }
 
   @override
@@ -142,16 +206,24 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   }
 
   @override
+  Future<String?> exportRefreshRotationRequestId() async {
+    return _refreshRotationRequestId;
+  }
+
+  @override
   Future<void> clearRefreshToken() async {
     _refreshToken = null;
+    _refreshRotationRequestId = null;
   }
 
   @override
   Future<bool> revokeRefreshSession({
     required String cloudBaseUrl,
     required String refreshToken,
-  }) async =>
-      true;
+  }) async {
+    revokeCalls += 1;
+    return true;
+  }
 
   @override
   Future<void> configureSync({
@@ -178,6 +250,8 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   Future<PimItem> upsertPimItem({
     required String spaceId,
     String? resourceId,
+    String? projectionId,
+    String? headOperationId,
     required PimItemKind kind,
     required String title,
     bool completed = false,
@@ -186,9 +260,12 @@ class _FakeRustBridgeApi implements RustBridgeApi {
     String? startsAt,
     String? endsAt,
   }) async {
+    final logicalId = resourceId ?? '00000000-0000-4000-8000-000000000020';
     return PimItem(
       spaceId: spaceId,
-      resourceId: resourceId ?? '00000000-0000-4000-8000-000000000020',
+      resourceId: logicalId,
+      projectionId: projectionId ?? '$logicalId.ics',
+      headOperationId: '00000000-0000-4000-8000-000000000021',
       kind: kind,
       title: title,
       completed: completed,
@@ -204,11 +281,17 @@ class _FakeRustBridgeApi implements RustBridgeApi {
 
   @override
   Future<CollectionEntry> createCollection({required String name}) async {
-    return CollectionEntry(
-      id: '00000000-0000-4000-8000-000000000010',
+    createCollectionCalls += 1;
+    final collection = CollectionEntry(
+      id: '00000000-0000-4000-8000-${createCollectionCalls.toString().padLeft(12, '0')}',
       name: name,
       cmk: List<int>.filled(32, 5),
     );
+    provisionedCollections = <CollectionEntry>[
+      ...provisionedCollections,
+      collection,
+    ];
+    return collection;
   }
 
   @override
@@ -220,6 +303,7 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   Future<void> registerCollectionKey({
     required String collectionId,
     required int keyEpoch,
+    required int syncStartSeq,
     required List<int> cmk,
   }) async {
     registerCollectionKeyCalls += 1;
@@ -246,13 +330,33 @@ class _FakeRustBridgeApi implements RustBridgeApi {
 }
 
 class _FakeDeviceVaultStorage implements DeviceVaultStorage {
-  MobileDeviceVault? vault;
+  final Map<String, MobileDeviceVault> _vaults = <String, MobileDeviceVault>{};
+  MobileDeviceVault? legacyVault;
+
+  MobileDeviceVault? get vault =>
+      _vaults.isEmpty ? legacyVault : _vaults.values.first;
+
+  set vault(MobileDeviceVault? value) {
+    _vaults.clear();
+    legacyVault = null;
+    if (value != null) {
+      _vaults['${value.cloudBaseUrl}\u0000${value.username}'] = value;
+    }
+  }
 
   @override
-  Future<MobileDeviceVault?> read() async => vault;
+  Future<MobileDeviceVault?> read({
+    String? cloudBaseUrl,
+    String? username,
+  }) async {
+    if (cloudBaseUrl == null || username == null) return legacyVault;
+    return _vaults['$cloudBaseUrl\u0000$username'];
+  }
 
   @override
-  Future<void> write(MobileDeviceVault value) async => vault = value;
+  Future<void> write(MobileDeviceVault value) async {
+    _vaults['${value.cloudBaseUrl}\u0000${value.username}'] = value;
+  }
 }
 
 class _FakeSyncRuntimeStorage implements SyncRuntimeStorage {
@@ -276,19 +380,28 @@ class _FakeLocalCacheKeyStorage implements LocalCacheKeyStorage {
 }
 
 class _FakeRefreshTokenStorage implements RefreshTokenStorage {
-  final Map<String, String> _tokens = <String, String>{};
+  final Map<String, RefreshCredential> _tokens = <String, RefreshCredential>{};
   PendingRefreshRevocation? _pending;
 
   @override
   Future<void> write({
     required String cloudBaseUrl,
     required String refreshToken,
+    required String rotationRequestId,
   }) async {
-    _tokens[cloudBaseUrl] = refreshToken;
+    _tokens[cloudBaseUrl] = RefreshCredential(
+      refreshToken: refreshToken,
+      rotationRequestId: rotationRequestId,
+    );
   }
 
   @override
   Future<String?> read({required String cloudBaseUrl}) async {
+    return _tokens[cloudBaseUrl]?.refreshToken;
+  }
+
+  @override
+  Future<RefreshCredential?> readCredential({required String cloudBaseUrl}) async {
     return _tokens[cloudBaseUrl];
   }
 
@@ -315,8 +428,8 @@ class _FakeRefreshTokenStorage implements RefreshTokenStorage {
 }
 
 class _FakeSystemProjectionService implements SystemProjectionService {
-  bool calendarEnabled = false;
-  bool contactsEnabled = false;
+  final Set<String> calendarCollectionIds = <String>{};
+  final Set<String> contactsCollectionIds = <String>{};
   int projectCalls = 0;
   bool? lastCalendarRemoveChoice;
   bool? lastContactsRemoveChoice;
@@ -330,32 +443,38 @@ class _FakeSystemProjectionService implements SystemProjectionService {
   @override
   Future<SystemProjectionSettings> readSettings() async {
     return SystemProjectionSettings(
-      calendarEnabled: calendarEnabled,
-      contactsEnabled: contactsEnabled,
+      calendarCollectionIds: Set.unmodifiable(calendarCollectionIds),
+      contactsCollectionIds: Set.unmodifiable(contactsCollectionIds),
     );
   }
 
   @override
-  Future<void> enableCalendar(List<PimItem> items) async {
-    calendarEnabled = true;
+  Future<void> enableCalendar(String collectionId, List<PimItem> items) async {
+    calendarCollectionIds.add(collectionId);
     projectCalls += 1;
   }
 
   @override
-  Future<void> enableContacts(List<PimItem> items) async {
-    contactsEnabled = true;
+  Future<void> enableContacts(String collectionId, List<PimItem> items) async {
+    contactsCollectionIds.add(collectionId);
     projectCalls += 1;
   }
 
   @override
-  Future<void> disableCalendar({required bool removeProjectedData}) async {
-    calendarEnabled = false;
+  Future<void> disableCalendar(
+    String collectionId, {
+    required bool removeProjectedData,
+  }) async {
+    calendarCollectionIds.remove(collectionId);
     lastCalendarRemoveChoice = removeProjectedData;
   }
 
   @override
-  Future<void> disableContacts({required bool removeProjectedData}) async {
-    contactsEnabled = false;
+  Future<void> disableContacts(
+    String collectionId, {
+    required bool removeProjectedData,
+  }) async {
+    contactsCollectionIds.remove(collectionId);
     lastContactsRemoveChoice = removeProjectedData;
   }
 
@@ -373,6 +492,8 @@ void main() {
     Future<void> Function()? cancelPeriodicSync,
     DateTime Function()? now,
     _FakeSystemProjectionService? systemProjectionService,
+    _FakeSyncRuntimeStorage? syncRuntimeStorage,
+    _FakeDeviceVaultStorage? deviceVaultStorage,
   }) {
     return ProviderContainer(
       overrides: [
@@ -381,13 +502,13 @@ void main() {
           (ref) => refreshTokenStorage ?? _FakeRefreshTokenStorage(),
         ),
         syncRuntimeStorageProvider.overrideWith(
-          (ref) => _FakeSyncRuntimeStorage(),
+          (ref) => syncRuntimeStorage ?? _FakeSyncRuntimeStorage(),
         ),
         localCacheKeyStorageProvider.overrideWith(
           (ref) => _FakeLocalCacheKeyStorage(),
         ),
         deviceVaultStorageProvider.overrideWith(
-          (ref) => _FakeDeviceVaultStorage(),
+          (ref) => deviceVaultStorage ?? _FakeDeviceVaultStorage(),
         ),
         systemProjectionServiceProvider.overrideWith(
           (ref) => systemProjectionService ?? _FakeSystemProjectionService(),
@@ -417,6 +538,34 @@ void main() {
       expect(state.cloudBaseUrl, 'http://localhost:4000');
     });
 
+    test('settings reject insecure remote origins', () async {
+      final bridge = _FakeRustBridgeApi();
+      final container = createContainer(bridge: bridge);
+      addTearDown(container.dispose);
+      final controller = container.read(bridgeControllerProvider.notifier);
+
+      await controller.updateCloudBaseUrl('http://example.com');
+
+      final state = container.read(bridgeControllerProvider);
+      expect(state.cloudBaseUrl, 'https://api.kamori.app');
+      expect(state.error, contains('HTTPS'));
+    });
+
+    test('authenticated sessions cannot silently switch server origin',
+        () async {
+      final bridge = _FakeRustBridgeApi();
+      final container = createContainer(bridge: bridge);
+      addTearDown(container.dispose);
+      final controller = container.read(bridgeControllerProvider.notifier);
+
+      await controller.loginWithPassword(username: 'alice', password: 'secret');
+      await controller.updateCloudBaseUrl('https://other.example');
+
+      final state = container.read(bridgeControllerProvider);
+      expect(state.cloudBaseUrl, 'https://api.kamori.app');
+      expect(state.error, contains('Sign out'));
+    });
+
     test('password login authenticates and configures sync', () async {
       final bridge = _FakeRustBridgeApi();
       var scheduleCalls = 0;
@@ -438,11 +587,159 @@ void main() {
       expect(scheduleCalls, 1);
     });
 
+    test('persists a new device identity before server provisioning', () async {
+      final bridge = _FakeRustBridgeApi();
+      final vault = _FakeDeviceVaultStorage();
+      bridge.beforeProvision = () async {
+        expect(vault.vault, isNotNull);
+        expect(
+          vault.vault!.device.deviceId,
+          '00000000-0000-4000-8000-000000000001',
+        );
+      };
+      final container = createContainer(
+        bridge: bridge,
+        deviceVaultStorage: vault,
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .loginWithPassword(username: 'alice', password: 'secret');
+
+      expect(container.read(bridgeControllerProvider).isAuthenticated, isTrue);
+      expect(bridge.provisionCalls, 1);
+    });
+
+    test('failed provisioning revokes the session but keeps device keys',
+        () async {
+      final bridge = _FakeRustBridgeApi()..failProvisioning = true;
+      final vault = _FakeDeviceVaultStorage();
+      final tokens = _FakeRefreshTokenStorage();
+      final container = createContainer(
+        bridge: bridge,
+        deviceVaultStorage: vault,
+        refreshTokenStorage: tokens,
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .loginWithPassword(username: 'alice', password: 'secret');
+
+      final state = container.read(bridgeControllerProvider);
+      expect(state.isAuthenticated, isFalse);
+      expect(state.accessToken, isNull);
+      expect(vault.vault, isNotNull);
+      expect(bridge.revokeCalls, 1);
+      expect(
+        await tokens.read(cloudBaseUrl: 'https://api.kamori.app'),
+        isNull,
+      );
+    });
+
+    test('failed provisioning for another account preserves existing keys',
+        () async {
+      final bridge = _FakeRustBridgeApi()
+        ..failProvisioning = true
+        ..passwordLoginResult = LoginResult(
+          username: 'bob',
+          accessToken: 'session-bob',
+          totpContinuationToken: null,
+          deviceEnrollmentToken: 'device-enrollment-bob',
+          totpVerified: true,
+          accountMasterKey: List<int>.filled(32, 21),
+        );
+      final vault = _FakeDeviceVaultStorage();
+      final aliceDevice = DeviceSecrets(
+        deviceId: '00000000-0000-4000-8000-0000000000aa',
+        signingPrivateKey: List<int>.filled(32, 12),
+        hpkePrivateKey: List<int>.filled(32, 13),
+        hpkePublicKey: List<int>.filled(32, 14),
+      );
+      await vault.write(MobileDeviceVault(
+        cloudBaseUrl: 'https://api.kamori.app',
+        username: 'alice',
+        accountMasterKey: List<int>.filled(32, 11),
+        device: aliceDevice,
+      ));
+      final container = createContainer(
+        bridge: bridge,
+        deviceVaultStorage: vault,
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .loginWithPassword(username: 'bob', password: 'secret');
+
+      expect(
+        (await vault.read(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'alice',
+        ))
+            ?.device
+            .deviceId,
+        aliceDevice.deviceId,
+      );
+      expect(
+        await vault.read(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'bob',
+        ),
+        isNotNull,
+      );
+    });
+
+    test('restored background preference remains disabled', () async {
+      final bridge = _FakeRustBridgeApi();
+      final runtime = _FakeSyncRuntimeStorage()
+        ..snapshot = const MobileSyncRuntimeSnapshot(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'alice',
+          sqlitePath: '.kamori/mobile-cache.sqlite3',
+          accessToken: 'persisted-access',
+          collections: <CollectionEntry>[],
+          backgroundSyncEnabled: false,
+        );
+      final vault = _FakeDeviceVaultStorage()
+        ..vault = MobileDeviceVault(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'alice',
+          accountMasterKey: List<int>.filled(32, 1),
+          device: DeviceSecrets(
+            deviceId: '00000000-0000-4000-8000-000000000001',
+            signingPrivateKey: List<int>.filled(32, 2),
+            hpkePrivateKey: List<int>.filled(32, 3),
+            hpkePublicKey: List<int>.filled(32, 4),
+          ),
+        );
+      var scheduleCalls = 0;
+      final container = createContainer(
+        bridge: bridge,
+        syncRuntimeStorage: runtime,
+        deviceVaultStorage: vault,
+        schedulePeriodicSync: () async => scheduleCalls += 1,
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .restorePersistedSession();
+
+      final state = container.read(bridgeControllerProvider);
+      expect(state.isAuthenticated, isTrue);
+      expect(state.backgroundSyncEnabled, isFalse);
+      expect(scheduleCalls, 0);
+      expect(bridge.provisionCalls, 1);
+    });
+
     test('password login surfaces totp required message', () async {
       final bridge = _FakeRustBridgeApi()
         ..passwordLoginResult = const LoginResult(
           accessToken: null,
-          preauthToken: 'preauth',
+          totpContinuationToken: 'continuation',
+          deviceEnrollmentToken: null,
           totpVerified: false,
         );
       final container = createContainer(bridge: bridge);
@@ -463,6 +760,7 @@ void main() {
       addTearDown(container.dispose);
       final controller = container.read(bridgeControllerProvider.notifier);
 
+      await controller.loginWithPassword(username: 'alice', password: 'secret');
       await controller.syncNow();
 
       final state = container.read(bridgeControllerProvider);
@@ -543,20 +841,67 @@ void main() {
       final controller = container.read(bridgeControllerProvider.notifier);
 
       await controller.loginWithPassword(username: 'alice', password: 'secret');
-      expect(container.read(bridgeControllerProvider).calendarProjectionEnabled,
-          isFalse);
+      await controller.createCollection('Personal');
+      final collectionId =
+          container.read(bridgeControllerProvider).collections.single.id;
+      expect(
+        container
+            .read(bridgeControllerProvider)
+            .calendarProjectionCollectionIds,
+        isEmpty,
+      );
 
-      await controller.setCalendarProjectionEnabled(true);
-      expect(container.read(bridgeControllerProvider).calendarProjectionEnabled,
-          isTrue);
+      await controller.setCalendarProjectionEnabled(collectionId, true);
+      expect(
+        container
+            .read(bridgeControllerProvider)
+            .calendarProjectionCollectionIds,
+        {collectionId},
+      );
 
       await controller.setCalendarProjectionEnabled(
+        collectionId,
         false,
         removeProjectedData: true,
       );
-      expect(container.read(bridgeControllerProvider).calendarProjectionEnabled,
-          isFalse);
+      expect(
+        container
+            .read(bridgeControllerProvider)
+            .calendarProjectionCollectionIds,
+        isEmpty,
+      );
       expect(projection.lastCalendarRemoveChoice, isTrue);
+    });
+
+    test('system projection remains isolated to the selected collection',
+        () async {
+      final bridge = _FakeRustBridgeApi();
+      final projection = _FakeSystemProjectionService();
+      final container = createContainer(
+        bridge: bridge,
+        systemProjectionService: projection,
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(bridgeControllerProvider.notifier);
+
+      await controller.loginWithPassword(username: 'alice', password: 'secret');
+      await controller.createCollection('Personal');
+      await controller.createCollection('Work');
+      final collections = container.read(bridgeControllerProvider).collections;
+
+      await controller.setContactsProjectionEnabled(collections.first.id, true);
+
+      expect(
+        container
+            .read(bridgeControllerProvider)
+            .contactsProjectionCollectionIds,
+        {collections.first.id},
+      );
+      expect(projection.contactsCollectionIds, {collections.first.id});
+      expect(
+        projection.contactsCollectionIds.contains(collections.last.id),
+        isFalse,
+      );
     });
 
     test('reader spaces reject organizer writes before calling the bridge',
@@ -668,6 +1013,12 @@ void main() {
       expect(issued, isNotNull);
       expect(issued!.code, 'ABCD-EFGH-JKLM-NPQR');
       expect(issued.ttlMinutes, 60);
+      final rotated =
+          container.read(bridgeControllerProvider).collections.single;
+      expect(rotated.keyEpoch, 2);
+      expect(rotated.historyStartSeq, 0);
+      expect(rotated.currentStateStartSeq, 4);
+      expect(rotated.cmk, everyElement(2));
     });
 
     test('redeemInviteCode adds shared collection', () async {

@@ -35,6 +35,16 @@ pub(crate) struct RefreshRotation<'a> {
     pub(crate) expires_at: OffsetDateTime,
 }
 
+pub(crate) struct DeviceAuthorizationRefresh<'a> {
+    pub(crate) user_id: Uuid,
+    pub(crate) device_secret: &'a str,
+    pub(crate) flow_id: Uuid,
+    pub(crate) rotation_key: &'a [u8; 32],
+    pub(crate) user_agent: Option<&'a str>,
+    pub(crate) ip_address: Option<&'a str>,
+    pub(crate) expires_at: OffsetDateTime,
+}
+
 #[derive(Debug)]
 struct StoredRefreshToken {
     id: Uuid,
@@ -43,10 +53,8 @@ struct StoredRefreshToken {
     revoked_at: Option<OffsetDateTime>,
     replaced_by_token_id: Option<Uuid>,
     rotation_request_id: Option<Uuid>,
-    rotated_at: Option<OffsetDateTime>,
+    device_id: Option<Uuid>,
 }
-
-const IDEMPOTENT_ROTATION_RETRY_SECONDS: i64 = 30;
 
 fn generate_refresh_token_and_hash() -> (String, Vec<u8>) {
     let mut raw = [0u8; 32];
@@ -66,6 +74,21 @@ fn derive_refresh_token(
     mac.update(b"kamori.refresh-rotation.v1\0");
     mac.update(current_token.as_bytes());
     mac.update(rotation_request_id.as_bytes());
+    let raw = mac.finalize().into_bytes();
+    let token = URL_SAFE_NO_PAD.encode(raw);
+    let token_hash = Sha256::digest(raw).to_vec();
+    (token, token_hash)
+}
+
+fn derive_device_authorization_refresh_token(
+    device_secret: &str,
+    flow_id: Uuid,
+    rotation_key: &[u8; 32],
+) -> (String, Vec<u8>) {
+    let mut mac = Hmac::<Sha256>::new_from_slice(rotation_key).expect("valid HMAC key");
+    mac.update(b"kamori.device-authorization-refresh.v1\0");
+    mac.update(flow_id.as_bytes());
+    mac.update(device_secret.as_bytes());
     let raw = mac.finalize().into_bytes();
     let token = URL_SAFE_NO_PAD.encode(raw);
     let token_hash = Sha256::digest(raw).to_vec();
@@ -103,6 +126,71 @@ pub(crate) async fn create_refresh_token(
     Ok(IssuedRefreshToken { token_id, token })
 }
 
+/// Creates one stable refresh session for a device-authorization flow.
+/// Retries after a lost HTTP response resolve the existing active row instead
+/// of allocating orphaned sessions or storing plaintext tokens in Valkey.
+pub(crate) async fn create_device_authorization_refresh_token(
+    pool: &PgPool,
+    request: DeviceAuthorizationRefresh<'_>,
+) -> Result<IssuedRefreshToken, ApiError> {
+    let DeviceAuthorizationRefresh {
+        user_id,
+        device_secret,
+        flow_id,
+        rotation_key,
+        user_agent,
+        ip_address,
+        expires_at,
+    } = request;
+    let (token, token_hash) =
+        derive_device_authorization_refresh_token(device_secret, flow_id, rotation_key);
+    let proposed_token_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO refresh_tokens (
+            id, user_id, token_hash, expires_at, user_agent, ip_address
+        )
+        SELECT $1, active_user.id, $3, $4, $5, $6
+        FROM users active_user
+        WHERE active_user.id = $2
+          AND active_user.deleted_at IS NULL
+          AND active_user.suspended_at IS NULL
+        ON CONFLICT (token_hash) DO NOTHING
+        "#,
+    )
+    .bind(proposed_token_id)
+    .bind(user_id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .bind(user_agent)
+    .bind(ip_address)
+    .execute(pool)
+    .await
+    .map_err(internal_error)?;
+
+    let token_id: Uuid = sqlx::query_scalar(
+        r#"
+        SELECT token.id
+        FROM refresh_tokens token
+        JOIN users active_user ON active_user.id = token.user_id
+        WHERE token.token_hash = $1
+          AND token.user_id = $2
+          AND token.revoked_at IS NULL
+          AND token.expires_at > now()
+          AND active_user.deleted_at IS NULL
+          AND active_user.suspended_at IS NULL
+        "#,
+    )
+    .bind(&token_hash)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| unauthenticated("device authorization was already consumed"))?;
+
+    Ok(IssuedRefreshToken { token_id, token })
+}
+
 async fn find_refresh_token_for_update(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     token_hash: &[u8],
@@ -110,7 +198,7 @@ async fn find_refresh_token_for_update(
     let row = sqlx::query(
         r#"
         SELECT id, user_id, expires_at, revoked_at, replaced_by_token_id,
-               rotation_request_id, rotated_at
+               rotation_request_id, device_id
         FROM refresh_tokens
         WHERE token_hash = $1
         FOR UPDATE
@@ -134,7 +222,7 @@ async fn find_refresh_token_for_update(
             .try_get("replaced_by_token_id")
             .map_err(internal_error)?,
         rotation_request_id: row.try_get("rotation_request_id").map_err(internal_error)?,
-        rotated_at: row.try_get("rotated_at").map_err(internal_error)?,
+        device_id: row.try_get("device_id").map_err(internal_error)?,
     }))
 }
 
@@ -159,11 +247,7 @@ pub(crate) async fn rotate_refresh_token(
         .ok_or_else(|| unauthenticated("invalid refresh token"))?;
 
     if current.revoked_at.is_some() {
-        let retry_deadline = current
-            .rotated_at
-            .map(|value| value + time::Duration::seconds(IDEMPOTENT_ROTATION_RETRY_SECONDS));
         if current.rotation_request_id == Some(rotation_request_id)
-            && retry_deadline.is_some_and(|deadline| now <= deadline)
             && let Some(replacement_id) = current.replaced_by_token_id
         {
             let username = sqlx::query_scalar::<_, String>(
@@ -247,9 +331,9 @@ pub(crate) async fn rotate_refresh_token(
     sqlx::query(
         r#"
         INSERT INTO refresh_tokens (
-            id, user_id, token_hash, expires_at, user_agent, ip_address
+            id, user_id, token_hash, expires_at, user_agent, ip_address, device_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(new_token_id)
@@ -258,6 +342,7 @@ pub(crate) async fn rotate_refresh_token(
     .bind(expires_at)
     .bind(user_agent)
     .bind(ip_address)
+    .bind(current.device_id)
     .execute(&mut *tx)
     .await
     .map_err(internal_error)?;
@@ -335,10 +420,11 @@ pub(crate) async fn revoke_refresh_token_by_id_for_user(
 pub(crate) async fn list_refresh_sessions(
     pool: &PgPool,
     user_id: Uuid,
+    current_session_id: Uuid,
 ) -> Result<Vec<SessionSummary>, ApiError> {
     let rows = sqlx::query(
         r#"
-        SELECT id, user_agent, ip_address,
+        SELECT id, device_id, id = $2 AS is_current, user_agent, ip_address,
                (extract(epoch FROM created_at) * 1000)::bigint AS created_at_ms,
                (extract(epoch FROM last_used_at) * 1000)::bigint AS last_used_at_ms,
                (extract(epoch FROM expires_at) * 1000)::bigint AS expires_at_ms,
@@ -351,6 +437,7 @@ pub(crate) async fn list_refresh_sessions(
         "#,
     )
     .bind(user_id)
+    .bind(current_session_id)
     .fetch_all(pool)
     .await
     .map_err(internal_error)?;
@@ -358,6 +445,8 @@ pub(crate) async fn list_refresh_sessions(
         .map(|row| {
             Ok(SessionSummary {
                 refresh_token_id: row.try_get("id").map_err(internal_error)?,
+                device_id: row.try_get("device_id").map_err(internal_error)?,
+                is_current: row.try_get("is_current").map_err(internal_error)?,
                 user_agent: row.try_get("user_agent").map_err(internal_error)?,
                 ip_address: row.try_get("ip_address").map_err(internal_error)?,
                 created_at_unix_ms: row.try_get("created_at_ms").map_err(internal_error)?,
@@ -399,69 +488,6 @@ pub(crate) async fn update_user_password_file_and_revoke_refresh_sessions(
     .execute(&mut *tx)
     .await
     .map_err(internal_error)?;
-
-    tx.commit().await.map_err(internal_error)?;
-    Ok(())
-}
-
-pub(crate) async fn apply_account_recovery_reset(
-    pool: &PgPool,
-    user_id: Uuid,
-    opaque_record: &[u8],
-    encrypted_master_key: &[u8],
-) -> Result<(), ApiError> {
-    let now = OffsetDateTime::now_utc();
-    let mut tx = pool.begin().await.map_err(internal_error)?;
-
-    let updated = sqlx::query(
-        "UPDATE users SET opaque_record = $2, encrypted_master_key = $3, totp_secret_ciphertext = NULL WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL",
-    )
-    .bind(user_id)
-    .bind(opaque_record)
-    .bind(encrypted_master_key)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal_error)?;
-    if updated.rows_affected() == 0 {
-        tx.rollback().await.map_err(internal_error)?;
-        return Err(unauthenticated("user not found"));
-    }
-
-    sqlx::query(
-        "UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, $2) WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal_error)?;
-
-    sqlx::query("DELETE FROM user_passkeys WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal_error)?;
-
-    sqlx::query(
-        "UPDATE devices SET status = 'revoked', revoked_at = COALESCE(revoked_at, $2) WHERE user_id = $1 AND status = 'active'",
-    )
-    .bind(user_id)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .map_err(internal_error)?;
-
-    sqlx::query("DELETE FROM security_space_device_keys WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal_error)?;
-
-    sqlx::query("DELETE FROM account_recovery_codes WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal_error)?;
 
     tx.commit().await.map_err(internal_error)?;
     Ok(())

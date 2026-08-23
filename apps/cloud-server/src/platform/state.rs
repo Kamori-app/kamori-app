@@ -13,7 +13,10 @@ use object_store::ObjectStore;
 use sqlx::PgPool;
 use std::sync::Arc;
 use time::Duration;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
+
+const PROCESS_BLOB_DOWNLOAD_SAFETY_CAP: usize = 4096;
 
 /// Shared application state.
 #[derive(Clone)]
@@ -22,7 +25,7 @@ pub struct AppState {
     pub pool: PgPool,
     /// Runtime configuration.
     pub config: Config,
-    /// JWT manager for access and preauth tokens.
+    /// JWT manager for access and scoped proof tokens.
     pub jwt: JwtManager,
     /// Valkey-backed store for OPAQUE and passkey states.
     pub state_store: Arc<dyn StateStore>,
@@ -30,6 +33,12 @@ pub struct AppState {
     pub object_store: Arc<dyn ObjectStore>,
     /// Low-cardinality process metrics with no user or content labels.
     pub http_metrics: Arc<HttpMetrics>,
+    /// Process-local memory/backpressure guard for streamed blob delivery.
+    pub blob_download_semaphore: Arc<Semaphore>,
+    /// Process-local concurrency cap for large authenticated request bodies.
+    pub large_request_semaphore: Arc<Semaphore>,
+    /// Aggregate request-body budget measured in 64 KiB permits.
+    pub request_byte_semaphore: Arc<Semaphore>,
     /// OPAQUE server instance.
     pub opaque: Arc<OpaqueServer>,
     /// Passkey service instance.
@@ -49,6 +58,8 @@ pub struct ValidatedToken {
     pub kind: TokenKind,
     /// Optional username snapshot from claims.
     pub username: Option<String>,
+    /// Refresh-session id bound to a session access token.
+    pub session_id: Option<Uuid>,
 }
 
 impl AppState {
@@ -64,6 +75,16 @@ impl AppState {
         let admin_passkeys = Arc::new(PasskeyService::new_admin(&config, state_store.clone())?);
         let object_store = build_object_store(&config)?;
         let http_metrics = Arc::new(HttpMetrics::default());
+        // PostgreSQL enforces the runtime-configurable cross-node limit. This
+        // semaphore is a fixed process memory/backpressure ceiling so an
+        // operator reduction takes effect without rebuilding application state.
+        let blob_download_semaphore = Arc::new(Semaphore::new(PROCESS_BLOB_DOWNLOAD_SAFETY_CAP));
+        let large_request_semaphore = Arc::new(Semaphore::new(usize::try_from(
+            config.max_concurrent_large_requests,
+        )?));
+        let request_byte_semaphore = Arc::new(Semaphore::new(usize::try_from(
+            config.max_inflight_request_bytes.div_ceil(64 * 1024),
+        )?));
 
         Ok(Self {
             pool,
@@ -72,21 +93,14 @@ impl AppState {
             state_store,
             object_store,
             http_metrics,
+            blob_download_semaphore,
+            large_request_semaphore,
+            request_byte_semaphore,
             opaque,
             passkeys,
             admin_passkeys,
             account_state_checks_enabled: true,
         })
-    }
-
-    /// Issues a short-lived preauth JWT.
-    pub fn issue_preauth_token(&self, user_id: Uuid, username: &str) -> Result<String> {
-        self.jwt.issue_token(
-            TokenKind::PreAuth,
-            user_id,
-            Some(username),
-            self.config.jwt_preauth_ttl_seconds,
-        )
     }
 
     /// Issues a short-lived account-recovery JWT.
@@ -95,24 +109,41 @@ impl AppState {
             TokenKind::AccountRecovery,
             user_id,
             Some(username),
+            None,
             self.config.jwt_account_recovery_ttl_seconds,
         )
     }
 
     /// Issues an access JWT.
-    pub fn issue_access_token(&self, user_id: Uuid, username: &str) -> Result<String> {
+    pub fn issue_access_token(
+        &self,
+        user_id: Uuid,
+        username: &str,
+        session_id: Uuid,
+    ) -> Result<String> {
         self.jwt.issue_token(
             TokenKind::Session,
             user_id,
             Some(username),
+            Some(session_id),
             self.config.access_token_ttl_seconds,
         )
     }
 
     /// Issues a five-minute token proving a fresh OPAQUE reauthentication.
-    pub fn issue_reauth_token(&self, user_id: Uuid, username: &str) -> Result<String> {
-        self.jwt
-            .issue_token(TokenKind::Reauth, user_id, Some(username), 5 * 60)
+    pub fn issue_reauth_token(
+        &self,
+        user_id: Uuid,
+        username: &str,
+        session_id: Uuid,
+    ) -> Result<String> {
+        self.jwt.issue_token(
+            TokenKind::Reauth,
+            user_id,
+            Some(username),
+            Some(session_id),
+            5 * 60,
+        )
     }
 
     /// Returns refresh token TTL from config.
@@ -128,6 +159,7 @@ impl AppState {
             user_id,
             kind: claims.kind,
             username: claims.username,
+            session_id: claims.session_id,
         })
     }
 }

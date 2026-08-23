@@ -33,7 +33,7 @@ Pulumi state is stored in the private
 `Pulumi.yaml`. Local operators and GitHub Actions use the same backend. Its
 dedicated bucket-scoped Application Key is a bootstrap credential supplied as
 AWS-compatible environment variables; it is not stored inside Pulumi config.
-Pulumi CLI and the Go SDK are pinned to `3.258.0`. The backend deliberately uses
+Pulumi CLI and the Go SDK are pinned to `3.259.0`. The backend deliberately uses
 AWS SDK v2 with optional request and response checksums limited to
 `when_required`; local operators and CI must keep this complete contract
 aligned. It has completed production previews and updates against the B2
@@ -76,8 +76,9 @@ internet. If first issuance reports an ACME delegation error, wait at least the
 certificate or add a scheduled renewal workflow.
 
 Create separate bucket-scoped Backblaze keys for the API, PostgreSQL backup,
-and blob-replication jobs. All three are encrypted Pulumi inputs; cloud-init
-delivers each credential only to the role that needs it. SSH listens on TCP
+and blob-replication jobs. All three are encrypted Pulumi inputs; the protected
+host-configuration channel delivers each credential only to the role that
+needs it. SSH listens on TCP
 port `2022` on every node. Only the ops/bastion node has a public address and
 exposes that port, protected by key-only authentication and Fail2ban. App and
 database nodes have private addresses only and route required outbound traffic
@@ -91,14 +92,14 @@ to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud
 or a `PULUMI_ACCESS_TOKEN`.
 
 VM creation itself uses the Hetzner API, not SSH. Pulumi generates a persistent
-SSH host CA, a certified host identity per node, and a dedicated deployment
-identity. Cloud-init installs each generated private key, its matching raw
-public key, and its host certificate as one identity before validating the
-hardened OpenSSH configuration. The files are first staged under root-only
+SSH host CA, a host identity per node, a dedicated configuration identity, and
+a separate release-deployment identity. Cloud-init installs each generated
+private key and its matching raw public key before validating the hardened
+OpenSSH configuration. The files are first staged under root-only
 `/var/lib/kamori/bootstrap` and installed into `/etc/ssh` from `runcmd`, after
 Ubuntu's `cc_ssh` module has finished deleting and generating image host keys.
-This ordering prevents cloud-init from silently separating the certificate
-from its Pulumi-managed private key. Any image-started SSH daemon is stopped
+This ordering prevents cloud-init from replacing the Pulumi-managed identity.
+Any image-started SSH daemon is stopped
 after validation so the socket-activated process cannot retain an older key in
 memory.
 Before that validation, cloud-init creates `/run/sshd` with the same ownership
@@ -112,18 +113,27 @@ remains the break-glass identity. Do not temporarily expose `22`; use the
 Hetzner Console for failed first-boot recovery.
 
 Pulumi also generates the private PostgreSQL CA, server/client certificates,
-the restricted jobs-role password, the pgBackRest repository cipher, and the
-Grafana administrator password. These values are encrypted in Pulumi state and
-installed only through role-specific cloud-init. No local PKI directory or
-manual `/etc/kamori` edits are part of provisioning.
+finite-lived SSH host certificates, the restricted jobs-role password, the
+pgBackRest repository cipher, and the Grafana administrator password. These
+values are encrypted in Pulumi state. After resource creation, the same
+infrastructure workflow sends host configuration through a distinct,
+forced-command SSH identity and a root-owned, role-checking installer. App and
+database hosts are reached only through the ops bastion. Rotating a runtime
+secret or a PostgreSQL/SSH leaf certificate therefore updates hosts in place;
+it does not put secrets in GitHub and does not replace a VM. No local PKI
+directory or manual `/etc/kamori` edits are part of provisioning.
 
 ## Application rollout
 
-Base nodes are fully provisioned and hardened by cloud-init and expose
-node-exporter only on the private network. The manually approved `Deploy cloud
-server` workflow builds four GHCR images, addresses them by digest, and rolls
-the two app nodes from a GitHub-hosted runner through the ops SSH bastion. The
-workflow logs in with its short-lived GitHub token and may invoke only
+Cloud-init creates only the immutable host baseline, raw SSH trust, and the
+restricted configuration channel. The infrastructure workflow then applies
+the encrypted role configuration and exposes node-exporter only on the private
+network. The manually approved `Deploy cloud server` workflow publishes four
+GHCR images once, then activates the exact immutable digests on one explicitly
+selected app node per dispatch. Promotion is `publish`, `deploy-app-1`, external
+monitoring and operator review, then `deploy-app-2`; CI/CD does not infer health
+from a successful process start. The workflow logs in with its short-lived
+GitHub token and may invoke only
 preinstalled root-owned deployment entrypoints through the restricted `deploy`
 account. The bastion key permits only forwarding to the two app SSH endpoints.
 The workflow never copies runner-controlled executable code into a privileged
@@ -149,9 +159,10 @@ explicit and reviewable:
 
 1. `retire` disables Pulumi and Hetzner delete/rebuild protection without
    changing host configuration.
-2. `replace` installs the generated identities and passwords, recreates the four
-   empty servers, preserves and reattaches the PostgreSQL volume, removes
-   public networking from app/DB, and bootstraps every service.
+2. `replace` installs the generated raw identities and restricted configuration
+   channel, recreates the four empty servers, preserves and reattaches the
+   PostgreSQL volume, removes public networking from app/DB, and then applies
+   each role configuration in place.
 3. `protect` reenables Pulumi and Hetzner protection after the replacement is
    complete.
 

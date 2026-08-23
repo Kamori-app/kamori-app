@@ -1,10 +1,23 @@
 {
 	auto_https off
 	admin off
+	servers {
+		# Hetzner is the only public HTTP peer. Strict right-to-left parsing
+		# preserves its client address without trusting values prepended by a
+		# caller. The API repeats the same trust walk after the Docker hop.
+		trusted_proxies static 10.42.0.5/32
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
 }
 
 :8080 {
 	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
 
 	@api host api.kamori.app
 	handle @api {

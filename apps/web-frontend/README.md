@@ -7,22 +7,24 @@ SvelteKit web frontend for Kamori (landing + web app).
 `web-frontend` is the browser client for Kamori.
 It contains:
 - landing page (`/`),
-- web app area (`/app`) for auth, collections, sync stats, and invite-code sharing.
+- web app area (`/app`) for authentication, offline PIM, devices, sessions,
+  collections, sync, recovery, and invite-code sharing.
 
 Main responsibilities:
 - Full OPAQUE auth flow against `cloud-server` (start/finish executed in browser runtime).
 - OPAQUE password-change flow in web settings (`/auth/password/change/*`).
 - TOTP setup/disable UI in web settings (QR generated locally in browser from `otpauth_uri` + manual key fallback).
-- Account recovery-code UI for:
-  - authenticated regeneration in settings,
-  - unauthenticated account recovery in sign-in modal.
+- Separate security UX for:
+  - one-time TOTP backup-code regeneration in settings,
+  - 24-word data recovery-kit display and account recovery.
 - Passkey login flow against `cloud-server` (discoverable flow - no username input required).
 - Passkey management API support with client-encrypted passkey labels.
-- Client-side collection keys, device keys, materialized PIM state, and durable
-  outbox encrypted at rest in IndexedDB.
+- Client-side collection keys, device keys, materialized PIM state, and a
+  causally ordered durable outbox encrypted at rest in IndexedDB.
 - Invite-code generation/redeem with client-side code handling.
 - MessagePack transport to backend APIs.
-- Documentation-first landing sections (`Why`, `What`, `How`, `Downloads`, `Compatibility`, `Security`, `Sharing`, `FAQ`).
+- English-first localized landing sections (`Product`, `How it works`, `Apps`,
+  `Security`, `Questions`) with direct document and download links.
 
 Local DAV runtime and local SQLite are out of scope for web.
 
@@ -31,16 +33,34 @@ Local DAV runtime and local SQLite are out of scope for web.
 - `access_token` is attached as Bearer token to authenticated API requests.
 - `refresh_token` is used only for `POST /auth/refresh` when access token is expired.
 - Web app uses cookie transport (`X-Kamori-Refresh-Transport: cookie`): refresh token is read/written only via `HttpOnly` cookie.
-- Web app sends `X-Kamori-Csrf-Token` from CSRF cookie for cookie-mode `POST /auth/refresh` and `POST /auth/logout`.
+- The API keeps both refresh and CSRF cookies host-only and `HttpOnly`. Login returns the same
+  CSRF value in its CORS-protected MessagePack response; after a page reload the
+  web app recovers it through `POST /auth/csrf`, which requires the refresh
+  cookie and an allowed `Origin`/`Referer`.
+- The web app keeps that CSRF value in memory and sends it in
+  `X-Kamori-Csrf-Token` for cookie-mode refresh/logout requests. It never tries
+  to read an API-subdomain cookie through `document.cookie`. Refresh rotates
+  both cookies; the next CSRF value is returned only to the allowed origin.
+- Before refresh, the browser commits a random attempt id to a separate
+  IndexedDB auth-runtime store keyed by a digest of backend origin and current
+  CSRF generation. Tabs therefore share the exact retry identity, and a lost
+  response can be retried after reload without deriving an id from a bearer
+  credential. The record contains no refresh token or content key.
 - Web app retries once on `401` by rotating refresh cookie, then repeats the original request with new `access_token`.
-- Only non-sensitive UI descriptors and sync counters are stored in
-  `localStorage`; key material and content use the encrypted IndexedDB vault.
-- `access_token` / preauth token are memory-only in web app runtime.
+- Only the selected cloud origin is stored in `localStorage`; usernames,
+  collection names, cursors, counters, tokens, key material, and content are not.
+  Durable encrypted client state lives in the IndexedDB vault.
+- Every encrypted-vault IndexedDB record, local-unlock record, and outbox sequence is scoped by
+  a domain-separated SHA-256 digest of normalized cloud origin plus normalized
+  username. The username is not present in IndexedDB lookup keys, and switching
+  server or account cannot reuse another account's vault or pending operations.
+- `access_token` and the one-time TOTP continuation are memory-only in web app runtime.
 - `refresh_token` is not accessible from JS state (`HttpOnly` cookie only).
-- The account master key is memory-only unless the user explicitly approves
-  local passkey unlock; that path wraps it with a non-extractable WebCrypto key.
+- The account master key is memory-only unless the user explicitly opts in to
+  local browser unlock. That path wraps it with a non-extractable WebCrypto
+  key. It protects copied browser storage, but is not hardware binding: trusted
+  any code executing under that origin in the browser profile can request decryption.
 - Changing cloud base URL clears in-memory auth tokens and requires re-login.
-- If server uses non-default CSRF cookie name, set `VITE_KAMORI_WEB_CSRF_COOKIE_NAME`.
 
 Server-side token TTL policy (cloud-server env):
 - `KAMORI_ACCESS_TOKEN_TTL_SECONDS` (default `300`)
@@ -51,28 +71,38 @@ Server-side token TTL policy (cloud-server env):
 
 - TOTP management is available in web settings modal (`/app`).
 - Setup flow:
-  - call `POST /auth/totp/setup/start`,
-  - receive `manual_entry_key` + `otpauth_uri`,
+  - complete a scoped OPAQUE reauthentication and call `POST /auth/totp/setup/start`,
+  - receive one-time `flow_id`, `manual_entry_key` + `otpauth_uri`,
   - generate QR locally in browser from `otpauth_uri`,
-  - confirm via `POST /auth/totp/setup/finish` with one current code,
-  - receive 8 one-time account recovery codes (displayed once, user must save them).
-- Recovery-code regeneration:
-  - call `POST /auth/account-recovery/codes/regenerate` (revokes old unused codes and returns new 8 codes).
+  - confirm via `POST /auth/totp/setup/finish` with `flow_id` and one current code,
+  - receive 8 one-time TOTP backup codes (displayed once, user must save them).
+- TOTP backup-code regeneration:
+  - consume a scoped reauthentication proof and call
+    `POST /auth/account-recovery/codes/regenerate` (revokes old unused backup
+    codes and returns 8 replacements).
 - Disable flow:
-  - call `POST /auth/totp/disable` with current TOTP code.
+  - consume a scoped reauthentication proof and call `POST /auth/totp/disable`
+    with the current TOTP code.
 - Security note:
   - QR is generated client-side only; `otpauth_uri` is never sent to third-party QR services.
 
 ## Account Recovery UX
 
-- Recovery is available in Sign In modal via one-time account recovery code.
+- Recovery is available in Sign In with the 24-word data recovery kit. TOTP
+  backup codes cannot perform data recovery.
 - Flow:
-  - call `POST /auth/account-recovery/start` with `username`, `recovery_code`, and OPAQUE `opaque_start_request`,
-  - call `POST /auth/account-recovery/finish` with `recovery_token` + OPAQUE `opaque_finish_request`.
+  - derive the recovery verifier and account master key locally from the words;
+  - call `POST /auth/account-recovery/start` with `username`,
+    `recovery_verifier`, and the OPAQUE start for the new password;
+  - call `POST /auth/account-recovery/finish` with the one-time
+    `recovery_token`, OPAQUE finish, and newly wrapped account master key;
+  - decrypt returned current space-key packages locally and persist them in the
+    encrypted vault.
 - On success:
   - password is reset,
   - TOTP is disabled,
-  - user sees explicit notice to sign in again with new password or passkey.
+  - prior sessions, passkeys, devices, and old device packages are revoked,
+  - user signs in with the new password to enroll a clean device.
 
 ## Architecture
 
@@ -82,6 +112,8 @@ Layers:
 - API transport clients in `src/lib/api` (MessagePack encode/decode).
 - Non-sensitive browser state store in `src/lib/stores/app.ts`.
 - Encrypted IndexedDB vault and outbox in `src/lib/cryptoVault.ts`.
+- Same-tab and Web Locks API serialization around PIM commits, sync, and key
+  rotation; IndexedDB assigns a monotonic queue order that retries preserve.
 - PIM operation/materialization helpers in `src/lib/pim.ts`.
 - OPAQUE wasm wrapper in `src/lib/opaqueClient.ts`.
   - includes local `generate_qr_svg(payload)` helper used by TOTP setup UI.
@@ -99,6 +131,7 @@ This app uses `cloud-server` endpoints:
 - `/auth/account-recovery/start`
 - `/auth/account-recovery/finish`
 - `/auth/signin/*`
+- `/auth/reauth/*`
 - `/auth/totp/status`
 - `/auth/totp/setup/start`
 - `/auth/totp/setup/finish`
@@ -115,6 +148,13 @@ This app uses `cloud-server` endpoints:
 - `/invite-codes/redeem`
 - `/devices`
 - `/spaces`
+- `/spaces/recovery-key-packages`
+- `/spaces/{space_id}/devices`
+- `/spaces/{space_id}/members`
+- `/spaces/{space_id}/rotate-key`
+- `/spaces/{space_id}/members/{user_id}/revoke`
+- `/spaces/{space_id}/device-key-packages`
+- `/spaces/{space_id}/recovery-key-package`
 - `/operations?space_id=...&since=N`
 - `/users/me/consents`
 
@@ -141,20 +181,24 @@ One-time setup:
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.114
+cargo install wasm-bindgen-cli --version 0.2.127
 ```
 
 From repository root:
 
 ```bash
 CARGO_TARGET_DIR=/tmp/kamori-wasm-target \
-  cargo build -p crypto-core-lib --target wasm32-unknown-unknown --features wasm --no-default-features
+  cargo build -p crypto-core-lib --release --target wasm32-unknown-unknown --features wasm --no-default-features
 
 wasm-bindgen \
   --target web \
   --out-dir apps/web-frontend/src/lib/wasm/crypto-core-lib \
-  /tmp/kamori-wasm-target/wasm32-unknown-unknown/debug/crypto_core_lib.wasm
+  /tmp/kamori-wasm-target/wasm32-unknown-unknown/release/crypto_core_lib.wasm
 ```
+
+The `wasm-bindgen-cli` version must exactly match the `wasm-bindgen` version
+resolved in `Cargo.lock`. Keep the generated browser artifact on the release
+profile: debug generation makes the shipped WASM several times larger.
 
 Generated files:
 - `src/lib/wasm/crypto-core-lib/crypto_core_lib.js`
@@ -172,9 +216,10 @@ bun run --filter web-frontend test
 bun run --filter web-frontend build
 ```
 
-Current unit tests cover section navigation and cookie refresh/CSRF session
-behavior. Backend and crypto-core suites cover the matching MessagePack,
-OPAQUE, recovery, signed-operation, and key-wrapping contracts.
+Current unit tests cover PIM operation/snapshot validation, section navigation,
+and cookie refresh/CSRF session behavior. Backend and crypto-core suites cover
+the matching MessagePack, OPAQUE, recovery, signed-operation, rotation, and
+key-wrapping contracts.
 
 ## Build
 

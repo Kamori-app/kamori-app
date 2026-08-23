@@ -14,6 +14,7 @@ use opaque_ke::{
 };
 use rand08::rngs::OsRng;
 use serde::{Serialize, de::DeserializeOwned};
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tower::util::ServiceExt;
 use uuid::Uuid;
@@ -24,8 +25,9 @@ use crate::{
         auth::{
             dto::{
                 AccountRecoveryFinishRequest, AccountRecoveryFinishResponse,
-                AccountRecoveryStartRequest, AccountRecoveryStartResponse,
+                AccountRecoveryStartRequest, AccountRecoveryStartResponse, CsrfBootstrapResponse,
                 DeviceAuthorizationApproveRequest, DeviceAuthorizationApproveResponse,
+                DeviceAuthorizationInspectRequest, DeviceAuthorizationInspectResponse,
                 DeviceAuthorizationStartRequest, DeviceAuthorizationStartResponse,
                 DeviceAuthorizationStatus, DeviceAuthorizationTokenRequest,
                 DeviceAuthorizationTokenResponse, LogoutRequest, LogoutResponse, RefreshRequest,
@@ -38,6 +40,8 @@ use crate::{
             transport::{CSRF_HEADER, REFRESH_TRANSPORT_HEADER},
         },
         common::ErrorResponse,
+        devices::dto::{DevicePlatform, RegisterDeviceRequest},
+        users::repositories::delete_user,
     },
     platform::{
         security::opaque::DefaultOpaqueSuite, state::AppState, state_store::InMemoryStore,
@@ -51,6 +55,13 @@ static MIGRATIONS_READY: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::cons
 const MSGPACK_CONTENT_TYPE: &str = "application/msgpack";
 const BODY_LIMIT_BYTES: usize = 1024 * 1024;
 const ALLOWED_ORIGIN: &str = "http://localhost:4173";
+
+#[derive(Serialize)]
+struct TestAccountPublicKeyBundle {
+    version: u8,
+    #[serde(with = "serde_bytes")]
+    account_recovery_public_key: Vec<u8>,
+}
 
 struct TestApp {
     app: Router,
@@ -71,6 +82,8 @@ enum SigninTransport {
 struct SigninArtifacts {
     access_token: String,
     refresh_token: Option<String>,
+    device_enrollment_token: String,
+    csrf_token: Option<String>,
     set_cookie_headers: Vec<String>,
 }
 
@@ -89,6 +102,13 @@ async fn ensure_migrations(pool: &PgPool) {
 }
 
 async fn setup_test_app() -> Option<TestApp> {
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("error")),
+        )
+        .try_init();
     let Some(database_url) = test_database_url() else {
         eprintln!(
             "skipping auth integration tests: set KAMORI_DATABASE_URL or DATABASE_URL to enable"
@@ -155,10 +175,6 @@ fn decode_msgpack<T: DeserializeOwned>(body: &[u8]) -> T {
     T::deserialize(&mut deserializer).expect("decode msgpack response")
 }
 
-fn decode_json<T: DeserializeOwned>(body: &[u8]) -> T {
-    serde_json::from_slice(body).expect("decode json response")
-}
-
 fn set_cookie_values(headers: &HeaderMap) -> Vec<String> {
     headers
         .get_all(header::SET_COOKIE)
@@ -195,7 +211,12 @@ fn combined_cookie_header(
     format!("{refresh_cookie_name}={refresh_cookie}; {csrf_cookie_name}={csrf_cookie}")
 }
 
-async fn register_user(app: &TestApp, username: &str, password: &str) {
+async fn prepare_signup_request(
+    app: &TestApp,
+    username: &str,
+    password: &str,
+    signup_request_id: Uuid,
+) -> SignupFinishRequest {
     let mut rng = OsRng;
     let registration_start =
         ClientRegistration::<DefaultOpaqueSuite>::start(&mut rng, password.as_bytes())
@@ -229,22 +250,65 @@ async fn register_user(app: &TestApp, username: &str, password: &str) {
         )
         .expect("opaque registration finish");
 
-    let signup_finish_response = post_msgpack(
-        &app.app,
-        "/auth/signup/finish",
-        &SignupFinishRequest {
-            username: username.to_string(),
-            opaque_finish_request: registration_finish.message.serialize().to_vec(),
-            encrypted_master_key: vec![1; 49],
-            public_key_bundle: vec![4, 5, 6],
-            recovery_verifier: vec![7; 32],
-        },
-        &HeaderMap::new(),
-    )
-    .await;
+    SignupFinishRequest {
+        signup_request_id,
+        username: username.to_string(),
+        opaque_finish_request: registration_finish.message.serialize().to_vec(),
+        encrypted_master_key: vec![1; 49],
+        public_key_bundle: rmp_serde::to_vec_named(&TestAccountPublicKeyBundle {
+            version: 2,
+            account_recovery_public_key:
+                crypto_core_lib::CryptoEngine::derive_account_recovery_keypair(&[4_u8; 32])
+                    .public_key
+                    .to_vec(),
+        })
+        .expect("encode account public key bundle"),
+        recovery_verifier: vec![7; 32],
+    }
+}
+
+async fn register_user(app: &TestApp, username: &str, password: &str) {
+    let request = prepare_signup_request(app, username, password, Uuid::new_v4()).await;
+    let signup_finish_response =
+        post_msgpack(&app.app, "/auth/signup/finish", &request, &HeaderMap::new()).await;
     let (status, _headers, body) = split_response(signup_finish_response).await;
     assert_eq!(status, StatusCode::OK);
     let _signup_finish: SignupFinishResponse = decode_msgpack(&body);
+}
+
+#[tokio::test]
+async fn signup_finish_is_exact_retry_idempotent_after_registration_closes() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-signup-retry-{}", Uuid::new_v4());
+    let request_id = Uuid::new_v4();
+    let request = prepare_signup_request(&app, &username, "P@ssword123!", request_id).await;
+    let first = post_msgpack(&app.app, "/auth/signup/finish", &request, &HeaderMap::new()).await;
+    let (status, _, body) = split_response(first).await;
+    assert_eq!(status, StatusCode::OK);
+    let first: SignupFinishResponse = decode_msgpack(&body);
+
+    let mut closed_config = app.state.config.clone();
+    closed_config.registration_enabled = false;
+    let closed_store = Arc::new(InMemoryStore::new(Duration::from_secs(
+        closed_config.valkey_ttl_seconds,
+    )));
+    let closed_state = AppState::new(app.state.pool.clone(), closed_config, closed_store)
+        .expect("build registration-closed state");
+    let retry = crate::features::auth::services::signup_finish(&closed_state, request.clone())
+        .await
+        .expect("exact retry after registration closes");
+    assert_eq!(retry.user_id, first.user_id);
+
+    let mut conflicting = request;
+    conflicting.encrypted_master_key[0] ^= 1;
+    let error = crate::features::auth::services::signup_finish(&closed_state, conflicting)
+        .await
+        .expect_err("request id reuse with different data must fail");
+    assert_eq!(error.0, StatusCode::CONFLICT);
+
+    app.shutdown().await;
 }
 
 async fn signin_user(
@@ -296,7 +360,6 @@ async fn signin_user(
             opaque_flow_id: signin_start.opaque_flow_id,
             opaque_finish_request: login_finish.message.serialize().to_vec(),
             totp_code: None,
-            preauth_token: None,
         },
         &headers,
     )
@@ -307,17 +370,21 @@ async fn signin_user(
     let payload: SigninFinishResponse = decode_msgpack(&body);
     assert!(payload.access_token.is_some());
     assert!(payload.totp_verified);
-    assert!(payload.preauth_token.is_none());
+    assert!(payload.totp_continuation_token.is_none());
 
     SigninArtifacts {
         access_token: payload.access_token.expect("access token"),
         refresh_token: payload.refresh_token,
+        device_enrollment_token: payload
+            .device_enrollment_token
+            .expect("device enrollment token"),
+        csrf_token: payload.csrf_token,
         set_cookie_headers: set_cookie_values(&response_headers),
     }
 }
 
 #[tokio::test]
-async fn external_browser_device_authorization_is_explicit_and_single_use() {
+async fn external_browser_device_authorization_is_explicit_and_retry_safe() {
     let Some(app) = setup_test_app().await else {
         return;
     };
@@ -326,11 +393,37 @@ async fn external_browser_device_authorization_is_explicit_and_single_use() {
     let password = "P@ssword123!";
     register_user(&app, &username, password).await;
     let signin = signin_user(&app, &username, password, SigninTransport::Body).await;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[23_u8; 32]);
+    let hpke_key = crypto_core_lib::CryptoEngine::generate_x25519_keypair();
+    let mut enrollment_headers = HeaderMap::new();
+    enrollment_headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", signin.access_token))
+            .expect("authorization header"),
+    );
+    let enrollment = post_msgpack(
+        &app.app,
+        "/devices",
+        &RegisterDeviceRequest {
+            enrollment_token: signin.device_enrollment_token.clone(),
+            device_id: Uuid::new_v4(),
+            signing_public_key: signing_key.verifying_key().to_bytes().to_vec(),
+            hpke_public_key: hpke_key.public_key.to_vec(),
+            encrypted_name: vec![1_u8],
+            platform: DevicePlatform::Web,
+        },
+        &enrollment_headers,
+    )
+    .await;
+    let (status, _, _) = split_response(enrollment).await;
+    assert_eq!(status, StatusCode::OK);
 
     let start_response = post_msgpack(
         &app.app,
         "/auth/device-authorization/start",
-        &DeviceAuthorizationStartRequest {},
+        &DeviceAuthorizationStartRequest {
+            hpke_public_key: vec![7; 32],
+        },
         &HeaderMap::new(),
     )
     .await;
@@ -361,11 +454,31 @@ async fn external_browser_device_authorization_is_explicit_and_single_use() {
         HeaderValue::from_str(&format!("Bearer {}", signin.access_token))
             .expect("authorization header"),
     );
+    let inspect_response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/inspect",
+        &DeviceAuthorizationInspectRequest {
+            user_code: started.user_code.clone(),
+        },
+        &approve_headers,
+    )
+    .await;
+    let (status, _, body) = split_response(inspect_response).await;
+    if status != StatusCode::OK {
+        let error: ErrorResponse = decode_msgpack(&body);
+        panic!("device authorization inspect failed with {status}: {error:?}");
+    }
+    let inspected: DeviceAuthorizationInspectResponse = decode_msgpack(&body);
+    assert_eq!(inspected.flow_id, started.flow_id);
+    assert_eq!(inspected.hpke_public_key, vec![7; 32]);
+
+    let encrypted_master_key_package = vec![9; 96];
     let approve_response = post_msgpack(
         &app.app,
         "/auth/device-authorization/approve",
         &DeviceAuthorizationApproveRequest {
             user_code: started.user_code.clone(),
+            encrypted_master_key_package: encrypted_master_key_package.clone(),
         },
         &approve_headers,
     )
@@ -387,22 +500,34 @@ async fn external_browser_device_authorization_is_explicit_and_single_use() {
     )
     .await;
     let (status, _, body) = split_response(token_response).await;
-    assert_eq!(status, StatusCode::OK);
+    if status != StatusCode::OK {
+        let error: ErrorResponse = decode_msgpack(&body);
+        panic!("device authorization token failed with {status}: {error:?}");
+    }
     let token: DeviceAuthorizationTokenResponse = decode_msgpack(&body);
     assert_eq!(token.status, DeviceAuthorizationStatus::Approved);
     assert_eq!(token.username.as_deref(), Some(username.as_str()));
     assert!(token.access_token.is_some());
     assert!(token.refresh_token.is_some());
+    assert_eq!(
+        token.encrypted_master_key_package,
+        encrypted_master_key_package
+    );
 
-    let replay_response = post_msgpack(
+    let retry_response = post_msgpack(
         &app.app,
         "/auth/device-authorization/token",
         &token_request,
         &HeaderMap::new(),
     )
     .await;
-    let (status, _, _) = split_response(replay_response).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, body) = split_response(retry_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let retry: DeviceAuthorizationTokenResponse = decode_msgpack(&body);
+    assert_eq!(retry.status, DeviceAuthorizationStatus::Approved);
+    assert_eq!(retry.refresh_token, token.refresh_token);
+    assert_eq!(retry.refresh_token_id, token.refresh_token_id);
+    assert_eq!(retry.device_enrollment_token, token.device_enrollment_token);
 
     app.shutdown().await;
 }
@@ -425,6 +550,32 @@ async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies()
         .expect("refresh cookie from signin");
     let csrf_cookie = cookie_value(&signin.set_cookie_headers, &csrf_cookie_name)
         .expect("csrf cookie from signin");
+    assert_eq!(signin.csrf_token.as_deref(), Some(csrf_cookie.as_str()));
+
+    let cookie_header = combined_cookie_header(
+        &refresh_cookie_name,
+        &refresh_cookie,
+        &csrf_cookie_name,
+        &csrf_cookie,
+    );
+    let mut bootstrap_headers = HeaderMap::new();
+    bootstrap_headers.insert(REFRESH_TRANSPORT_HEADER, HeaderValue::from_static("cookie"));
+    bootstrap_headers.insert(header::ORIGIN, HeaderValue::from_static(ALLOWED_ORIGIN));
+    bootstrap_headers.insert(
+        header::COOKIE,
+        HeaderValue::from_str(&cookie_header).expect("cookie header"),
+    );
+    let bootstrap_response = post_msgpack(
+        &app.app,
+        "/auth/csrf",
+        &std::collections::HashMap::<String, String>::new(),
+        &bootstrap_headers,
+    )
+    .await;
+    let (status, _, body) = split_response(bootstrap_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let bootstrap: CsrfBootstrapResponse = decode_msgpack(&body);
+    assert_eq!(bootstrap.csrf_token, csrf_cookie);
 
     let mut refresh_headers = HeaderMap::new();
     refresh_headers.insert(REFRESH_TRANSPORT_HEADER, HeaderValue::from_static("cookie"));
@@ -432,12 +583,6 @@ async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies()
     refresh_headers.insert(
         CSRF_HEADER,
         HeaderValue::from_str(&csrf_cookie).expect("csrf header"),
-    );
-    let cookie_header = combined_cookie_header(
-        &refresh_cookie_name,
-        &refresh_cookie,
-        &csrf_cookie_name,
-        &csrf_cookie,
     );
     refresh_headers.insert(
         header::COOKIE,
@@ -464,6 +609,10 @@ async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies()
         cookie_value(&refresh_set_cookies, &refresh_cookie_name).expect("rotated refresh cookie");
     let rotated_csrf_cookie =
         cookie_value(&refresh_set_cookies, &csrf_cookie_name).expect("rotated csrf cookie");
+    assert_eq!(
+        refresh_payload.csrf_token.as_deref(),
+        Some(rotated_csrf_cookie.as_str())
+    );
 
     let mut logout_headers = HeaderMap::new();
     let authorization = format!("Bearer {}", refresh_payload.access_token);
@@ -554,7 +703,7 @@ async fn cookie_refresh_rejects_csrf_mismatch() {
     .await;
     let (status, _headers, body) = split_response(refresh_response).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let error: ErrorResponse = decode_json(&body);
+    let error: ErrorResponse = decode_msgpack(&body);
     assert_eq!(error.message, "csrf token mismatch");
 
     app.shutdown().await;
@@ -607,7 +756,7 @@ async fn cookie_refresh_rejects_missing_origin_or_referer() {
     .await;
     let (status, _headers, body) = split_response(refresh_response).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let error: ErrorResponse = decode_json(&body);
+    let error: ErrorResponse = decode_msgpack(&body);
     assert_eq!(error.message, "origin or referer is required");
 
     app.shutdown().await;
@@ -648,6 +797,14 @@ async fn body_transport_refresh_and_logout_remain_compatible() {
         .refresh_token
         .clone()
         .expect("rotated refresh token");
+
+    sqlx::query(
+        "UPDATE refresh_tokens SET rotated_at = now() - interval '1 day' WHERE replaced_by_token_id = $1",
+    )
+    .bind(refresh_payload.refresh_token_id.expect("replacement token id"))
+    .execute(&app.state.pool)
+    .await
+    .expect("age exact retry mapping beyond the former grace window");
 
     let retry_response = post_msgpack(
         &app.app,
@@ -851,6 +1008,15 @@ async fn account_recovery_returns_current_space_keys_and_revokes_old_credentials
             .expect("count device packages");
     assert_eq!((active_devices, passkeys, device_packages), (0, 0, 0));
 
+    let token_hash: [u8; 32] = Sha256::digest(finish_request.recovery_token.as_bytes()).into();
+    sqlx::query(
+        "UPDATE account_recovery_attempts SET expires_at = now() - interval '1 minute' WHERE token_hash = $1",
+    )
+    .bind(token_hash.as_slice())
+    .execute(&app.state.pool)
+    .await
+    .expect("expire completed recovery attempt");
+
     let replay = post_msgpack(
         &app.app,
         "/auth/account-recovery/finish",
@@ -858,7 +1024,22 @@ async fn account_recovery_returns_current_space_keys_and_revokes_old_credentials
         &HeaderMap::new(),
     )
     .await;
-    assert_eq!(split_response(replay).await.0, StatusCode::UNAUTHORIZED);
+    let (status, _, body) = split_response(replay).await;
+    assert_eq!(status, StatusCode::OK);
+    let replayed: AccountRecoveryFinishResponse = decode_msgpack(&body);
+    assert!(replayed.changed);
+    assert_eq!(replayed.space_key_packages.len(), 1);
+
+    let mut conflicting_request = finish_request;
+    conflicting_request.encrypted_master_key[0] ^= 1;
+    let conflict = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/finish",
+        &conflicting_request,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(split_response(conflict).await.0, StatusCode::UNAUTHORIZED);
 
     app.shutdown().await;
 }
@@ -895,5 +1076,64 @@ async fn totp_backup_code_can_only_be_consumed_once() {
             .await
             .unwrap()
     );
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn account_deletion_anonymizes_authentication_and_recovery_material() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-delete-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("load registered user");
+    sqlx::query(
+        "INSERT INTO account_recovery_attempts (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '10 minutes')",
+    )
+    .bind(vec![42_u8; 32])
+    .bind(user_id)
+    .execute(&app.state.pool)
+    .await
+    .expect("insert recovery attempt");
+
+    assert!(
+        delete_user(&app.state.pool, user_id)
+            .await
+            .expect("delete account")
+    );
+    let state: (bool, bool, bool, bool, bool) = sqlx::query_as(
+        r#"
+        SELECT deleted_at IS NOT NULL,
+               opaque_record IS NULL,
+               encrypted_master_key IS NULL,
+               public_key_bundle IS NULL,
+               recovery_verifier_hash IS NULL
+        FROM users WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&app.state.pool)
+    .await
+    .expect("load anonymized account");
+    assert_eq!(state, (true, true, true, true, true));
+    let attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM account_recovery_attempts WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("count recovery attempts");
+    assert_eq!(attempts, 0);
+    let signup_completions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM signup_completions WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("count signup idempotency records");
+    assert_eq!(signup_completions, 0);
+
     app.shutdown().await;
 }

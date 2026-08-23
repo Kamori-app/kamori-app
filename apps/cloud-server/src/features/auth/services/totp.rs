@@ -1,21 +1,24 @@
 //! Service logic for TOTP enrollment/disable and recovery-code regeneration.
 
 use axum::http::HeaderMap;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
     features::auth::dto::{
-        AccountRecoveryCodesRegenerateResponse, TotpDisableRequest, TotpDisableResponse,
-        TotpSetupFinishRequest, TotpSetupFinishResponse, TotpSetupStartResponse,
-        TotpStatusResponse,
+        AccountRecoveryCodesRegenerateRequest, AccountRecoveryCodesRegenerateResponse,
+        ReauthAction, TotpDisableRequest, TotpDisableResponse, TotpSetupFinishRequest,
+        TotpSetupFinishResponse, TotpSetupStartRequest, TotpSetupStartResponse, TotpStatusResponse,
     },
     features::auth::repositories::{
         clear_totp_for_user, count_unused_recovery_codes, enable_totp_for_user_with_recovery_codes,
         get_user_totp_ciphertext_by_id, regenerate_recovery_codes_for_user,
     },
     features::common::{
-        ApiError, authorize_principal, authorize_session, bad_request, unauthenticated,
+        ApiError, authorize_principal, authorize_session, bad_request, internal_error,
+        unauthenticated,
     },
     platform::state::AppState,
     platform::{
@@ -23,6 +26,14 @@ use crate::{
         security::auth::{TotpConfig, verify_totp},
     },
 };
+
+const TOTP_SETUP_TTL: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Deserialize, Serialize)]
+struct TotpSetupState {
+    user_id: Uuid,
+    manual_entry_key: String,
+}
 
 use super::support::{
     build_totp_otpauth_uri, generate_account_recovery_code_batch, generate_totp_manual_entry_key,
@@ -50,12 +61,21 @@ pub(crate) async fn totp_status(
 pub(crate) async fn totp_setup_start(
     state: &AppState,
     headers: &HeaderMap,
+    payload: TotpSetupStartRequest,
 ) -> Result<TotpSetupStartResponse, ApiError> {
     if !state.config.enable_totp {
         return Err(bad_request("totp is disabled"));
     }
 
     let principal = authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        ReauthAction::SecuritySettings,
+    )
+    .await?;
     let user_id = principal.user_id;
     if get_user_totp_ciphertext_by_id(&state.pool, user_id)
         .await?
@@ -68,8 +88,23 @@ pub(crate) async fn totp_setup_start(
     let manual_entry_key = generate_totp_manual_entry_key();
     let issuer = totp_issuer_from_config(&state.config);
     let otpauth_uri = build_totp_otpauth_uri(&issuer, &username, &manual_entry_key)?;
+    let flow_id = Uuid::new_v4();
+    state
+        .state_store
+        .put(
+            &totp_setup_key(flow_id),
+            &rmp_serde::to_vec_named(&TotpSetupState {
+                user_id,
+                manual_entry_key: manual_entry_key.clone(),
+            })
+            .map_err(internal_error)?,
+            TOTP_SETUP_TTL,
+        )
+        .await
+        .map_err(internal_error)?;
 
     Ok(TotpSetupStartResponse {
+        flow_id,
         manual_entry_key,
         otpauth_uri,
     })
@@ -92,7 +127,17 @@ pub(crate) async fn totp_setup_finish(
         return Err(bad_request("totp is already enabled"));
     }
 
-    let manual_entry_key = normalize_totp_manual_entry_key(&payload.manual_entry_key)?;
+    let setup = state
+        .state_store
+        .take(&totp_setup_key(payload.flow_id))
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthenticated("totp setup expired or was already used"))?;
+    let setup: TotpSetupState = rmp_serde::from_slice(&setup).map_err(internal_error)?;
+    if setup.user_id != user_id {
+        return Err(unauthenticated("totp setup belongs to another account"));
+    }
+    let manual_entry_key = normalize_totp_manual_entry_key(&setup.manual_entry_key)?;
     let code = payload.code.trim();
     if code.is_empty() {
         return Err(bad_request("code is required"));
@@ -148,7 +193,16 @@ pub(crate) async fn totp_disable(
     headers: &HeaderMap,
     payload: TotpDisableRequest,
 ) -> Result<TotpDisableResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        ReauthAction::SecuritySettings,
+    )
+    .await?;
+    let user_id = principal.user_id;
     let existing_secret = get_user_totp_ciphertext_by_id(&state.pool, user_id).await?;
 
     let Some(ciphertext) = existing_secret else {
@@ -185,8 +239,18 @@ pub(crate) async fn totp_disable(
 pub(crate) async fn account_recovery_codes_regenerate(
     state: &AppState,
     headers: &HeaderMap,
+    payload: AccountRecoveryCodesRegenerateRequest,
 ) -> Result<AccountRecoveryCodesRegenerateResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = authorize_principal(state, headers).await?;
+    super::reauth::consume_reauth_token(
+        state,
+        &payload.reauth_token,
+        principal.user_id,
+        &principal.username,
+        ReauthAction::SecuritySettings,
+    )
+    .await?;
+    let user_id = principal.user_id;
     let generated_recovery_codes = generate_account_recovery_code_batch();
     let recovery_code_rows = generated_recovery_codes
         .iter()
@@ -200,4 +264,8 @@ pub(crate) async fn account_recovery_codes_regenerate(
         .collect();
 
     Ok(AccountRecoveryCodesRegenerateResponse { recovery_codes })
+}
+
+fn totp_setup_key(flow_id: Uuid) -> String {
+    format!("auth:totp-setup:{flow_id}")
 }

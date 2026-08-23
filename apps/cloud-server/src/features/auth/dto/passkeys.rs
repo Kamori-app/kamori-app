@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Passkey add start request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PasskeyAddStartRequest {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasskeyAddStartRequest {
+    pub reauth_token: String,
+}
 
 /// Passkey add start response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +84,7 @@ pub struct PasskeyUpdateResponse {
 pub struct PasskeyDeleteRequest {
     /// Passkey row id.
     pub passkey_id: Uuid,
+    pub reauth_token: String,
 }
 
 /// Passkey delete response.

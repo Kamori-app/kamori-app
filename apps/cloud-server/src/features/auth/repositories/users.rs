@@ -16,7 +16,10 @@ pub(crate) struct UserRow {
 
 pub(crate) enum UserAdmissionResult {
     Inserted,
+    Duplicate(Uuid),
+    IdempotencyConflict,
     CapacityReached,
+    UsernameExists,
 }
 
 pub(crate) struct NewUser<'a> {
@@ -26,6 +29,38 @@ pub(crate) struct NewUser<'a> {
     pub(crate) encrypted_master_key: &'a [u8],
     pub(crate) public_key_bundle: &'a [u8],
     pub(crate) recovery_verifier_hash: &'a [u8],
+    pub(crate) signup_request_id: Uuid,
+    pub(crate) signup_request_hash: &'a [u8],
+}
+
+/// Resolves a completed signup before repeating expensive OPAQUE work. Exact
+/// retries remain idempotent even after registration has been administratively
+/// closed; reusing the request id with different material is always rejected.
+pub(crate) async fn find_signup_completion(
+    pool: &PgPool,
+    request_id: Uuid,
+    username: &str,
+    request_hash: &[u8],
+) -> anyhow::Result<Option<UserAdmissionResult>> {
+    let Some(row) = sqlx::query(
+        "SELECT username, request_hash, user_id FROM signup_completions WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let existing_username: String = row.try_get("username")?;
+    let existing_hash: Vec<u8> = row.try_get("request_hash")?;
+    let existing_user_id: Uuid = row.try_get("user_id")?;
+    Ok(Some(
+        if existing_username == username && existing_hash == request_hash {
+            UserAdmissionResult::Duplicate(existing_user_id)
+        } else {
+            UserAdmissionResult::IdempotencyConflict
+        },
+    ))
 }
 
 /// Fetches a user row by username.
@@ -98,7 +133,9 @@ pub(super) fn map_user_row(row: &sqlx::postgres::PgRow) -> Result<UserRow, ApiEr
     })
 }
 
-pub(crate) async fn insert_user_with_admission_cap(
+/// Atomically admits an account and creates the personal workspace invariant.
+/// A caller must never observe a committed user without its owner membership.
+pub(crate) async fn insert_user_with_personal_workspace_and_admission_cap(
     pool: &PgPool,
     user: NewUser<'_>,
     account_limit: u64,
@@ -108,6 +145,25 @@ pub(crate) async fn insert_user_with_admission_cap(
     sqlx::query("SELECT pg_advisory_xact_lock(44200617)")
         .execute(&mut *tx)
         .await?;
+    if let Some(row) = sqlx::query(
+        "SELECT username, request_hash, user_id FROM signup_completions WHERE request_id = $1",
+    )
+    .bind(user.signup_request_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    {
+        let existing_username: String = row.try_get("username")?;
+        let existing_hash: Vec<u8> = row.try_get("request_hash")?;
+        let existing_user_id: Uuid = row.try_get("user_id")?;
+        tx.commit().await?;
+        return Ok(
+            if existing_username == user.username && existing_hash == user.signup_request_hash {
+                UserAdmissionResult::Duplicate(existing_user_id)
+            } else {
+                UserAdmissionResult::IdempotencyConflict
+            },
+        );
+    }
     let active_accounts: i64 =
         sqlx::query_scalar("SELECT count(*)::bigint FROM users WHERE deleted_at IS NULL")
             .fetch_one(&mut *tx)
@@ -116,13 +172,15 @@ pub(crate) async fn insert_user_with_admission_cap(
         tx.rollback().await?;
         return Ok(UserAdmissionResult::CapacityReached);
     }
-    sqlx::query(
+    let inserted: Option<Uuid> = sqlx::query_scalar(
         r#"
         INSERT INTO users (
             id, username, opaque_record, encrypted_master_key,
             public_key_bundle, recovery_verifier_hash
         )
         VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (username) DO NOTHING
+        RETURNING id
         "#,
     )
     .bind(user.id)
@@ -131,6 +189,46 @@ pub(crate) async fn insert_user_with_admission_cap(
     .bind(user.encrypted_master_key)
     .bind(user.public_key_bundle)
     .bind(user.recovery_verifier_hash)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if inserted.is_none() {
+        tx.rollback().await?;
+        return Ok(UserAdmissionResult::UsernameExists);
+    }
+
+    let workspace_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO workspaces (id, owner_user_id, kind, encrypted_metadata)
+        VALUES ($1, $2, 'personal', $3)
+        "#,
+    )
+    .bind(workspace_id)
+    .bind(user.id)
+    .bind(Vec::<u8>::new())
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO workspace_members (id, workspace_id, user_id, role, status)
+        VALUES ($1, $2, $3, 'owner', 'active')
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(workspace_id)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO signup_completions (request_id, username, request_hash, user_id)
+        VALUES ($1, $2, $3, $4)
+        "#,
+    )
+    .bind(user.signup_request_id)
+    .bind(user.username)
+    .bind(user.signup_request_hash)
+    .bind(user.id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
