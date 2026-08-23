@@ -216,6 +216,63 @@ func TestPrivateHostEgressConfiguresProviderDNSBeforePackageInstallation(t *test
 	}
 }
 
+func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
+	t.Parallel()
+
+	material := appCloudInitMaterial{
+		commonHostMaterial: commonHostMaterial{
+			hostName: "kamori-beta-app-1", hostCertificate: "HOST CERT", configPublicKey: "ssh-ed25519 CONFIG",
+		},
+		deployPublicKey: "ssh-ed25519 DEPLOY", cloudEnvironment: "KAMORI_JWT_SECRET=secret\n", opaqueServerSetup: "opaque", refreshRotationKey: "rotation",
+		postgresCACertificate: "CA", postgresClientCertificate: "CLIENT CERT", postgresClientPrivateKey: "CLIENT KEY",
+	}
+	configuration, err := renderAppHostConfiguration(material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := decodeHostConfiguration(t, configuration)
+	resolver := files["root/etc/systemd/resolved.conf.d/60-kamori-private-egress.conf"]
+	if resolver != "[Resolve]\nDNS=185.12.64.1 185.12.64.2\n" {
+		t.Fatalf("private resolver configuration = %q", resolver)
+	}
+
+	applyScript, err := deploymentAsset("host-config/kamori-apply-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"systemctl restart systemd-resolved.service",
+		"systemctl restart kamori-private-egress.service",
+		"systemctl restart kamori-nat-gateway.service",
+		"resolvectl flush-caches",
+	} {
+		if !strings.Contains(applyScript, required) {
+			t.Fatalf("host configuration is missing egress recovery command %q", required)
+		}
+	}
+}
+
+func TestRegistryOperationsHaveBoundedRetries(t *testing.T) {
+	t.Parallel()
+
+	login, err := deploymentAsset("cloud-server/kamori-registry-login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deploy, err := deploymentAsset("cloud-server/deploy-cloud-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, script := range map[string]string{"login": login, "deploy": deploy} {
+		if !strings.Contains(script, "for attempt in $(seq 1 5); do") {
+			t.Fatalf("%s script is missing its bounded registry retry", name)
+		}
+		if !strings.Contains(script, `if [[ "$attempt" == 5 ]]`) {
+			t.Fatalf("%s script does not stop after the bounded retry count", name)
+		}
+	}
+}
+
 func TestContainerHostsDisableCloudInitNetworkHotplug(t *testing.T) {
 	t.Parallel()
 

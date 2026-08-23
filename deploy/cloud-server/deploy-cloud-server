@@ -51,8 +51,21 @@ trap cleanup EXIT
 chmod 0600 "$temporary_release"
 
 test -r "$env_file"
+pull_image() {
+  local image=$1
+  for attempt in $(seq 1 5); do
+    if /usr/bin/docker pull "$image"; then
+      return 0
+    fi
+    if [[ "$attempt" == 5 ]]; then
+      echo "could not pull immutable image after 5 attempts: $image" >&2
+      return 1
+    fi
+    sleep $((attempt * 3))
+  done
+}
 for image in "$cloud_image" "$web_image" "$admin_image" "$edge_image"; do
-  /usr/bin/docker pull "$image"
+  pull_image "$image"
 done
 
 if [[ "${RUN_MIGRATIONS:-0}" == "1" ]]; then

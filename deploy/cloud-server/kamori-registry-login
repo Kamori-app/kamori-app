@@ -6,4 +6,21 @@ if [[ $# -ne 1 || ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]; then
   exit 2
 fi
 
-exec /usr/bin/docker login ghcr.io --username "$1" --password-stdin
+registry_password=$(cat)
+if [[ -z "$registry_password" ]]; then
+  echo "registry password is empty" >&2
+  exit 2
+fi
+
+for attempt in $(seq 1 5); do
+  if printf '%s' "$registry_password" \
+    | /usr/bin/docker login ghcr.io --username "$1" --password-stdin; then
+    unset registry_password
+    exit 0
+  fi
+  if [[ "$attempt" == 5 ]]; then
+    echo "registry login did not succeed after 5 attempts" >&2
+    exit 1
+  fi
+  sleep $((attempt * 3))
+done

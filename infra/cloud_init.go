@@ -337,6 +337,16 @@ func commonHostConfigurationFiles(role string, material commonHostMaterial, rele
 		cloudInitFile{path: "/home/deploy/.ssh/authorized_keys", owner: "deploy:deploy", permissions: "0600", content: configAuthorizedKey(role, material.configPublicKey) + releaseAuthorizedKey(role, releasePublicKey)},
 		cloudInitFile{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: fmt.Sprintf("deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s\n", role)},
 	)
+	if role != "ops" {
+		files = append(files, cloudInitFile{
+			path:        "/etc/systemd/resolved.conf.d/60-kamori-private-egress.conf",
+			owner:       "root:root",
+			permissions: "0644",
+			content: `[Resolve]
+DNS=185.12.64.1 185.12.64.2
+`,
+		})
+	}
 	return files, nil
 }
 
