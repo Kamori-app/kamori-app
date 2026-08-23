@@ -22,6 +22,30 @@ select_engine() {
 engine="$(select_engine)"
 compose=("$engine" compose --project-directory "$acceptance_dir" -f "$compose_file")
 
+run_compose_without_required_runtime() {
+  # Compose validates service env_file paths even for read-only and teardown
+  # commands. A clean checkout intentionally has no runtime secrets yet, so
+  # provide a private, empty parse-time file and remove it again afterwards.
+  # The actual stack can only start through up(), which writes every required
+  # secret before invoking Compose.
+  local created_runtime_env=false
+  local status=0
+  install -d -m 0700 "$runtime_dir"
+  if [[ ! -e "$runtime_dir/cloud.env" ]]; then
+    umask 077
+    : > "$runtime_dir/cloud.env"
+    created_runtime_env=true
+  fi
+
+  "${compose[@]}" "$@" || status=$?
+
+  if [[ "$created_runtime_env" == "true" ]]; then
+    rm -f "$runtime_dir/cloud.env"
+    rmdir "$runtime_dir" 2>/dev/null || true
+  fi
+  return "$status"
+}
+
 write_runtime_config() {
   install -d -m 0700 "$runtime_dir"
   if [[ ! -f "$runtime_dir/cloud.env" ]]; then
@@ -97,11 +121,11 @@ up() {
 }
 
 down() {
-  "${compose[@]}" down --remove-orphans
+  run_compose_without_required_runtime down --remove-orphans
 }
 
 reset() {
-  "${compose[@]}" down --volumes --remove-orphans
+  run_compose_without_required_runtime down --volumes --remove-orphans
   if [[ -d "$runtime_dir" ]]; then
     find "$runtime_dir" -type f -delete
   fi
@@ -126,7 +150,7 @@ case "${1:-}" in
   reset) reset ;;
   smoke) run_suite smoke ;;
   full) run_suite full ;;
-  logs) "${compose[@]}" logs --no-color "${@:2}" ;;
+  logs) run_compose_without_required_runtime logs --no-color "${@:2}" ;;
   *)
     printf '%s\n' "Usage: scripts/acceptance.sh {up|down|reset|smoke|full|logs [service...]}" >&2
     exit 2
