@@ -27,6 +27,7 @@
 <button
     class="inline-flex min-h-9 items-center gap-2 border border-slate/20 bg-paper px-3 py-1.5 text-xs text-slate hover:bg-sand/40"
     on:click={onSync}
+    aria-label={$locale === "ru" ? "Синхронизировать сейчас" : "Sync now"}
     title={$syncState.error ?? label}
 >
     <span

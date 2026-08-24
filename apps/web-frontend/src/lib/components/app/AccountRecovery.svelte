@@ -166,7 +166,10 @@
     };
 </script>
 
-<section class="border border-slate/20 bg-paper p-5 shadow-[6px_6px_0_rgba(23,63,55,0.10)] md:p-7">
+<section
+    class="border border-slate/20 bg-paper p-5 shadow-[6px_6px_0_rgba(23,63,55,0.10)] md:p-7"
+    aria-label={text.title}
+>
     <p class="text-xs font-semibold uppercase tracking-[0.18em] text-coral">Security reset</p>
     <h1 class="mt-2 font-heading text-2xl font-semibold text-slate">{text.title}</h1>
     <p class="mt-3 text-sm leading-6 text-slate/80">{text.body}</p>

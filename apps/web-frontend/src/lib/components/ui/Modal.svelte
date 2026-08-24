@@ -67,7 +67,10 @@
 <svelte:window on:keydown|capture={onWindowKeydown} />
 
 {#if open && embedded}
-    <section class="border border-slate/20 bg-paper p-4 shadow-[6px_6px_0_rgba(23,63,55,0.10)] md:p-6">
+    <section
+        class="border border-slate/20 bg-paper p-4 shadow-[6px_6px_0_rgba(23,63,55,0.10)] md:p-6"
+        aria-label={title}
+    >
         <h1 class="mb-5 font-heading text-2xl font-semibold text-slate">{title}</h1>
         <slot />
     </section>

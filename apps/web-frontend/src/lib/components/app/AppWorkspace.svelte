@@ -2202,6 +2202,10 @@
                 ? "Пространство — независимая граница шифрования и совместного доступа для задач, календаря и контактов."
                 : "A space is an independent encryption and sharing boundary for tasks, calendar events, and contacts."}
         </p>
+        <a
+            class="mt-3 inline-flex text-sm font-semibold text-slate underline underline-offset-2"
+            href="/app/sharing"
+        >{$locale === "ru" ? "Принять код приглашения →" : "Redeem invite code →"}</a>
         <div class="mt-3 space-y-2">
             <Input bind:value={collectionName} placeholder={t("Space name")} />
             <Button on:click={createCollection}>{t("Create Space")}</Button>
