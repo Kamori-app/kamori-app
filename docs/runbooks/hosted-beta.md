@@ -127,22 +127,19 @@ provisioning. Valkey remains deliberately ephemeral and single-node.
 
 Run `cloud-server admin-bootstrap <username>` only in a trusted terminal on an
 app host. Immediately add the printed TOTP seed to the operator authenticator,
-enroll a supported roaming security key at `admin.kamori.app`, and clear the
-terminal. The current strict attestation catalog accepts supported Yubico
-devices through the three pinned official production roots (legacy U2F, FIDO,
-and Attestation Root 1 for firmware 5.7.4+). This is an explicit beta allowlist,
-not a claim that other keys are insecure. If the browser asks to disclose the
-key's make and model, allow it; the control plane rejects platform and
-synchronized passkeys because they cannot provide the required hardware
-attestation. Review Yubico's published root list before every server dependency
-upgrade and pin additions through the normal code-review path; never fetch
-mutable trust roots during server startup.
+enroll a passkey at `admin.kamori.app`, and clear the terminal. The browser
+presents the available providers and the operator chooses a password manager,
+platform passkey, physical security key, or another WebAuthn authenticator.
+Kamori does not force an authenticator attachment or request vendor attestation;
+the registration ceremony still requires WebAuthn user verification.
 
-Sign in, add a second independently stored roaming key, and verify both keys
-before opening registration. The control plane rejects the transition to open
-registration while the acting operator has fewer than two keys. Operator
-sessions live only in browser memory for 15 minutes; every mutation requires a
-fresh key assertion, TOTP, reason, and exact confirmation.
+Sign in, add a second passkey from an independent authenticator or provider,
+and verify both before opening registration. Two credentials stored only in the
+same synchronized vault are not operationally independent. The control plane
+rejects the transition to open registration while the acting operator has fewer
+than two credentials. Operator sessions live only in browser memory for 15
+minutes; every mutation requires a fresh passkey assertion, TOTP, reason, and
+exact confirmation.
 
 ## 5. Release gates
 
@@ -160,8 +157,8 @@ fresh key assertion, TOTP, reason, and exact confirmation.
   notifications reach a human. GitHub Actions is not used for uptime checks.
 - Legal templates are reviewed and a real operator exists; until then public
   registration remains closed regardless of technical readiness.
-- Two operator security keys are enrolled and tested from separate storage
-  locations.
+- Two operator passkeys are enrolled and tested through independent
+  authenticators or providers.
 
 Only after every gate is evidenced may an operator set the audited runtime
 `registration_enabled` override to `true`. Deployment defaults remain closed.

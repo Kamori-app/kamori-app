@@ -24,7 +24,7 @@ pub struct Config {
     pub webauthn_rp_name: String,
     /// Exact WebAuthn origin of the separately deployed operator console.
     pub admin_webauthn_rp_origin: String,
-    /// Display name used for operator security-key ceremonies.
+    /// Display name used for operator passkey ceremonies.
     pub admin_webauthn_rp_name: String,
     /// Deployment-owned 256-bit key used only to encrypt operator TOTP seeds.
     pub admin_totp_kek: [u8; 32],

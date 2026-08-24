@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use serde_json::Value;
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
-use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential, WebauthnError};
+use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
 use crate::{
     features::{
@@ -34,36 +34,15 @@ use crate::{
 
 const ADMIN_SESSION_MINUTES: i64 = 15;
 const ADMIN_REAUTH_MINUTES: i64 = 5;
-const ADMIN_KEY_ENROLLMENT_PREFIX: &str = "admin:key-enrollment:";
+const ADMIN_PASSKEY_ENROLLMENT_PREFIX: &str = "admin:passkey-enrollment:";
 
-fn security_key_registration_failure(flow_id: Uuid, error: anyhow::Error) -> ApiError {
-    let attestation_rejected = error.downcast_ref::<WebauthnError>().is_some_and(|cause| {
-        matches!(
-            cause,
-            WebauthnError::MissingAttestationCredentialData
-                | WebauthnError::AttestationNotSupported
-                | WebauthnError::AttestationTrustFailure
-                | WebauthnError::AttestationNotVerifiable
-                | WebauthnError::AttestationUntrustedAaguid
-                | WebauthnError::AttestationFormatMissingAaguid
-                | WebauthnError::AttestationChainNotTrusted(_)
-                | WebauthnError::TrustFailure
-                | WebauthnError::CredentialMayNotBeHardwareBound
-        )
-    });
+fn passkey_registration_failure(flow_id: Uuid, error: anyhow::Error) -> ApiError {
     tracing::warn!(
         %flow_id,
         error = ?error,
-        attestation_rejected,
-        "operator security-key registration rejected"
+        "operator passkey registration rejected"
     );
-    if attestation_rejected {
-        unauthenticated(
-            "security-key attestation was not trusted; use a supported physical YubiKey and allow the browser to share device attestation",
-        )
-    } else {
-        unauthenticated("security-key registration failed; start a new enrollment attempt")
-    }
+    unauthenticated("passkey registration failed; start a new enrollment attempt")
 }
 
 fn verify_admin_totp(
@@ -139,7 +118,7 @@ pub(crate) async fn bootstrap_start(
     let flow_id = Uuid::new_v4();
     let challenge = state
         .admin_passkeys
-        .start_security_key_registration(flow_id, identity.id, &identity.username)
+        .start_operator_passkey_registration(flow_id, identity.id, &identity.username, &[])
         .await
         .map_err(internal_error)?;
     Ok(AdminSecurityKeyRegistrationResponse {
@@ -161,16 +140,16 @@ pub(crate) async fn bootstrap_finish(
     verify_admin_totp(state, &identity, &payload.totp_code)?;
     let credential: RegisterPublicKeyCredential = serde_json::from_slice(&payload.credential)
         .map_err(|_| bad_request("invalid credential"))?;
-    let security_key = state
+    let passkey = state
         .admin_passkeys
-        .finish_security_key_registration(payload.flow_id, credential)
+        .finish_operator_passkey_registration(payload.flow_id, identity.id, credential)
         .await
-        .map_err(|error| security_key_registration_failure(payload.flow_id, error))?;
+        .map_err(|error| passkey_registration_failure(payload.flow_id, error))?;
     let changed = repositories::activate_with_security_key(
         &state.pool,
         identity.id,
         &payload.bootstrap_token,
-        &security_key,
+        &passkey,
     )
     .await
     .map_err(internal_error)?;
@@ -185,12 +164,12 @@ async fn auth_start_for_identity(
     identity: &AdminIdentity,
 ) -> Result<AdminAuthStartResponse, ApiError> {
     if identity.security_keys.is_empty() {
-        return Err(unauthenticated("operator security key is not enrolled"));
+        return Err(unauthenticated("operator passkey is not enrolled"));
     }
     let flow_id = Uuid::new_v4();
     let challenge = state
         .admin_passkeys
-        .start_security_key_authentication(flow_id, &identity.security_keys)
+        .start_operator_passkey_authentication(flow_id, &identity.security_keys)
         .await
         .map_err(internal_error)?;
     Ok(AdminAuthStartResponse {
@@ -211,7 +190,7 @@ pub(crate) async fn login_start(
     auth_start_for_identity(state, &identity).await
 }
 
-async fn finish_security_key_and_totp(
+async fn finish_passkey_and_totp(
     state: &AppState,
     payload: &AdminAuthFinishRequest,
 ) -> Result<AdminIdentity, ApiError> {
@@ -225,9 +204,9 @@ async fn finish_security_key_and_totp(
         .map_err(|_| bad_request("invalid credential"))?;
     let result = state
         .admin_passkeys
-        .finish_security_key_authentication(payload.flow_id, credential)
+        .finish_operator_passkey_authentication(payload.flow_id, credential)
         .await
-        .map_err(|_| unauthenticated("operator security-key verification failed"))?;
+        .map_err(|_| unauthenticated("operator passkey verification failed"))?;
     repositories::persist_security_key_result(&state.pool, identity.id, &result)
         .await
         .map_err(internal_error)?;
@@ -246,7 +225,7 @@ pub(crate) async fn login_finish(
     headers: &HeaderMap,
     payload: AdminAuthFinishRequest,
 ) -> Result<AdminAuthFinishResponse, ApiError> {
-    let identity = finish_security_key_and_totp(state, &payload).await?;
+    let identity = finish_passkey_and_totp(state, &payload).await?;
     let client = client_metadata_from_headers(headers);
     let token = repositories::issue_token(
         &state.pool,
@@ -282,7 +261,7 @@ pub(crate) async fn reauth_finish(
     if session.username != payload.username.trim() {
         return Err(unauthenticated("operator identity mismatch"));
     }
-    let identity = finish_security_key_and_totp(state, &payload).await?;
+    let identity = finish_passkey_and_totp(state, &payload).await?;
     let client = client_metadata_from_headers(headers);
     let token = repositories::issue_token(
         &state.pool,
@@ -313,16 +292,25 @@ pub(crate) async fn add_security_key_start(
     headers: &HeaderMap,
 ) -> Result<AdminSecurityKeyRegistrationResponse, ApiError> {
     let actor = authorize_admin(state, headers).await?;
+    let identity = repositories::load_active_identity(&state.pool, &actor.username)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthenticated("operator authentication failed"))?;
     let flow_id = Uuid::new_v4();
     let challenge = state
         .admin_passkeys
-        .start_security_key_registration(flow_id, actor.id, &actor.username)
+        .start_operator_passkey_registration(
+            flow_id,
+            actor.id,
+            &actor.username,
+            &identity.security_keys,
+        )
         .await
         .map_err(internal_error)?;
     state
         .state_store
         .put(
-            &format!("{ADMIN_KEY_ENROLLMENT_PREFIX}{flow_id}"),
+            &format!("{ADMIN_PASSKEY_ENROLLMENT_PREFIX}{flow_id}"),
             actor.id.as_bytes(),
             std::time::Duration::from_secs(state.config.valkey_ttl_seconds.min(300)),
         )
@@ -342,40 +330,36 @@ pub(crate) async fn add_security_key_finish(
     let actor = authorize_admin(state, headers).await?;
     let name = payload.name.trim();
     if !(3..=64).contains(&name.len()) {
-        return Err(bad_request(
-            "security-key name must contain 3 to 64 characters",
-        ));
+        return Err(bad_request("passkey name must contain 3 to 64 characters"));
     }
     let reason = validate_reason(&payload.reason)?;
-    if payload.confirmation != "ADD SECURITY KEY" {
-        return Err(bad_request(
-            "typed security-key confirmation does not match",
-        ));
+    if payload.confirmation != "ADD PASSKEY" {
+        return Err(bad_request("typed passkey confirmation does not match"));
     }
-    let binding_key = format!("{ADMIN_KEY_ENROLLMENT_PREFIX}{}", payload.flow_id);
+    let binding_key = format!("{ADMIN_PASSKEY_ENROLLMENT_PREFIX}{}", payload.flow_id);
     consume_reauth(state, actor.id, &payload.reauth_token).await?;
     let binding = state
         .state_store
         .take(&binding_key)
         .await
         .map_err(internal_error)?
-        .ok_or_else(|| unauthenticated("security-key enrollment expired"))?;
+        .ok_or_else(|| unauthenticated("passkey enrollment expired"))?;
     if binding.as_slice() != actor.id.as_bytes() {
-        return Err(unauthenticated("security-key enrollment identity mismatch"));
+        return Err(unauthenticated("passkey enrollment identity mismatch"));
     }
     let credential: RegisterPublicKeyCredential = serde_json::from_slice(&payload.credential)
         .map_err(|_| bad_request("invalid credential"))?;
-    let security_key = state
+    let passkey = state
         .admin_passkeys
-        .finish_security_key_registration(payload.flow_id, credential)
+        .finish_operator_passkey_registration(payload.flow_id, actor.id, credential)
         .await
-        .map_err(|error| security_key_registration_failure(payload.flow_id, error))?;
+        .map_err(|error| passkey_registration_failure(payload.flow_id, error))?;
     let client = client_metadata_from_headers(headers);
     repositories::add_security_key(
         &state.pool,
         actor.id,
         name,
-        &security_key,
+        &passkey,
         reason,
         client.ip_address.as_deref(),
     )
@@ -391,10 +375,8 @@ pub(crate) async fn remove_security_key(
 ) -> Result<AdminMutationResponse, ApiError> {
     let actor = authorize_admin(state, headers).await?;
     let reason = validate_reason(&payload.reason)?;
-    if payload.confirmation != format!("REMOVE SECURITY KEY {}", payload.key_id) {
-        return Err(bad_request(
-            "typed security-key confirmation does not match",
-        ));
+    if payload.confirmation != format!("REMOVE PASSKEY {}", payload.key_id) {
+        return Err(bad_request("typed passkey confirmation does not match"));
     }
     consume_reauth(state, actor.id, &payload.reauth_token).await?;
     let client = client_metadata_from_headers(headers);
@@ -413,13 +395,13 @@ pub(crate) async fn remove_security_key(
             Ok(AdminMutationResponse { changed: true })
         }
         repositories::RemoveSecurityKeyResult::NotFound => {
-            Err(bad_request("operator security key not found"))
+            Err(bad_request("operator passkey not found"))
         }
         repositories::RemoveSecurityKeyResult::WouldViolateMinimum { required } => {
             Err(bad_request(if required == 2 {
-                "close registration or enroll a replacement before removing this key"
+                "close registration or enroll a replacement before removing this passkey"
             } else {
-                "the last operator security key cannot be removed"
+                "the last operator passkey cannot be removed"
             }))
         }
     }
@@ -696,7 +678,7 @@ pub(crate) async fn update_setting(
             "runtime setting version changed; reload and retry",
         )),
         repositories::SetRuntimeValueResult::SecurityKeyMinimum => Err(bad_request(
-            "enroll a second roaming security key before opening registration",
+            "enroll a second independent passkey before opening registration",
         )),
     }
 }
@@ -817,18 +799,12 @@ mod tests {
     }
 
     #[test]
-    fn attestation_failure_returns_actionable_safe_message() {
-        let error = security_key_registration_failure(
-            Uuid::nil(),
-            anyhow::Error::new(WebauthnError::AttestationTrustFailure),
-        );
+    fn passkey_failure_does_not_expose_internal_details() {
+        let error = passkey_registration_failure(Uuid::nil(), anyhow::anyhow!("private detail"));
         assert_eq!(error.0, axum::http::StatusCode::UNAUTHORIZED);
-        assert!(
-            error
-                .1
-                .0
-                .message
-                .starts_with("security-key attestation was not trusted")
+        assert_eq!(
+            error.1.0.message,
+            "passkey registration failed; start a new enrollment attempt"
         );
     }
 }
