@@ -30,7 +30,6 @@ time = { version = "0.3", features = ["macros", "serde"] }
 opaque-ke = { version = "4.0.1", features = ["serde", "argon2", "std"] }
 argon2 = "0.5"
 webauthn-rs = { version = "0.5", optional = true, features = ["danger-allow-state-serialisation", "conditional-ui"] }
-webauthn-rs-device-catalog = "0.5.0-20230418"
 base64 = "0.23"
 hmac = "0.13"
 sha1 = "0.11"

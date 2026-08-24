@@ -286,7 +286,8 @@
       </div>
       <details>
         <summary>First-time enrollment</summary>
-        <p>Run <code>cloud-server admin-bootstrap &lt;username&gt;</code> on the trusted ops host. The token expires in 15 minutes.</p>
+        <p>Run <code>cloud-server admin-bootstrap &lt;username&gt;</code> in the cloud container on a trusted app host. The token expires in 15 minutes.</p>
+        <p>Use a physical YubiKey. If the browser asks whether this site may see the key's make and model, allow it: hardware attestation is required. Platform and synchronized passkeys are not accepted for operator access.</p>
         <label>One-time bootstrap token<input bind:value={bootstrapToken} type="password" autocomplete="off" /></label>
         <button on:click={enroll} disabled={Boolean(busy)}>Enroll roaming security key</button>
       </details>
