@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 3 * * 0"
   workflow_dispatch:
 
 concurrency:
@@ -21,8 +21,55 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  changes:
+    name: Detect affected areas
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+      android: ${{ steps.filter.outputs.android }}
+      ios: ${{ steps.filter.outputs.ios }}
+      server: ${{ steps.filter.outputs.server }}
+      infrastructure: ${{ steps.filter.outputs.infrastructure }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          files=()
+          detector_args=(--output "$GITHUB_OUTPUT")
+
+          if [[ "$EVENT_NAME" == "schedule" || "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            detector_args+=(--all)
+          elif [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] ||
+            ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null ||
+            ! git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+            echo "A complete comparison is unavailable; running the full matrix."
+            detector_args+=(--all)
+          else
+            mapfile -d '' files < <(
+              git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA"
+            )
+            printf 'Changed path: %s\n' "${files[@]}"
+          fi
+
+          bash scripts/ci/detect-affected.test.sh
+          bash scripts/ci/detect-affected.sh "${detector_args[@]}" -- "${files[@]}"
+
   rust:
     name: Rust workspace
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -92,6 +139,8 @@ jobs:
 
   frontend:
     name: Web and desktop frontends
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -127,6 +176,8 @@ jobs:
 
   mobile-checks:
     name: Mobile static checks
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -147,6 +198,8 @@ jobs:
 
   android:
     name: Android native package
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -181,6 +234,8 @@ jobs:
 
   ios:
     name: iOS native package
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-26
     defaults:
       run:
@@ -210,6 +265,8 @@ jobs:
 
   server-image:
     name: Production containers and acceptance
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -334,6 +391,8 @@ jobs:
 
   infrastructure:
     name: Pulumi Go stack
+    needs: changes
+    if: needs.changes.outputs.infrastructure == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -359,3 +418,28 @@ jobs:
         run: go vet ./...
       - name: Tests
         run: go test ./...
+
+  required:
+    name: CI required
+    if: always()
+    needs:
+      - changes
+      - rust
+      - frontend
+      - mobile-checks
+      - android
+      - ios
+      - server-image
+      - infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful affected checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -e '
+            .changes.result == "success" and
+            ([to_entries[] | select(.key != "changes") | .value.result]
+              | all(. == "success" or . == "skipped"))
+          ' <<< "$RESULTS" >/dev/null

@@ -76,6 +76,13 @@ bun run acceptance:full
 The stack, coverage, generated-secret lifecycle, and troubleshooting workflow
 are documented in [tests/acceptance/README.md](tests/acceptance/README.md).
 
+Pull-request and `main` CI classifies changed paths before starting expensive
+jobs. Native Android/iOS packages, Rust, hosted containers, frontends, and
+Pulumi checks run only when their inputs or shared dependencies changed. The
+mapping and its regression tests live in `scripts/ci/`; `CI required` is the
+single stable branch-protection result. A full matrix still runs on manual
+dispatch, CI workflow changes, and the weekly compatibility schedule.
+
 Targeted applications:
 
 ```bash
