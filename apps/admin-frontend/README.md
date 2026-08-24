@@ -31,10 +31,13 @@ security key, or another WebAuthn provider. Kamori does not request vendor
 attestation or force an authenticator attachment; WebAuthn user verification is
 still required.
 
-After first sign-in, enroll and test a second passkey from an independent
-authenticator or provider. A second credential in the same synchronized vault
-does not protect against losing access to that vault. Opening registration is
-rejected while the acting operator has fewer than two enrolled credentials.
+After first sign-in, a second passkey from an independent authenticator or
+provider is recommended for recovery, but it is optional and does not block
+opening registration. A second credential in the same synchronized vault does
+not protect against losing access to that vault. The console allows existing
+passkeys to be renamed; names are unique per operator and every rename is
+audited. The final passkey cannot be removed because doing so would lock the
+operator out.
 
 Every mutation requires another passkey assertion, current TOTP, a reason,
 and exact typed confirmation. Operator session and reauthentication tokens are

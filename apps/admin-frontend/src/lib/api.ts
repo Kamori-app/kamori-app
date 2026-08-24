@@ -147,6 +147,14 @@ export const adminApi = {
       payload,
       token,
     ),
+  renamePasskey: (baseUrl: string, token: string, payload: unknown) =>
+    request<{ changed: boolean }>(
+      baseUrl,
+      "/admin-api/security-keys/rename",
+      "POST",
+      payload,
+      token,
+    ),
   dashboard: (baseUrl: string, token: string) =>
     request<Dashboard>(baseUrl, "/admin-api/dashboard", "GET", undefined, token),
   settings: (baseUrl: string, token: string) =>

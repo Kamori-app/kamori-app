@@ -133,13 +133,14 @@ platform passkey, physical security key, or another WebAuthn authenticator.
 Kamori does not force an authenticator attachment or request vendor attestation;
 the registration ceremony still requires WebAuthn user verification.
 
-Sign in, add a second passkey from an independent authenticator or provider,
-and verify both before opening registration. Two credentials stored only in the
-same synchronized vault are not operationally independent. The control plane
-rejects the transition to open registration while the acting operator has fewer
-than two credentials. Operator sessions live only in browser memory for 15
-minutes; every mutation requires a fresh passkey assertion, TOTP, reason, and
-exact confirmation.
+Sign in and give the enrolled passkey a recognizable name. A second passkey
+from an independent authenticator or provider is recommended for recovery, but
+it is optional and does not block opening registration. Two credentials stored
+only in the same synchronized vault are not operationally independent. Passkey
+renames are audited, names are unique per operator, and the final passkey cannot
+be removed. Operator sessions live only in browser memory for 15 minutes; every
+mutation requires a fresh passkey assertion, TOTP, reason, and exact
+confirmation.
 
 ## 5. Release gates
 
@@ -157,8 +158,6 @@ exact confirmation.
   notifications reach a human. GitHub Actions is not used for uptime checks.
 - Legal templates are reviewed and a real operator exists; until then public
   registration remains closed regardless of technical readiness.
-- Two operator passkeys are enrolled and tested through independent
-  authenticators or providers.
 
 Only after every gate is evidenced may an operator set the audited runtime
 `registration_enabled` override to `true`. Deployment defaults remain closed.

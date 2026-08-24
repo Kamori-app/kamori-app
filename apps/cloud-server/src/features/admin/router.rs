@@ -39,6 +39,10 @@ pub fn router() -> Router<AppState> {
             "/admin-api/security-keys/remove",
             post(handlers::remove_security_key),
         )
+        .route(
+            "/admin-api/security-keys/rename",
+            post(handlers::rename_passkey),
+        )
         .route("/admin-api/dashboard", get(handlers::dashboard))
         .route(
             "/admin-api/settings",

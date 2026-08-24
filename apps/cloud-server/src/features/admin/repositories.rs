@@ -59,13 +59,19 @@ pub(crate) struct StoredRuntimeSetting {
 pub(crate) enum RemoveSecurityKeyResult {
     Removed,
     NotFound,
-    WouldViolateMinimum { required: i64 },
+    WouldRemoveLast,
+}
+
+pub(crate) enum RenamePasskeyResult {
+    Renamed,
+    Unchanged,
+    NotFound,
+    NameConflict,
 }
 
 pub(crate) enum SetRuntimeValueResult {
     Changed,
     VersionConflict,
-    SecurityKeyMinimum,
 }
 
 fn new_secret_token(prefix: &str) -> (String, Vec<u8>) {
@@ -304,14 +310,19 @@ pub(crate) async fn add_security_key(
     key: &Passkey,
     reason: &str,
     ip_address: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
+    sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
+        .bind(admin_id)
+        .fetch_one(&mut *tx)
+        .await?;
     let key_id = Uuid::new_v4();
-    sqlx::query(
+    let inserted = sqlx::query(
         r#"
         INSERT INTO admin_security_keys (
             id, admin_user_id, name, credential_id, security_key_data
         ) VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT DO NOTHING
         "#,
     )
     .bind(key_id)
@@ -320,7 +331,13 @@ pub(crate) async fn add_security_key(
     .bind(key.cred_id().as_ref())
     .bind(encode_passkey(key)?)
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected()
+        == 1;
+    if !inserted {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     sqlx::query(
         r#"
         INSERT INTO admin_audit_log (
@@ -336,7 +353,7 @@ pub(crate) async fn add_security_key(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) async fn remove_security_key(
@@ -345,43 +362,38 @@ pub(crate) async fn remove_security_key(
     key_id: Uuid,
     reason: &str,
     ip_address: Option<&str>,
-    registration_enabled_default: bool,
 ) -> anyhow::Result<RemoveSecurityKeyResult> {
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
         .bind(admin_id)
         .fetch_one(&mut *tx)
         .await?;
-    let registration_enabled = sqlx::query_scalar::<_, Value>(
-        "SELECT value FROM runtime_config_overrides WHERE key = 'registration_enabled'",
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM admin_security_keys WHERE id = $1 AND admin_user_id = $2)",
     )
-    .fetch_optional(&mut *tx)
-    .await?
-    .and_then(|value| value.as_bool())
-    .unwrap_or(registration_enabled_default);
-    let required = if registration_enabled { 2 } else { 1 };
+    .bind(key_id)
+    .bind(admin_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !exists {
+        tx.rollback().await?;
+        return Ok(RemoveSecurityKeyResult::NotFound);
+    }
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM admin_security_keys WHERE admin_user_id = $1",
     )
     .bind(admin_id)
     .fetch_one(&mut *tx)
     .await?;
-    if count <= required {
+    if count <= 1 {
         tx.rollback().await?;
-        return Ok(RemoveSecurityKeyResult::WouldViolateMinimum { required });
+        return Ok(RemoveSecurityKeyResult::WouldRemoveLast);
     }
-    let removed =
-        sqlx::query("DELETE FROM admin_security_keys WHERE id = $1 AND admin_user_id = $2")
-            .bind(key_id)
-            .bind(admin_id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected()
-            == 1;
-    if !removed {
-        tx.rollback().await?;
-        return Ok(RemoveSecurityKeyResult::NotFound);
-    }
+    sqlx::query("DELETE FROM admin_security_keys WHERE id = $1 AND admin_user_id = $2")
+        .bind(key_id)
+        .bind(admin_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query(
         "UPDATE admin_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE admin_user_id = $1",
     )
@@ -404,6 +416,76 @@ pub(crate) async fn remove_security_key(
     .await?;
     tx.commit().await?;
     Ok(RemoveSecurityKeyResult::Removed)
+}
+
+pub(crate) async fn rename_passkey(
+    pool: &PgPool,
+    admin_id: Uuid,
+    key_id: Uuid,
+    name: &str,
+    reason: &str,
+    ip_address: Option<&str>,
+) -> anyhow::Result<RenamePasskeyResult> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
+        .bind(admin_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let previous_name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM admin_security_keys WHERE id = $1 AND admin_user_id = $2 FOR UPDATE",
+    )
+    .bind(key_id)
+    .bind(admin_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(previous_name) = previous_name else {
+        tx.rollback().await?;
+        return Ok(RenamePasskeyResult::NotFound);
+    };
+    if previous_name == name {
+        tx.rollback().await?;
+        return Ok(RenamePasskeyResult::Unchanged);
+    }
+    let name_conflict: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM admin_security_keys
+            WHERE admin_user_id = $1 AND id <> $2 AND lower(name) = lower($3)
+        )
+        "#,
+    )
+    .bind(admin_id)
+    .bind(key_id)
+    .bind(name)
+    .fetch_one(&mut *tx)
+    .await?;
+    if name_conflict {
+        tx.rollback().await?;
+        return Ok(RenamePasskeyResult::NameConflict);
+    }
+    sqlx::query("UPDATE admin_security_keys SET name = $3 WHERE id = $1 AND admin_user_id = $2")
+        .bind(key_id)
+        .bind(admin_id)
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO admin_audit_log (
+            id, actor_admin_user_id, event_kind, target_kind, target_id, reason, details, ip_address
+        ) VALUES ($1, $2, 'operator_passkey_renamed', 'admin_passkey', $3, $4, $5, $6)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(admin_id)
+    .bind(key_id.to_string())
+    .bind(reason)
+    .bind(json!({ "previous_name": previous_name, "new_name": name }))
+    .bind(ip_address)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(RenamePasskeyResult::Renamed)
 }
 
 pub(crate) async fn issue_token(
@@ -639,22 +721,6 @@ pub(crate) async fn set_runtime_value(
     ip_address: Option<&str>,
 ) -> anyhow::Result<SetRuntimeValueResult> {
     let mut tx = pool.begin().await?;
-    if key == "registration_enabled" && value == &Value::Bool(true) {
-        sqlx::query("SELECT id FROM admin_users WHERE id = $1 FOR UPDATE")
-            .bind(actor_id)
-            .fetch_one(&mut *tx)
-            .await?;
-        let key_count: i64 = sqlx::query_scalar(
-            "SELECT count(*)::bigint FROM admin_security_keys WHERE admin_user_id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if key_count < 2 {
-            tx.rollback().await?;
-            return Ok(SetRuntimeValueResult::SecurityKeyMinimum);
-        }
-    }
     let changed = if expected_version == 0 {
         sqlx::query(
             r#"

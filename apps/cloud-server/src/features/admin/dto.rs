@@ -56,6 +56,15 @@ pub struct AdminSecurityKeyRemoveRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AdminPasskeyRenameRequest {
+    pub key_id: Uuid,
+    pub name: String,
+    pub reauth_token: String,
+    pub reason: String,
+    pub confirmation: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AdminAuthStartRequest {
     pub username: String,
 }
@@ -178,5 +187,21 @@ mod tests {
         let decoded: UpdateRuntimeSettingRequest = rmp_serde::from_slice(&encoded).expect("decode");
         assert_eq!(decoded.key, request.key);
         assert_eq!(decoded.value, request.value);
+    }
+
+    #[test]
+    fn passkey_rename_request_roundtrips() {
+        let key_id = Uuid::new_v4();
+        let request = AdminPasskeyRenameRequest {
+            key_id,
+            name: "Password manager".to_string(),
+            reauth_token: "proof".to_string(),
+            reason: "Use a recognizable provider name".to_string(),
+            confirmation: format!("RENAME PASSKEY {key_id}"),
+        };
+        let encoded = rmp_serde::to_vec_named(&request).expect("encode");
+        let decoded: AdminPasskeyRenameRequest = rmp_serde::from_slice(&encoded).expect("decode");
+        assert_eq!(decoded.key_id, request.key_id);
+        assert_eq!(decoded.name, request.name);
     }
 }
