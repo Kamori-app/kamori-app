@@ -49,7 +49,7 @@
                 "Kamori is an offline-first personal organizer. Its first-party apps encrypt every operation before sync; the hosted service only moves ciphertext between your devices.",
             start: "Create an account",
             seeApps: "See the apps",
-            available: "Web · Desktop · Android · iOS",
+            available: "Web · Desktop · Android · iOS coming soon",
             noteTitle: "One account, four surfaces",
             noteBody:
                 "Work directly in Kamori on the web or mobile. On desktop, use the native control center—or expose an optional local CalDAV/CardDAV bridge to an app you already trust.",
@@ -84,8 +84,9 @@
             desktopBody: "Native organizer and sync controls for macOS, Windows and Linux, plus the optional local DAV bridge.",
             desktopAction: "Desktop releases",
             mobileTitle: "Mobile organizer",
-            mobileBody: "Offline-first Android and iOS apps. Optional system projection is per collection and can be disabled again.",
-            mobileAction: "Mobile releases",
+            mobileBody: "The offline-first Android app is available now. The iOS release is coming soon. Optional system projection is per collection and can be disabled again.",
+            mobileAction: "Android releases",
+            iosStatus: "iOS · Coming soon",
             releasePrefix: "Latest published release",
             releaseNotes: "release notes",
             desktopPaper: "Desktop DAV white paper",
@@ -131,7 +132,7 @@
                 "Kamori — офлайн-органайзер. Официальные приложения шифруют каждую операцию до синхронизации; hosted-сервис только передаёт шифротекст между вашими устройствами.",
             start: "Создать аккаунт",
             seeApps: "Посмотреть приложения",
-            available: "Веб · Desktop · Android · iOS",
+            available: "Веб · Desktop · Android · iOS скоро",
             noteTitle: "Один аккаунт, четыре интерфейса",
             noteBody:
                 "Работайте прямо в Kamori через веб или мобильное приложение. На компьютере используйте нативный центр управления — либо включите локальный CalDAV/CardDAV-мост для привычного приложения.",
@@ -166,8 +167,9 @@
             desktopBody: "Нативный органайзер и управление синхронизацией на macOS, Windows и Linux, плюс необязательный локальный DAV-мост.",
             desktopAction: "Desktop-релизы",
             mobileTitle: "Мобильный органайзер",
-            mobileBody: "Офлайн-приложения для Android и iOS. Системная проекция включается отдельно для коллекций и всегда может быть отключена.",
-            mobileAction: "Mobile-релизы",
+            mobileBody: "Офлайн-приложение для Android уже доступно. Релиз для iOS скоро. Системная проекция включается отдельно для коллекций и всегда может быть отключена.",
+            mobileAction: "Android-релизы",
+            iosStatus: "iOS · Скоро",
             releasePrefix: "Последний опубликованный релиз",
             releaseNotes: "заметки к релизу",
             desktopPaper: "White paper о desktop DAV-мосте",
@@ -203,7 +205,7 @@
     $: mobilePaper = currentLocale === "ru" ? links.mobileGuideRu : links.mobileGuide;
     $: privacyPaper = currentLocale === "ru" ? links.privacyRu : links.privacy;
 
-    let osHint: "desktop" | "mobile" | "other" = "other";
+    let osHint: "desktop" | "android" | "ios" | "other" = "other";
     let latestRelease = "";
     let latestReleaseDate = "";
     let latestReleaseUrl = links.releases;
@@ -229,8 +231,10 @@
         }
 
         const ua = navigator.userAgent.toLowerCase();
-        osHint = /(android|iphone|ipad|ipod)/.test(ua)
-            ? "mobile"
+        osHint = /android/.test(ua)
+            ? "android"
+            : /(iphone|ipad|ipod)/.test(ua)
+              ? "ios"
             : /(mac os|win|linux)/.test(ua)
               ? "desktop"
               : "other";
@@ -264,7 +268,7 @@
     <title>Kamori — encrypted organizer</title>
     <meta
         name="description"
-        content="Offline-first encrypted calendars, tasks and contacts for web, desktop, Android and iOS."
+        content="Offline-first encrypted calendars, tasks and contacts for web, desktop and Android. iOS is coming soon."
     />
 </svelte:head>
 
@@ -406,9 +410,10 @@
                 <p>{c.desktopBody}</p>
                 <a href={links.releases} target="_blank" rel="noreferrer">{c.desktopAction} →</a>
             </article>
-            <article class:recommended={osHint === "mobile"}>
+            <article class:recommended={osHint === "android"}>
                 <div class="app-glyph mobile"><span></span></div>
-                <p class="app-platform">ANDROID · IOS</p>
+                <p class="app-platform">ANDROID</p>
+                <span class="release-status">{c.iosStatus}</span>
                 <h3>{c.mobileTitle}</h3>
                 <p>{c.mobileBody}</p>
                 <a href={links.releases} target="_blank" rel="noreferrer">{c.mobileAction} →</a>
@@ -545,6 +550,7 @@
     .app-glyph.desktop span { width: 108px; height: 70px; border: 3px solid var(--ink); box-shadow: 0 12px 0 -8px var(--ink); background: var(--coral); }
     .app-glyph.mobile span { width: 54px; height: 92px; border: 3px solid var(--ink); border-radius: 8px; background: var(--leaf); box-shadow: inset 0 -12px 0 var(--sun); }
     .app-platform { color: var(--coral) !important; }
+    .release-status { width: fit-content; margin-top: .65rem; padding: .3rem .5rem; border: 1px solid var(--ink); background: var(--sun); font-size: .68rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .app-ledger h3 { margin-top: 1.4rem; }
     .app-ledger a { width: fit-content; margin-top: auto; padding-top: 1.5rem; color: var(--ink); font-size: .85rem; font-weight: 650; }
     .release-line { margin: 1.5rem 0 0; font-size: .8rem; }
