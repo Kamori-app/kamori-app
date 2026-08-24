@@ -36,7 +36,9 @@
     import Button from "$lib/components/ui/Button.svelte";
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
+    import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
     import { locale } from "$lib/i18n";
+    import { notify } from "$lib/stores/notifications";
 
     const ruCopy: Record<string, string> = {
         "Web Settings": "Настройки веб-приложения", "Cloud Base URL": "Адрес сервиса Kamori", "Save Settings": "Сохранить настройки",
@@ -58,11 +60,11 @@
     const localized = (english: string, russian: string) =>
         $locale === "ru" ? russian : english;
 
-    /**
-     * Minimal settings modal used to override cloud API base URL.
-     */
+    /** Routed settings surface; it can still use the modal shell in legacy hosts. */
     export let open = false;
     export let onClose: () => void = () => {};
+    export let embedded = false;
+    export let section: "general" | "security" | "devices" | "privacy" | "account" | "advanced" = "general";
 
     let settingsCloudBaseUrl = "";
     let wasOpen = false;
@@ -106,10 +108,18 @@
     let accountDeletePassword = "";
     let accountDeleteTotp = "";
     let accountDeleteConfirmation = "";
+    let formNotice = "";
+    let previousSection = section;
 
     const setNotice = (notice: string) => {
-        appState.update((state) => ({ ...state, notice }));
+        formNotice = notice;
+        notify(notice, { source: t("Web Settings") });
     };
+
+    $: if (section !== previousSection) {
+        formNotice = "";
+        previousSection = section;
+    }
 
     const clearTotpSetupDraft = () => {
         totpSetupFlowId = "";
@@ -522,8 +532,8 @@
                 ...state,
                 accessToken: null,
                 totpContinuationToken: null,
-                notice: localized("Password changed. Sign in again.", "Пароль изменён. Войдите снова."),
             }));
+            setNotice(localized("Password changed. Sign in again.", "Пароль изменён. Войдите снова."));
             clearPasswordChangeDraft();
             clearTotpRecoveryCodes();
             clearTotpSetupDraft();
@@ -988,11 +998,11 @@
                 collections: [],
                 syncedItemsTotal: 0,
                 lastSyncedSeq: 0,
-                notice: localized(
-                    "Account and local encrypted browser data deleted.",
-                    "Аккаунт и локальные зашифрованные данные браузера удалены.",
-                ),
             }));
+            setNotice(localized(
+                "Account and local encrypted browser data deleted.",
+                "Аккаунт и локальные зашифрованные данные браузера удалены.",
+            ));
             accountDeletePassword = "";
             accountDeleteTotp = "";
             accountDeleteConfirmation = "";
@@ -1091,8 +1101,27 @@
     }
 </script>
 
-<Modal {open} title={t("Web Settings")} {onClose}>
+<Modal {open} title={t("Web Settings")} {onClose} {embedded}>
     <div class="space-y-4">
+        {#if formNotice}
+            <p class="border border-coral/30 bg-coral/10 p-3 text-sm text-slate" role="alert">
+                {formNotice}
+            </p>
+        {/if}
+        {#if section === "general"}
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
+            {localized("Application language", "Язык приложения")}
+        </p>
+        <p class="text-sm text-slate/70">
+            {localized(
+                "Choose the language used by this browser. The preference stays on this device.",
+                "Выберите язык для этого браузера. Настройка сохраняется только на этом устройстве.",
+            )}
+        </p>
+        <LocaleSwitch />
+        {/if}
+
+        {#if section === "advanced"}
         <p class="text-xs font-semibold uppercase tracking-wide text-slate/70">
             {t("Cloud Base URL")}
         </p>
@@ -1100,7 +1129,15 @@
         <div class="pt-1">
             <Button on:click={saveCloudBaseUrl}>{t("Save Settings")}</Button>
         </div>
+        <p class="text-xs text-slate/65">
+            {localized(
+                "The hosted app configures this automatically. Change it only when connecting to a self-hosted Kamori service.",
+                "В hosted-версии адрес настроен автоматически. Меняйте его только для подключения к self-hosted Kamori.",
+            )}
+        </p>
+        {/if}
 
+        {#if section === "account"}
         <div class="border-t border-slate/15 pt-3">
             <div class="flex items-center justify-between gap-2">
                 <p
@@ -1228,7 +1265,9 @@
                 </div>
             {/if}
         </div>
+        {/if}
 
+        {#if section === "privacy"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -1307,7 +1346,9 @@
                 </div>
             {/if}
         </div>
+        {/if}
 
+        {#if section === "devices"}
         <div class="border-t border-slate/15 pt-3">
             <div class="flex items-center justify-between gap-2">
                 <p
@@ -1430,7 +1471,9 @@
                 </div>
             {/if}
         </div>
+        {/if}
 
+        {#if section === "security"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -1744,7 +1787,9 @@
                 </div>
             {/if}
         </div>
+        {/if}
 
+        {#if section === "account"}
         <div class="border-t border-coral/30 pt-3">
             <div class="flex items-center justify-between gap-2">
                 <p
@@ -1807,5 +1852,6 @@
                 </div>
             {/if}
         </div>
+        {/if}
     </div>
 </Modal>
