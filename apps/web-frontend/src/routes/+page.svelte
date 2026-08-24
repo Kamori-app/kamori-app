@@ -535,7 +535,7 @@
     .bridge-note code { white-space: normal; font-family: var(--font-sans); font-size: .83rem; }
     .document-link { width: fit-content; margin-top: 1.3rem; color: var(--ink); font-size: .83rem; }
     .app-ledger { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 4rem; border: 1px solid var(--ink); }
-    .app-ledger article { position: relative; min-height: 400px; padding: 1.5rem; border-right: 1px solid var(--ink); background: rgba(250, 247, 237, .5); }
+    .app-ledger article { position: relative; display: flex; min-height: 400px; padding: 1.5rem; flex-direction: column; border-right: 1px solid var(--ink); background: rgba(250, 247, 237, .5); }
     .app-ledger article:last-child { border-right: 0; }
     .app-ledger article.recommended::before { content: "●"; position: absolute; right: 1rem; top: 1rem; color: var(--coral); }
     .app-glyph { height: 130px; display: grid; place-items: center; margin-bottom: 1.5rem; background: var(--paper-deep); }
@@ -546,7 +546,7 @@
     .app-glyph.mobile span { width: 54px; height: 92px; border: 3px solid var(--ink); border-radius: 8px; background: var(--leaf); box-shadow: inset 0 -12px 0 var(--sun); }
     .app-platform { color: var(--coral) !important; }
     .app-ledger h3 { margin-top: 1.4rem; }
-    .app-ledger a { position: absolute; left: 1.5rem; bottom: 1.5rem; color: var(--ink); font-size: .85rem; font-weight: 650; }
+    .app-ledger a { width: fit-content; margin-top: auto; padding-top: 1.5rem; color: var(--ink); font-size: .85rem; font-weight: 650; }
     .release-line { margin: 1.5rem 0 0; font-size: .8rem; }
     .release-line a { margin-left: .8rem; color: var(--ink); }
     .document-row { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin-top: 1.2rem; }
