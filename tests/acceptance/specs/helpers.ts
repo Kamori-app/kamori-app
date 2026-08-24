@@ -6,6 +6,15 @@ export interface AcceptanceAccount {
   recoveryPhrase: string;
 }
 
+export type AppSection = "Today" | "Tasks" | "Calendar" | "Contacts" | "Spaces";
+
+export const openAppSection = async (page: Page, section: AppSection): Promise<void> => {
+  await page
+    .getByRole("link", { name: section, exact: true })
+    .filter({ visible: true })
+    .click();
+};
+
 export const uniqueAccount = (prefix: string): AcceptanceAccount => ({
   username: `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
   password: `Kamori-${crypto.randomUUID()}-Pass!`,
@@ -16,27 +25,27 @@ export const signup = async (
   page: Page,
   account: AcceptanceAccount,
 ): Promise<AcceptanceAccount> => {
-  await page.goto("/app?start=signup");
-  const dialog = page.getByRole("dialog", { name: "Create account" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByPlaceholder("Username").fill(account.username);
-  await dialog.getByPlaceholder("Password", { exact: true }).fill(account.password);
-  await dialog.getByPlaceholder("Confirm password").fill(account.password);
-  await dialog.getByRole("button", { name: "Create account" }).click();
+  await page.goto("/app/sign-up");
+  const surface = page.getByRole("region", { name: "Create account" });
+  await expect(surface).toBeVisible();
+  await surface.getByPlaceholder("Username").fill(account.username);
+  await surface.getByPlaceholder("Password", { exact: true }).fill(account.password);
+  await surface.getByPlaceholder("Confirm password").fill(account.password);
+  await surface.getByRole("button", { name: "Create account" }).click();
 
-  const words = dialog.locator("ol li");
+  const words = surface.locator("ol li");
   await expect(words).toHaveCount(24);
   const recoveryWords = (await words.allTextContents()).map((entry) =>
     entry.replace(/^\d+\.\s*/, "").trim(),
   );
   const recoveryPhrase = recoveryWords.join(" ");
-  await dialog
+  await surface
     .getByPlaceholder("Type word 24 to confirm")
     .fill(recoveryWords.at(-1) ?? "");
-  await dialog
+  await surface
     .getByRole("button", { name: "I saved the kit — create account" })
     .click();
-  await expect(page.getByRole("dialog", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Sign in" })).toBeVisible();
   return { ...account, recoveryPhrase };
 };
 
@@ -45,18 +54,19 @@ export const signIn = async (
   account: Pick<AcceptanceAccount, "username" | "password">,
   options: { allowLocalUnlock?: boolean } = {},
 ): Promise<void> => {
-  let dialog = page.getByRole("dialog", { name: "Sign in" });
-  if (!(await dialog.isVisible())) {
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    dialog = page.getByRole("dialog", { name: "Sign in" });
+  let surface = page.getByRole("region", { name: "Sign in" });
+  if (!(await surface.isVisible())) {
+    await page.goto("/app/sign-in");
+    surface = page.getByRole("region", { name: "Sign in" });
   }
-  await dialog.getByPlaceholder("Username").fill(account.username);
-  await dialog.getByPlaceholder("Password", { exact: true }).fill(account.password);
+  await expect(surface).toBeVisible();
+  await surface.getByPlaceholder("Username").fill(account.username);
+  await surface.getByPlaceholder("Password", { exact: true }).fill(account.password);
   if (options.allowLocalUnlock) {
-    await dialog.getByRole("checkbox").check();
+    await surface.getByRole("checkbox").check();
   }
-  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByText("Authenticated", { exact: true })).toBeVisible();
+  await surface.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
 };
 
 export const signupAndSignIn = async (
@@ -72,9 +82,10 @@ export const createCollection = async (
   page: Page,
   name: string,
 ): Promise<string> => {
-  await page.getByPlaceholder("Collection name").fill(name);
-  await page.getByRole("button", { name: "Create Collection" }).click();
-  await expect(page.getByText(`Collection "${name}" created.`)).toBeVisible();
+  await openAppSection(page, "Spaces");
+  await page.getByPlaceholder("Space name").fill(name);
+  await page.getByRole("button", { name: "Create Space" }).click();
+  await expect(page.getByText(`Space "${name}" created.`)).toBeVisible();
   const collection = page
     .locator("[data-space-id]")
     .filter({ has: page.getByText(name, { exact: true }) });
@@ -82,6 +93,11 @@ export const createCollection = async (
   const id = await collection.getAttribute("data-space-id");
   if (!id) throw new Error("created collection has no space id");
   return id;
+};
+
+export const syncNow = async (page: Page): Promise<void> => {
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(page.getByText(/Sync completed:/)).toBeVisible();
 };
 
 export const captureAccessToken = (page: Page): (() => string) => {
@@ -100,5 +116,5 @@ export const captureAccessToken = (page: Page): (() => string) => {
 
 export const logout = async (page: Page): Promise<void> => {
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByText("Not signed in", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Sign in" })).toBeVisible();
 };

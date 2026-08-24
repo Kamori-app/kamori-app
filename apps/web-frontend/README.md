@@ -7,13 +7,15 @@ SvelteKit web frontend for Kamori (landing + web app).
 `web-frontend` is the browser client for Kamori.
 It contains:
 - landing page (`/`),
-- web app area (`/app`) for authentication, offline PIM, devices, sessions,
-  collections, sync, recovery, and invite-code sharing.
+- routed web app area (`/app`) for authentication, offline PIM, devices,
+  sessions, spaces, automatic sync, recovery, and invite-code sharing.
 
 Main responsibilities:
 - Full OPAQUE auth flow against `cloud-server` (start/finish executed in browser runtime).
-- OPAQUE password-change flow in web settings (`/auth/password/change/*`).
-- TOTP setup/disable UI in web settings (QR generated locally in browser from `otpauth_uri` + manual key fallback).
+- OPAQUE password-change flow in the routed Security settings
+  (`/auth/password/change/*`).
+- TOTP setup/disable UI in Security settings (QR generated locally in browser
+  from `otpauth_uri` + manual key fallback).
 - Separate security UX for:
   - one-time TOTP backup-code regeneration in settings,
   - 24-word data recovery-kit display and account recovery.
@@ -27,6 +29,46 @@ Main responsibilities:
   `Security`, `Questions`) with direct document and download links.
 
 Local DAV runtime and local SQLite are out of scope for web.
+
+## Application Routes
+
+The authenticated app shell stays mounted while its focused views change:
+
+- `/app` — Today overview;
+- `/app/tasks`, `/app/calendar`, `/app/contacts` — first-party PIM views;
+- `/app/spaces` — encrypted space creation, trash, and access entry points;
+- `/app/sharing?space=<id>` — invite and membership controls for one space;
+- `/app/settings/{general,security,devices,privacy,account,advanced}` — routed
+  settings; the self-hosted service endpoint is isolated under Advanced.
+
+Authentication is intentionally separate from recovery:
+
+- `/app/sign-in` — OPAQUE or passkey sign-in;
+- `/app/sign-up` — web-only account registration;
+- `/app/recovery` — destructive Data Recovery Kit flow with its revocation
+  effects shown before submission.
+
+An account without a space sees a dedicated first-run screen instead of empty
+task/calendar/contact forms. Write controls are also disabled for reader spaces
+and devices that have not received the current space key.
+
+## Browser Synchronization
+
+- A full initial sync discovers spaces, key packages, members, trash, and the
+  signed encrypted operation journal.
+- Subsequent foreground auto-sync runs use the lighter operation-delta path and
+  the stored per-space cursor. A metadata refresh runs at least every five
+  minutes.
+- Delta sync is requested after a local write, when connectivity returns, when
+  the tab becomes visible or focused, and every 30 seconds while visible.
+- Overlapping runs are coalesced, the data plane is serialized with Web Locks,
+  and a separate non-waiting Web Lock avoids duplicate simultaneous polling by
+  multiple tabs.
+- Failures use exponential backoff with jitter up to five minutes. The header
+  reports syncing, offline, pending-outbox, and persistent error states; manual
+  sync remains available from that status control.
+- A locked or closed browser never gives a Service Worker the account master
+  key. Encrypted outbox entries resume after the user unlocks the app.
 
 ## Token Usage
 
@@ -69,7 +111,7 @@ Server-side token TTL policy (cloud-server env):
 
 ## TOTP UX
 
-- TOTP management is available in web settings modal (`/app`).
+- TOTP management is available at `/app/settings/security`.
 - Setup flow:
   - complete a scoped OPAQUE reauthentication and call `POST /auth/totp/setup/start`,
   - receive one-time `flow_id`, `manual_entry_key` + `otpauth_uri`,
@@ -88,8 +130,9 @@ Server-side token TTL policy (cloud-server env):
 
 ## Account Recovery UX
 
-- Recovery is available in Sign In with the 24-word data recovery kit. TOTP
-  backup codes cannot perform data recovery.
+- Recovery is a dedicated `/app/recovery` flow and is not embedded in Sign In.
+  It uses the 24-word data recovery kit; TOTP backup codes cannot perform data
+  recovery.
 - Flow:
   - derive the recovery verifier and account master key locally from the words;
   - call `POST /auth/account-recovery/start` with `username`,
@@ -108,6 +151,8 @@ Server-side token TTL policy (cloud-server env):
 
 Layers:
 - SvelteKit app shell + routing.
+- Structured global notifications, inline form errors, and a persistent sync
+  status replace the former single bottom-of-page notice string.
 - UI pages/components under `src/routes` and `src/lib`.
 - API transport clients in `src/lib/api` (MessagePack encode/decode).
 - Non-sensitive browser state store in `src/lib/stores/app.ts`.
@@ -217,7 +262,7 @@ bun run --filter web-frontend build
 ```
 
 Current unit tests cover PIM operation/snapshot validation, section navigation,
-and cookie refresh/CSRF session behavior. Backend and crypto-core suites cover
+auto-sync trigger coalescing, and cookie refresh/CSRF session behavior. Backend and crypto-core suites cover
 the matching MessagePack, OPAQUE, recovery, signed-operation, rotation, and
 key-wrapping contracts.
 

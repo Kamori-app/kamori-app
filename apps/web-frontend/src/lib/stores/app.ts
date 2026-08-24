@@ -2,8 +2,8 @@ import { browser } from "$app/environment";
 import { writable } from "svelte/store";
 import { normalizeCloudBaseUrl } from "$lib/endpoint";
 
-/** In-memory collection descriptor hydrated from the encrypted vault/cloud. */
-export interface CollectionEntry {
+/** In-memory encrypted-space descriptor hydrated from the vault/cloud. */
+export interface SpaceEntry {
   id: string;
   name: string;
   keyAvailable: boolean;
@@ -24,10 +24,9 @@ export interface AppState {
   currentUsername: string;
   accessToken: string | null;
   totpContinuationToken: string | null;
-  collections: CollectionEntry[];
+  collections: SpaceEntry[];
   syncedItemsTotal: number;
   lastSyncedSeq: number;
-  notice: string;
 }
 
 const STORAGE_KEY = "kamori.web-frontend.app-state.v1";
@@ -44,7 +43,6 @@ const defaultState: AppState = {
   collections: [],
   syncedItemsTotal: 0,
   lastSyncedSeq: 0,
-  notice: "",
 };
 
 /**

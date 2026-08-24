@@ -7,6 +7,7 @@
     export let open = false;
     export let title = "";
     export let onClose: () => void = () => {};
+    export let embedded = false;
     import { onDestroy } from "svelte";
     import { locale } from "$lib/i18n";
 
@@ -54,7 +55,7 @@
         }
     };
 
-    $: if (open) {
+    $: if (open && !embedded) {
         lockPageScroll();
     } else {
         unlockPageScroll();
@@ -65,7 +66,15 @@
 
 <svelte:window on:keydown|capture={onWindowKeydown} />
 
-{#if open}
+{#if open && embedded}
+    <section
+        class="border border-slate/20 bg-paper p-4 shadow-[6px_6px_0_rgba(23,63,55,0.10)] md:p-6"
+        aria-label={title}
+    >
+        <h1 class="mb-5 font-heading text-2xl font-semibold text-slate">{title}</h1>
+        <slot />
+    </section>
+{:else if open}
     <div
         class="modal-backdrop fixed inset-0 z-50 grid place-items-center overflow-y-auto overscroll-contain bg-slate/45"
         role="dialog"

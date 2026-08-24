@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { decode } from "@msgpack/msgpack";
     import { cloudApi } from "$lib/api/cloud";
     import { tokenStore } from "$lib/auth/tokenStore";
     import { appState } from "$lib/stores/app";
@@ -9,23 +8,14 @@
     import {
         opaqueSigninFinish,
         opaqueSigninStart,
-        opaqueSignupFinish,
-        opaqueSignupStart,
-        recoveryPhraseToMasterKey,
-        unwrapSpaceKeyFromAccountRecovery,
         unwrapAccountMasterKey,
-        wrapAccountMasterKey,
         encryptVaultBytes,
     } from "$lib/opaqueClient";
     import {
-        deriveDataRecoveryVerifier,
         forgetMasterKeyForLocalUnlock,
         lockWebVault,
         rememberMasterKeyForLocalUnlock,
-        storeSpaceKey,
-        resetWebCredentialsAfterRecovery,
         unlockOrCreateWebVault,
-        unlockWebVaultForRecovery,
         unlockWebVaultFromLocalUnlock,
         withActiveMasterKey,
     } from "$lib/cryptoVault";
@@ -35,6 +25,7 @@
         toUtf8Bytes,
     } from "$lib/webauthn";
     import { locale } from "$lib/i18n";
+    import { notify } from "$lib/stores/notifications";
 
     const signinCopy = {
         en: {
@@ -44,13 +35,7 @@
             totp: "TOTP or one-time backup code (if enabled)",
             signingIn: "Signing in…",
             signIn: "Sign in",
-            recovery: "Account recovery",
-            kit: "24-word data recovery kit",
-            newPassword: "New password",
-            confirmPassword: "Confirm new password",
-            recovering: "Recovering…",
-            recover: "Recover account",
-            recoveryBody: "The 24-word data recovery kit authorizes recovery and restores your account key. It resets the password, rewraps that key, revokes active sessions, and disables TOTP. TOTP backup codes are separate and are never required here.",
+            recovery: "Recover account",
             passkey: "Passkey",
             signInPasskey: "Sign in with passkey",
             passkeyBody: "Passkey login uses discoverable authentication and does not require username input.",
@@ -63,12 +48,6 @@
             passkeyFailed: "Passkey sign-in failed",
             passkeyUnlocked: "Signed in with passkey and unlocked this approved browser.",
             passkeyApprove: "Passkey authentication succeeded. Enter your password once to approve and unlock this new browser.",
-            recoveryRequired: "Username, 24-word data recovery kit, and new password are required.",
-            passwordMismatch: "Password confirmation does not match.",
-            invalidRecoveryKit: "The 24-word data recovery kit is invalid.",
-            invalidRecoveredSpaceKey: "A recovered space key has an invalid length.",
-            recoveryCompleted: "Account recovery completed. Your password was reset, TOTP was disabled, and existing sessions, passkeys, and devices were revoked. Sign in with your new password.",
-            recoveryFailed: "Account recovery failed",
             passkeyCancelled: "Passkey request was cancelled.",
             localUnlock: "Allow passkey sign-in to unlock data on this browser",
             localUnlockBody: "Off by default. Kamori stores the account key encrypted by a non-exportable browser key. This protects copied storage, but code running as app.kamori.app in this browser profile can request decryption.",
@@ -80,13 +59,7 @@
             totp: "TOTP или одноразовый backup-код (если включено)",
             signingIn: "Входим…",
             signIn: "Войти",
-            recovery: "Восстановление аккаунта",
-            kit: "Recovery kit из 24 слов",
-            newPassword: "Новый пароль",
-            confirmPassword: "Повторите новый пароль",
-            recovering: "Восстанавливаем…",
-            recover: "Восстановить аккаунт",
-            recoveryBody: "Recovery kit из 24 слов подтверждает восстановление и возвращает ключ аккаунта. Пароль сбрасывается, ключ оборачивается заново, активные сессии отзываются, а TOTP отключается. Backup-коды TOTP здесь не нужны.",
+            recovery: "Восстановить аккаунт",
             passkey: "Passkey",
             signInPasskey: "Войти с passkey",
             passkeyBody: "Passkey использует discoverable-аутентификацию, поэтому имя пользователя вводить не нужно.",
@@ -99,12 +72,6 @@
             passkeyFailed: "Не удалось войти с passkey",
             passkeyUnlocked: "Вход с passkey выполнен, одобренный браузер разблокирован.",
             passkeyApprove: "Passkey подтверждён. Один раз введите пароль, чтобы одобрить и разблокировать новый браузер.",
-            recoveryRequired: "Введите имя пользователя, recovery kit из 24 слов и новый пароль.",
-            passwordMismatch: "Пароли не совпадают.",
-            invalidRecoveryKit: "Recovery kit из 24 слов недействителен.",
-            invalidRecoveredSpaceKey: "Восстановленный ключ пространства имеет неверную длину.",
-            recoveryCompleted: "Аккаунт восстановлен. Пароль сброшен, TOTP отключён, а прежние сессии, passkey и устройства отозваны. Войдите с новым паролем.",
-            recoveryFailed: "Не удалось восстановить аккаунт",
             passkeyCancelled: "Запрос passkey отменён.",
             localUnlock: "Разрешить passkey-входу разблокировать данные в этом браузере",
             localUnlockBody: "По умолчанию выключено. Ключ аккаунта хранится зашифрованным неизвлекаемым ключом браузера. Это защищает скопированное хранилище, но код app.kamori.app в этом профиле может запросить расшифровку.",
@@ -120,17 +87,17 @@
      */
     export let open = false;
     export let onClose: () => void = () => {};
+    export let onOpenRecovery: () => void = () => {};
+    export let embedded = false;
 
     let loginUsername = "";
     let loginPassword = "";
     let loginTotpCode = "";
-    let recoveryNewPassword = "";
-    let recoveryPasswordConfirm = "";
-    let recoveryPhrase = "";
     let loadingAction = "";
     let wasOpen = false;
     let pendingOpaqueExportKey: Uint8Array | null = null;
     let allowLocalUnlock = false;
+    let formNotice = "";
 
     const setLoading = (value: string) => {
         loadingAction = value;
@@ -141,7 +108,8 @@
     };
 
     const setNotice = (notice: string) => {
-        appState.update((state) => ({ ...state, notice }));
+        formNotice = notice;
+        notify(notice, { source: copy.title });
     };
 
     /**
@@ -293,8 +261,8 @@
                 currentUsername: username,
                 accessToken: response.access_token ?? null,
                 totpContinuationToken: null,
-                notice: copy.signedIn,
             }));
+            notify(copy.signedIn, { kind: "success", source: copy.title });
             pendingOpaqueExportKey?.fill(0);
             pendingOpaqueExportKey = null;
             loginPassword = "";
@@ -321,114 +289,6 @@
             throw error;
         } finally {
             masterKey.fill(0);
-        }
-    };
-
-    /**
-     * Resets password using the data recovery kit and disables TOTP.
-     */
-    const recoverAccount = async () => {
-        const username = loginUsername.trim();
-        const nextPassword = recoveryNewPassword;
-
-        if (
-            !username ||
-            !nextPassword ||
-            !recoveryPasswordConfirm ||
-            !recoveryPhrase.trim()
-        ) {
-            setNotice(copy.recoveryRequired);
-            return;
-        }
-        if (nextPassword !== recoveryPasswordConfirm) {
-            setNotice(copy.passwordMismatch);
-            return;
-        }
-
-        let recoveredMasterKey: Uint8Array;
-        try {
-            recoveredMasterKey = await recoveryPhraseToMasterKey(
-                recoveryPhrase,
-            );
-        } catch {
-            setNotice(copy.invalidRecoveryKit);
-            return;
-        }
-
-        setLoading("account-recovery");
-        try {
-            const start = await opaqueSignupStart(nextPassword);
-            const recoveryVerifier =
-                await deriveDataRecoveryVerifier(recoveredMasterKey);
-            const startResponse = await cloudApi.accountRecoveryStart(
-                $appState.cloudBaseUrl,
-                {
-                    username,
-                    recovery_verifier: recoveryVerifier,
-                    opaque_start_request: start.opaque_start_request,
-                },
-            );
-
-            const finish = await opaqueSignupFinish(
-                start.flow_id,
-                nextPassword,
-                startResponse.opaque_server_message,
-            );
-            const encryptedMasterKey = await wrapAccountMasterKey(
-                finish.export_key,
-                recoveredMasterKey,
-            );
-            const recovered = await cloudApi.accountRecoveryFinish($appState.cloudBaseUrl, {
-                recovery_token: startResponse.recovery_token,
-                opaque_finish_request: finish.opaque_finish_request,
-                encrypted_master_key: encryptedMasterKey,
-            });
-            await unlockWebVaultForRecovery(
-                $appState.cloudBaseUrl,
-                username,
-                recoveredMasterKey,
-            );
-            for (const packageEntry of recovered.space_key_packages) {
-                const spaceKey = await unwrapSpaceKeyFromAccountRecovery(
-                    recoveredMasterKey,
-                    decode(packageEntry.encrypted_key_package),
-                );
-                if (spaceKey.length !== 32) {
-                    throw new Error(copy.invalidRecoveredSpaceKey);
-                }
-                await storeSpaceKey(
-                    packageEntry.space_id,
-                    packageEntry.key_epoch,
-                    spaceKey,
-                );
-                spaceKey.fill(0);
-            }
-            await resetWebCredentialsAfterRecovery(
-                $appState.cloudBaseUrl,
-                username,
-            );
-            lockWebVault();
-
-            tokenStore.clear();
-            appState.update((state) => ({
-                ...state,
-                accessToken: null,
-                totpContinuationToken: null,
-                notice: copy.recoveryCompleted,
-            }));
-            loginPassword = "";
-            loginTotpCode = "";
-            recoveryNewPassword = "";
-            recoveryPasswordConfirm = "";
-            recoveryPhrase = "";
-        } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
-            setNotice(`${copy.recoveryFailed}: ${message}`);
-        } finally {
-            recoveredMasterKey.fill(0);
-            lockWebVault();
-            clearLoading();
         }
     };
 
@@ -490,8 +350,8 @@
                     currentUsername: finish.username,
                     accessToken: null,
                     totpContinuationToken: null,
-                    notice: copy.passkeyApprove,
                 }));
+                setNotice(copy.passkeyApprove);
                 allowLocalUnlock = true;
                 return;
             }
@@ -533,8 +393,8 @@
                 currentUsername: finish.username,
                 accessToken: finish.access_token,
                 totpContinuationToken: null,
-                notice: copy.passkeyUnlocked,
             }));
+            notify(copy.passkeyUnlocked, { kind: "success", source: copy.title });
             onClose();
         } catch (error) {
             lockWebVault();
@@ -556,9 +416,7 @@
     $: if (!open && wasOpen) {
         loginPassword = "";
         loginTotpCode = "";
-        recoveryNewPassword = "";
-        recoveryPasswordConfirm = "";
-        recoveryPhrase = "";
+        formNotice = "";
         loadingAction = "";
         pendingOpaqueExportKey?.fill(0);
         pendingOpaqueExportKey = null;
@@ -571,8 +429,13 @@
     }
 </script>
 
-<Modal {open} title={copy.title} {onClose}>
+<Modal {open} title={copy.title} {onClose} {embedded}>
     <div class="space-y-3">
+        {#if formNotice}
+            <p class="border border-coral/30 bg-coral/10 p-3 text-sm text-slate" role="alert">
+                {formNotice}
+            </p>
+        {/if}
         <Input bind:value={loginUsername} placeholder={copy.username} />
         <Input
             bind:value={loginPassword}
@@ -590,10 +453,9 @@
                 <span class="mt-1 block text-slate/65">{copy.localUnlockBody}</span>
             </span>
         </label>
-        <Input
-            bind:value={loginTotpCode}
-            placeholder={copy.totp}
-        />
+        {#if $appState.totpContinuationToken}
+            <Input bind:value={loginTotpCode} placeholder={copy.totp} />
+        {/if}
         <Button
             on:click={signinWithOpaque}
             disabled={loadingAction === "signin-opaque"}
@@ -601,42 +463,7 @@
             {loadingAction === "signin-opaque" ? copy.signingIn : copy.signIn}
         </Button>
 
-        <div class="space-y-2 rounded-xl border border-slate/15 p-3">
-            <p
-                class="text-xs font-semibold uppercase tracking-wide text-slate/70"
-            >
-                {copy.recovery}
-            </p>
-            <Input
-                bind:value={recoveryPhrase}
-                autocomplete="off"
-                placeholder={copy.kit}
-            />
-            <Input
-                bind:value={recoveryNewPassword}
-                type="password"
-                placeholder={copy.newPassword}
-            />
-            <Input
-                bind:value={recoveryPasswordConfirm}
-                type="password"
-                placeholder={copy.confirmPassword}
-            />
-            <Button
-                variant="secondary"
-                on:click={recoverAccount}
-                disabled={loadingAction === "account-recovery"}
-            >
-                {loadingAction === "account-recovery"
-                    ? copy.recovering
-                    : copy.recover}
-            </Button>
-            <p class="text-xs text-slate/70">
-                {copy.recoveryBody}
-            </p>
-        </div>
-
-        <div class="pt-1">
+        <div class="border-t border-slate/15 pt-4">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
@@ -656,6 +483,13 @@
             <p class="mt-2 text-xs text-slate/70">
                 {copy.passkeyBody}
             </p>
+        </div>
+
+        <div class="border-t border-slate/15 pt-3 text-sm text-slate/70">
+            <button
+                class="font-semibold text-slate underline underline-offset-2"
+                on:click={onOpenRecovery}
+            >{copy.recovery}</button>
         </div>
     </div>
 </Modal>

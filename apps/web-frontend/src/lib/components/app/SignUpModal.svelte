@@ -14,6 +14,7 @@
     import { deriveDataRecoveryVerifier } from "$lib/cryptoVault";
     import { wrapAccountMasterKey } from "$lib/opaqueClient";
     import { locale } from "$lib/i18n";
+    import { notify } from "$lib/stores/notifications";
 
     const signupCopy = {
         en: {
@@ -72,6 +73,7 @@
     export let open = false;
     export let onClose: () => void = () => {};
     export let onOpenSignIn: () => void = () => {};
+    export let embedded = false;
 
     let signupUsername = "";
     let signupPassword = "";
@@ -79,6 +81,7 @@
     let recoveryConfirmation = "";
     let recoveryWords: string[] = [];
     let loadingAction = "";
+    let formNotice = "";
     let pendingSignup:
         | {
               username: string;
@@ -108,7 +111,8 @@
     };
 
     const setNotice = (notice: string) => {
-        appState.update((state) => ({ ...state, notice }));
+        formNotice = notice;
+        notify(notice, { source: copy.title });
     };
 
     /**
@@ -241,7 +245,12 @@
     };
 </script>
 
-<Modal {open} title={copy.title} onClose={requestClose}>
+<Modal {open} title={copy.title} onClose={requestClose} {embedded}>
+    {#if formNotice}
+        <p class="mb-3 border border-coral/30 bg-coral/10 p-3 text-sm text-slate" role="alert">
+            {formNotice}
+        </p>
+    {/if}
     {#if pendingSignup}
         <div class="space-y-3">
             <p class="text-sm text-slate">

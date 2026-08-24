@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onDestroy, onMount } from "svelte";
+    import { page } from "$app/stores";
     import { cloudApi, type SpaceMemberSummary } from "$lib/api/cloud";
     import { decode, encode } from "@msgpack/msgpack";
     import { normalizeByteArray } from "$lib/binary";
@@ -13,7 +14,7 @@
         wrapBytesWithInviteCode,
         wrapCollectionKeyWithInviteCode,
     } from "$lib/inviteCodeCrypto";
-    import { appState, type CollectionEntry } from "$lib/stores/app";
+    import { appState, type SpaceEntry } from "$lib/stores/app";
     import {
         getActiveWebDevice,
         listQueuedOperationEnvelopes,
@@ -63,47 +64,71 @@
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
     import { locale } from "$lib/i18n";
+    import { notify } from "$lib/stores/notifications";
+    import {
+        markSyncFailure,
+        markSyncSuccess,
+        markSyncing,
+        registerManualSync,
+        setPendingOperations,
+        syncState,
+    } from "$lib/stores/sync";
+    import {
+        AutoSyncCoordinator,
+        type SyncReason,
+    } from "$lib/sync/autoSyncCoordinator";
 
     const ruCopy: Record<string, string> = {
         "Confirm this code in your desktop app": "Сверьте этот код с кодом в приложении для компьютера",
         "Approve Desktop": "Подтвердить компьютер",
         "Dashboard": "Обзор", "Current user": "Текущий пользователь", "Not signed in": "Вход не выполнен",
-        "Collections": "Пространства", "Operation states on device": "Состояний операций на устройстве", "Last synced seq": "Последняя операция",
-        "Syncing...": "Синхронизация…", "Sync Now": "Синхронизировать", "Collection name": "Название пространства",
-        "Create Collection": "Создать пространство", "No collections yet.": "Пространств пока нет.", "Approval required on another device": "Нужно подтверждение на другом устройстве",
+        "Spaces": "Пространства", "Operation states on device": "Состояний операций на устройстве", "Last synced seq": "Последняя операция",
+        "Syncing...": "Синхронизация…", "Sync Now": "Синхронизировать", "Space name": "Название пространства",
+        "Create Space": "Создать пространство", "No spaces yet.": "Пространств пока нет.", "Approval required on another device": "Нужно подтверждение на другом устройстве",
         "Delete": "Удалить", "Trash · retained for 30 days": "Корзина · хранение 30 дней", "Restore": "Восстановить",
         "Tasks": "Задачи", "New task": "Новая задача", "Saving...": "Сохранение…", "Add Task": "Добавить задачу",
         "Completed": "Выполнено", "Open": "Открыто", "Reopen": "Вернуть", "Complete": "Выполнить", "No tasks on this device yet.": "На этом устройстве задач пока нет.",
         "Calendar": "Календарь", "Event title": "Название события", "Add Event": "Добавить событие", "No events on this device yet.": "На этом устройстве событий пока нет.",
         "Contacts": "Контакты", "Full name": "Полное имя", "Email": "Email", "Phone": "Телефон", "Add Contact": "Добавить контакт", "No contacts on this device yet.": "На этом устройстве контактов пока нет.",
-        "Invite Codes": "Коды приглашений", "Generate": "Создать", "No collections": "Нет пространств", "Editor": "Редактор", "Reader": "Чтение",
+        "Invite Codes": "Коды приглашений", "Generate": "Создать", "No spaces": "Нет пространств", "Editor": "Редактор", "Reader": "Чтение",
         "Optional encrypted note for recipient": "Необязательная зашифрованная заметка получателю", "Generating...": "Создание…", "Generate Invite Code": "Создать код приглашения",
         "Redeem": "Принять", "Redeeming...": "Принимаем…", "Redeem Code": "Принять код", "Invite Note": "Заметка приглашения",
-        "Delete Collection": "Удалить пространство", "Cancel": "Отмена", "Move to Trash": "Переместить в корзину",
+        "Delete Space": "Удалить пространство", "Cancel": "Отмена", "Move to Trash": "Переместить в корзину",
     };
     const t = (english: string) => $locale === "ru" ? (ruCopy[english] ?? english) : english;
     const localized = (english: string, russian: string) =>
         $locale === "ru" ? russian : english;
 
-    /**
-     * Authenticated workspace:
-     * dashboard counters, local collection state,
-     * and invite-code issue/redeem flows.
-     */
+    export let view:
+        | "today"
+        | "tasks"
+        | "calendar"
+        | "contacts"
+        | "spaces"
+        | "sharing" = "today";
+
+    /** Persistent encrypted data-plane controller and focused routed views. */
     let collectionName = "";
     let selectedCollectionId = "";
+    let selectedCollection: SpaceEntry | undefined;
+    let canWriteSelectedCollection = false;
+    let requestedSpaceId = "";
     let taskTitle = "";
+    let taskFormError = "";
     let eventTitle = "";
     let eventStart = "";
     let eventEnd = "";
+    let eventFormError = "";
     let contactName = "";
     let contactEmail = "";
     let contactPhone = "";
+    let contactFormError = "";
     let pimItems: MaterializedPimItem[] = [];
     let operationStates: MaterializedOperationState[] = [];
     let spaceMembers: Record<string, SpaceMemberSummary[]> = {};
+    const signingKeysBySpace = new Map<string, Map<string, Uint8Array>>();
     let syncCursors: Record<string, number> = {};
-    let trashedCollections: CollectionEntry[] = [];
+    let trashedCollections: SpaceEntry[] = [];
 
     let inviteTtlMinutes = "60";
     let inviteRole: "editor" | "reader" = "editor";
@@ -118,6 +143,10 @@
 
     let deleteModalOpen = false;
     let pendingDeleteCollectionId = "";
+    let collectionFormError = "";
+    let suggestedPersonalSpace = false;
+    let lastMetadataSyncAt = 0;
+    let stopManualSyncRegistration = () => {};
 
     const textEncoder = new TextEncoder();
     const textDecoder = new TextDecoder();
@@ -173,7 +202,7 @@
     }
 
     const setNotice = (notice: string) => {
-        appState.update((state) => ({ ...state, notice }));
+        notify(notice, { source: localized("Web app", "Веб-приложение") });
     };
 
     const clearDeviceAuthorizationQuery = () => {
@@ -269,10 +298,14 @@
     const createCollection = async () => {
         const name = collectionName.trim();
         if (!name) {
-            setNotice(localized("Collection name is required.", "Введите название пространства."));
+            collectionFormError = localized(
+                "Space name is required.",
+                "Введите название пространства.",
+            );
             return;
         }
 
+        collectionFormError = "";
         setLoading("space-create");
         try {
             const spaceId = crypto.randomUUID();
@@ -312,7 +345,7 @@
                 ),
             );
             await storeSpaceKey(spaceId, 1, spaceKey);
-            const entry: CollectionEntry = {
+            const entry: SpaceEntry = {
                 id: spaceId,
                 name,
                 keyAvailable: true,
@@ -324,17 +357,24 @@
             appState.update((state) => ({
                 ...state,
                 collections: [...state.collections, entry],
-                notice: localized(
-                    `Collection "${name}" created.`,
+            }));
+            notify(
+                localized(
+                    `Space "${name}" created.`,
                     `Пространство «${name}» создано.`,
                 ),
-            }));
+                { kind: "success", source: localized("Spaces", "Пространства") },
+            );
 
             selectedCollectionId = entry.id;
             collectionName = "";
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Space creation failed", "Не удалось создать пространство")}: ${message}`);
+            collectionFormError = `${localized("Space creation failed", "Не удалось создать пространство")}: ${message}`;
+            notify(collectionFormError, {
+                kind: "error",
+                source: localized("Spaces", "Пространства"),
+            });
         } finally {
             clearLoading();
         }
@@ -655,6 +695,162 @@
         }
     };
 
+    const loadSigningKeys = async (
+        spaceId: string,
+        refresh = false,
+    ): Promise<Map<string, Uint8Array>> => {
+        const cached = signingKeysBySpace.get(spaceId);
+        if (cached && !refresh) return cached;
+        const directory = await withAccessRetry((accessToken) =>
+            cloudApi.listSpaceDevices(
+                $appState.cloudBaseUrl,
+                spaceId,
+                accessToken,
+            ),
+        );
+        const signingKeys = new Map(
+            directory.devices.map((item) => [
+                item.device_id,
+                item.signing_public_key,
+            ]),
+        );
+        signingKeysBySpace.set(spaceId, signingKeys);
+        return signingKeys;
+    };
+
+    /** Pulls only the signed operation delta for one already-unlocked space. */
+    const syncSpaceOperations = async (
+        spaceId: string,
+        minimumCursor = 0,
+        refreshSigningKeys = false,
+    ): Promise<number> => {
+        let signingKeys = await loadSigningKeys(spaceId, refreshSigningKeys);
+        await retryUnresolvedPimOperations(spaceId, signingKeys);
+        let cursor = Math.max(syncCursors[spaceId] ?? 0, minimumCursor);
+        if ((syncCursors[spaceId] ?? 0) < cursor) {
+            syncCursors = { ...syncCursors, [spaceId]: cursor };
+        }
+        let synced = 0;
+        while (true) {
+            const page = await withAccessRetry((accessToken) =>
+                cloudApi.listOperations(
+                    $appState.cloudBaseUrl,
+                    spaceId,
+                    cursor,
+                    accessToken,
+                ),
+            );
+            for (const stored of page.operations) {
+                let signingKey = signingKeys.get(
+                    stored.envelope.author_device_id,
+                );
+                if (!signingKey) {
+                    signingKeys = await loadSigningKeys(spaceId, true);
+                    signingKey = signingKeys.get(stored.envelope.author_device_id);
+                    if (!signingKey) {
+                        throw new Error(
+                            `Missing author key for operation ${stored.envelope.client_op_id}`,
+                        );
+                    }
+                }
+                await verifyOperationEnvelope(stored.envelope, signingKey);
+                const operationKey = await loadSpaceKey(
+                    spaceId,
+                    stored.envelope.key_epoch,
+                );
+                if (!operationKey) {
+                    throw new Error(
+                        `Missing key epoch ${stored.envelope.key_epoch} for operation ${stored.envelope.client_op_id}`,
+                    );
+                }
+                let plaintext: Uint8Array;
+                try {
+                    plaintext = await openOperationEnvelope(
+                        stored.envelope,
+                        operationKey,
+                    );
+                } catch {
+                    await quarantineOperationEnvelope(
+                        stored.envelope,
+                        stored.space_seq,
+                        "invalid_ciphertext",
+                    );
+                    continue;
+                }
+                if (stored.envelope.envelope_kind === "operation") {
+                    let operation: PimOperationV1;
+                    try {
+                        operation = decodePimOperation(plaintext);
+                        if (operation.resource_id !== stored.envelope.stream_id) {
+                            throw new Error("stream mismatch");
+                        }
+                    } catch {
+                        await quarantineOperationEnvelope(
+                            stored.envelope,
+                            stored.space_seq,
+                            "invalid_operation",
+                        );
+                        continue;
+                    }
+                    try {
+                        await applyPimOperation(
+                            spaceId,
+                            stored.envelope.stream_id,
+                            stored.envelope.client_op_id,
+                            operation,
+                            stored.space_seq,
+                        );
+                    } catch {
+                        await quarantineOperationEnvelope(
+                            stored.envelope,
+                            stored.space_seq,
+                            "unresolved_pim_graph",
+                        );
+                        continue;
+                    }
+                } else if (stored.envelope.envelope_kind === "snapshot") {
+                    let snapshot: PimSnapshotV2;
+                    try {
+                        snapshot = decodePimSnapshot(plaintext);
+                        if (
+                            snapshot.resource_id !== stored.envelope.stream_id ||
+                            snapshot.covers_through_space_seq > stored.space_seq
+                        ) {
+                            throw new Error("snapshot context mismatch");
+                        }
+                    } catch {
+                        await quarantineOperationEnvelope(
+                            stored.envelope,
+                            stored.space_seq,
+                            "invalid_snapshot",
+                        );
+                        continue;
+                    }
+                    await applyPimSnapshot(
+                        spaceId,
+                        stored.envelope.stream_id,
+                        snapshot,
+                        stored.space_seq,
+                    );
+                } else {
+                    throw new Error("Unsupported mandatory key-control envelope.");
+                }
+            }
+            await retryUnresolvedPimOperations(spaceId, signingKeys);
+            synced += page.operations.length;
+            if (page.next_cursor <= cursor) break;
+            cursor = page.next_cursor;
+            syncCursors = { ...syncCursors, [spaceId]: cursor };
+            await storeMaterializedPimState(
+                pimItems,
+                operationStates,
+                syncCursors,
+            );
+            if (page.operations.length === 0) break;
+        }
+        return synced;
+    };
+
     const textField = (item: MaterializedPimItem, name: string): string => {
         const value = item.fields[name];
         return value?.type === "text" ? value.value : "";
@@ -743,7 +939,11 @@
             operation,
         );
         await storeMaterializedPimState(pimItems, operationStates, syncCursors);
-        return (await flushOutbox()) > 0;
+        const flushed = (await flushOutbox()) > 0;
+        const pending = (await listQueuedOperationEnvelopes()).length;
+        setPendingOperations(pending);
+        autoSync.request("local-change");
+        return flushed;
     });
 
     const makeUpsert = (
@@ -763,9 +963,10 @@
     const createTask = async () => {
         const title = taskTitle.trim();
         if (!title) {
-            setNotice(localized("Enter a task title.", "Введите название задачи."));
+            taskFormError = localized("Enter a task title.", "Введите название задачи.");
             return;
         }
+        taskFormError = "";
         setLoading("task-create");
         try {
             const flushed = await commitPimOperation(
@@ -783,7 +984,8 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Task creation failed", "Не удалось создать задачу")}: ${message}`);
+            taskFormError = `${localized("Task creation failed", "Не удалось создать задачу")}: ${message}`;
+            notify(taskFormError, { kind: "error", source: t("Tasks") });
         } finally {
             clearLoading();
         }
@@ -841,19 +1043,20 @@
     const createCalendarEvent = async () => {
         const title = eventTitle.trim();
         if (!title || !eventStart) {
-            setNotice(localized(
+            eventFormError = localized(
                 "Event title and start time are required.",
                 "Введите название и время начала события.",
-            ));
+            );
             return;
         }
         if (eventEnd && eventEnd < eventStart) {
-            setNotice(localized(
+            eventFormError = localized(
                 "Event end must not be earlier than its start.",
                 "Время окончания события не может быть раньше начала.",
-            ));
+            );
             return;
         }
+        eventFormError = "";
         setLoading("event-create");
         try {
             const startsAt = localDateTimeToIcalendarUtc(eventStart);
@@ -887,7 +1090,8 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Event creation failed", "Не удалось создать событие")}: ${message}`);
+            eventFormError = `${localized("Event creation failed", "Не удалось создать событие")}: ${message}`;
+            notify(eventFormError, { kind: "error", source: t("Calendar") });
         } finally {
             clearLoading();
         }
@@ -898,12 +1102,13 @@
         const email = contactEmail.trim();
         const phone = contactPhone.trim();
         if (!name || (!email && !phone)) {
-            setNotice(localized(
+            contactFormError = localized(
                 "Contact name and an email or phone number are required.",
                 "Введите имя контакта и email или номер телефона.",
-            ));
+            );
             return;
         }
+        contactFormError = "";
         setLoading("contact-create");
         try {
             const fields: Record<string, PimValue> = {
@@ -928,7 +1133,8 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Contact creation failed", "Не удалось создать контакт")}: ${message}`);
+            contactFormError = `${localized("Contact creation failed", "Не удалось создать контакт")}: ${message}`;
+            notify(contactFormError, { kind: "error", source: t("Contacts") });
         } finally {
             clearLoading();
         }
@@ -961,11 +1167,14 @@
                 collections: state.collections.filter(
                     (item) => item.id !== collectionId,
                 ),
-                notice: localized(
-                    "Collection moved to trash for 30 days.",
+            }));
+            notify(
+                localized(
+                    "Space moved to trash for 30 days.",
                     "Пространство перемещено в корзину на 30 дней.",
                 ),
-            }));
+                { kind: "success", source: localized("Spaces", "Пространства") },
+            );
             if (removed) {
                 trashedCollections = [removed, ...trashedCollections];
             }
@@ -976,6 +1185,7 @@
             const remainingCursors = { ...syncCursors };
             delete remainingCursors[collectionId];
             syncCursors = remainingCursors;
+            signingKeysBySpace.delete(collectionId);
             await storeMaterializedPimState(
                 pimItems,
                 operationStates,
@@ -988,7 +1198,7 @@
             deleteModalOpen = false;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Collection deletion failed", "Не удалось удалить пространство")}: ${message}`);
+            setNotice(`${localized("Space deletion failed", "Не удалось удалить пространство")}: ${message}`);
         } finally {
             clearLoading();
         }
@@ -1008,21 +1218,33 @@
                 (item) => item.id !== collectionId,
             );
             setNotice(localized(
-                "Collection restored. Syncing its encrypted history...",
+                "Space restored. Syncing its encrypted history...",
                 "Пространство восстановлено. Синхронизируем зашифрованную историю…",
             ));
             await syncNow();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Collection restore failed", "Не удалось восстановить пространство")}: ${message}`);
+            setNotice(`${localized("Space restore failed", "Не удалось восстановить пространство")}: ${message}`);
         } finally {
             clearLoading();
         }
     };
 
-    /** Pulls accessible security spaces and unlocks packages for this device. */
-    const syncNowUnlocked = async (): Promise<boolean> => {
-        setLoading("sync-now");
+    interface SyncRunOptions {
+        announce?: boolean;
+        showLoading?: boolean;
+    }
+
+    /** Pulls accessible spaces, key metadata, and operation deltas. */
+    const syncNowUnlocked = async (
+        options: SyncRunOptions = {},
+    ): Promise<boolean> => {
+        if (!navigator.onLine) {
+            markSyncFailure(localized("You are offline.", "Нет подключения к сети."), true);
+            return false;
+        }
+        if (options.showLoading) setLoading("sync-now");
+        markSyncing();
         try {
             const response = await withAccessRetry((accessToken) =>
                 cloudApi.listSpaces($appState.cloudBaseUrl, accessToken),
@@ -1046,7 +1268,7 @@
                 ),
             );
             const device = getActiveWebDevice();
-            const collections: CollectionEntry[] = [];
+            const collections: SpaceEntry[] = [];
             const nextSpaceMembers: Record<string, SpaceMemberSummary[]> = {};
             let syncedOperationCount = 0;
             const accessibleSpaceIds = new Set(
@@ -1133,7 +1355,10 @@
                         ),
                     );
                 }
-                if (key) {
+                if (
+                    key &&
+                    !recoveryPackages.has(`${space.space_id}:${space.key_epoch}`)
+                ) {
                     const recoveryPackage = await withActiveMasterKey(
                         async (masterKey) =>
                             encode(await wrapSpaceKeyForAccountRecovery(masterKey, key)),
@@ -1168,171 +1393,14 @@
                     syncedItems: 0,
                 });
                 if (key) {
-                    const directory = await withAccessRetry((accessToken) =>
-                        cloudApi.listSpaceDevices(
-                            $appState.cloudBaseUrl,
-                            space.space_id,
-                            accessToken,
-                        ),
-                    );
-                    const signingKeys = new Map(
-                        directory.devices.map((item) => [
-                            item.device_id,
-                            item.signing_public_key,
-                        ]),
-                    );
-                    let spaceOperationCount = 0;
-                    await retryUnresolvedPimOperations(
+                    syncedOperationCount += await syncSpaceOperations(
                         space.space_id,
-                        signingKeys,
+                        Math.max(
+                            space.history_start_seq,
+                            space.current_state_start_seq,
+                        ),
+                        true,
                     );
-                    let cursor = Math.max(
-                        syncCursors[space.space_id] ?? 0,
-                        space.history_start_seq,
-                        space.current_state_start_seq,
-                    );
-                    if ((syncCursors[space.space_id] ?? 0) < cursor) {
-                        syncCursors = {
-                            ...syncCursors,
-                            [space.space_id]: cursor,
-                        };
-                    }
-                    while (true) {
-                        const page = await withAccessRetry((accessToken) =>
-                            cloudApi.listOperations(
-                                $appState.cloudBaseUrl,
-                                space.space_id,
-                                cursor,
-                                accessToken,
-                            ),
-                        );
-                        for (const stored of page.operations) {
-                            const signingKey = signingKeys.get(
-                                stored.envelope.author_device_id,
-                            );
-                            if (!signingKey) {
-                                throw new Error(
-                                    `Missing author key for operation ${stored.envelope.client_op_id}`,
-                                );
-                            }
-                            await verifyOperationEnvelope(
-                                stored.envelope,
-                                signingKey,
-                            );
-                            const operationKey = await loadSpaceKey(
-                                space.space_id,
-                                stored.envelope.key_epoch,
-                            );
-                            if (!operationKey) {
-                                throw new Error(
-                                    `Missing key epoch ${stored.envelope.key_epoch} for operation ${stored.envelope.client_op_id}`,
-                                );
-                            }
-                            let plaintext: Uint8Array;
-                            try {
-                                plaintext = await openOperationEnvelope(
-                                    stored.envelope,
-                                    operationKey,
-                                );
-                            } catch {
-                                await quarantineOperationEnvelope(
-                                    stored.envelope,
-                                    stored.space_seq,
-                                    "invalid_ciphertext",
-                                );
-                                continue;
-                            }
-                            if (stored.envelope.envelope_kind === "operation") {
-                                let operation: PimOperationV1;
-                                try {
-                                    operation = decodePimOperation(plaintext);
-                                    if (
-                                        operation.resource_id !==
-                                        stored.envelope.stream_id
-                                    ) {
-                                        throw new Error("stream mismatch");
-                                    }
-                                } catch {
-                                    await quarantineOperationEnvelope(
-                                        stored.envelope,
-                                        stored.space_seq,
-                                        "invalid_operation",
-                                    );
-                                    continue;
-                                }
-                                try {
-                                    await applyPimOperation(
-                                        space.space_id,
-                                        stored.envelope.stream_id,
-                                        stored.envelope.client_op_id,
-                                        operation,
-                                        stored.space_seq,
-                                    );
-                                } catch {
-                                    await quarantineOperationEnvelope(
-                                        stored.envelope,
-                                        stored.space_seq,
-                                        "unresolved_pim_graph",
-                                    );
-                                    continue;
-                                }
-                            } else if (
-                                stored.envelope.envelope_kind === "snapshot"
-                            ) {
-                                let snapshot: PimSnapshotV2;
-                                try {
-                                    snapshot = decodePimSnapshot(plaintext);
-                                    if (
-                                        snapshot.resource_id !==
-                                            stored.envelope.stream_id ||
-                                        snapshot.covers_through_space_seq >
-                                            stored.space_seq
-                                    ) {
-                                        throw new Error("snapshot context mismatch");
-                                    }
-                                } catch {
-                                    await quarantineOperationEnvelope(
-                                        stored.envelope,
-                                        stored.space_seq,
-                                        "invalid_snapshot",
-                                    );
-                                    continue;
-                                }
-                                await applyPimSnapshot(
-                                    space.space_id,
-                                    stored.envelope.stream_id,
-                                    snapshot,
-                                    stored.space_seq,
-                                );
-                            } else {
-                                throw new Error(
-                                    "Unsupported mandatory key-control envelope.",
-                                );
-                            }
-                        }
-                        await retryUnresolvedPimOperations(
-                            space.space_id,
-                            signingKeys,
-                        );
-                        spaceOperationCount += page.operations.length;
-                        if (page.next_cursor <= cursor) {
-                            break;
-                        }
-                        cursor = page.next_cursor;
-                        syncCursors = {
-                            ...syncCursors,
-                            [space.space_id]: cursor,
-                        };
-                        await storeMaterializedPimState(
-                            pimItems,
-                            operationStates,
-                            syncCursors,
-                        );
-                        if (page.operations.length === 0) {
-                            break;
-                        }
-                    }
-                    syncedOperationCount += spaceOperationCount;
                 }
             }
 
@@ -1363,7 +1431,7 @@
                 syncCursors,
             );
 
-            const trash: CollectionEntry[] = [];
+            const trash: SpaceEntry[] = [];
             for (const space of trashResponse.spaces) {
                 const key = await loadSpaceKey(space.space_id, space.key_epoch);
                 let name = `Space ${space.space_id.slice(0, 8)}`;
@@ -1399,24 +1467,104 @@
                 collections,
                 syncedItemsTotal: operationStates.length,
                 lastSyncedSeq: Math.max(0, ...Object.values(syncCursors)),
-                notice: localized(
-                    `Sync completed: ${syncedOperationCount} operations, ${flushed} outbox items uploaded.`,
-                    `Синхронизация завершена: операций — ${syncedOperationCount}, отправлено из очереди — ${flushed}.`,
-                ),
             }));
+            const pending = (await listQueuedOperationEnvelopes()).length;
+            markSyncSuccess(pending);
+            lastMetadataSyncAt = Date.now();
+            if (options.announce) {
+                notify(
+                    localized(
+                        `Sync completed: ${syncedOperationCount} operations, ${flushed} outbox items uploaded.`,
+                        `Синхронизация завершена: операций — ${syncedOperationCount}, отправлено из очереди — ${flushed}.`,
+                    ),
+                    { kind: "success", source: localized("Sync", "Синхронизация") },
+                );
+            }
             return true;
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            setNotice(`${localized("Sync failed", "Ошибка синхронизации")}: ${message}`);
+            markSyncFailure(message, !navigator.onLine);
+            if (options.announce) {
+                notify(`${localized("Sync failed", "Ошибка синхронизации")}: ${message}`, {
+                    kind: "error",
+                    source: localized("Sync", "Синхронизация"),
+                    persistent: true,
+                });
+            }
             return false;
         } finally {
-            clearLoading();
+            if (options.showLoading) clearLoading();
+        }
+    };
+
+    /** Fast path used by automatic sync after space keys are already known. */
+    const syncOperationDeltasUnlocked = async (): Promise<boolean> => {
+        if (!navigator.onLine) {
+            markSyncFailure(localized("You are offline.", "Нет подключения к сети."), true);
+            return false;
+        }
+        markSyncing();
+        try {
+            const flushed = await flushOutbox();
+            for (const collection of $appState.collections) {
+                if (!collection.keyAvailable) continue;
+                await syncSpaceOperations(collection.id);
+            }
+            await storeMaterializedPimState(
+                pimItems,
+                operationStates,
+                syncCursors,
+            );
+            const pending = (await listQueuedOperationEnvelopes()).length;
+            appState.update((state) => ({
+                ...state,
+                collections: state.collections.map((collection) => ({
+                    ...collection,
+                    syncedItems: operationStates.filter(
+                        (operation) => operation.spaceId === collection.id,
+                    ).length,
+                })),
+                syncedItemsTotal: operationStates.length,
+                lastSyncedSeq: Math.max(0, ...Object.values(syncCursors)),
+            }));
+            markSyncSuccess(pending);
+            if (flushed > 0) setPendingOperations(pending);
+            return true;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            markSyncFailure(message, !navigator.onLine);
+            return false;
         }
     };
 
     const syncNow = (): Promise<boolean> =>
-        runDataPlaneExclusive(syncNowUnlocked);
+        runDataPlaneExclusive(() =>
+            syncNowUnlocked({ announce: true, showLoading: true }),
+        );
+
+    const runAutomaticSyncInThisTab = (reason: SyncReason): Promise<boolean> =>
+        runDataPlaneExclusive(() =>
+            reason === "initial" ||
+            $appState.collections.length === 0 ||
+            Date.now() - lastMetadataSyncAt >= 5 * 60_000
+                ? syncNowUnlocked()
+                : syncOperationDeltasUnlocked(),
+        );
+
+    const runAutomaticSync = async (reason: SyncReason): Promise<boolean> => {
+        if (!navigator.locks) return runAutomaticSyncInThisTab(reason);
+        return navigator.locks.request(
+            "kamori-web-auto-sync-v1",
+            { ifAvailable: true },
+            (lock) => lock ? runAutomaticSyncInThisTab(reason) : true,
+        );
+    };
+
+    const autoSync = new AutoSyncCoordinator({
+        run: runAutomaticSync,
+        ready: () => Boolean(tokenStore.getAccessToken()),
+    });
 
     const accountRecoveryPublicKey = (
         member: SpaceMemberSummary,
@@ -1518,7 +1666,7 @@
     };
 
     const rotateSpaceKeyForMembershipChange = async (
-        collection: CollectionEntry,
+        collection: SpaceEntry,
         target?: SpaceMemberSummary,
     ): Promise<{ keyEpoch: number; rotationId: string; spaceKey: Uint8Array }> =>
     runDataPlaneExclusive(async () => {
@@ -1658,7 +1806,7 @@
     });
 
     const revokeSpaceMember = async (
-        collection: CollectionEntry,
+        collection: SpaceEntry,
         target: SpaceMemberSummary,
     ) => {
         if (
@@ -1696,7 +1844,7 @@
             selectedCollectionId || $appState.collections[0]?.id;
         if (!collectionId) {
             setNotice(localized(
-                "Create at least one collection first.",
+                "Create at least one space first.",
                 "Сначала создайте хотя бы одно пространство.",
             ));
             return;
@@ -1706,7 +1854,7 @@
             (item) => item.id === collectionId,
         );
         if (!collection) {
-            setNotice(localized("Selected collection not found.", "Выбранное пространство не найдено."));
+            setNotice(localized("Selected space not found.", "Выбранное пространство не найдено."));
             return;
         }
         if (collection.role !== "owner") {
@@ -1850,10 +1998,6 @@
                     return {
                         ...state,
                         collections: updated,
-                        notice: localized(
-                            `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
-                            `Приглашение в пространство ${redeemed.space_id.slice(0, 8)} принято.`,
-                        ),
                     };
                 }
 
@@ -1870,12 +2014,15 @@
                             syncedItems: 0,
                         },
                     ],
-                    notice: localized(
-                        `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
-                        `Приглашение в пространство ${redeemed.space_id.slice(0, 8)} принято.`,
-                    ),
                 };
             });
+            notify(
+                localized(
+                    `Invite redeemed for space ${redeemed.space_id.slice(0, 8)}.`,
+                    `Приглашение в пространство ${redeemed.space_id.slice(0, 8)} принято.`,
+                ),
+                { kind: "success", source: localized("Sharing", "Доступ") },
+            );
 
             inviteCodeToRedeem = "";
             inviteRedeemedNote = decryptedInviteNote;
@@ -1890,6 +2037,30 @@
 
     $: if (!selectedCollectionId && $appState.collections.length > 0) {
         selectedCollectionId = $appState.collections[0].id;
+    }
+    $: selectedCollection = $appState.collections.find(
+        (collection) => collection.id === selectedCollectionId,
+    );
+    $: canWriteSelectedCollection = Boolean(
+        selectedCollection &&
+        selectedCollection.keyAvailable &&
+        selectedCollection.role !== "reader",
+    );
+    $: requestedSpaceId = $page.url.searchParams.get("space") ?? "";
+    $: if (
+        view === "spaces" &&
+        $appState.collections.length === 0 &&
+        !suggestedPersonalSpace
+    ) {
+        collectionName = localized("Personal", "Личное");
+        suggestedPersonalSpace = true;
+    }
+    $: if (
+        view === "sharing" &&
+        requestedSpaceId &&
+        $appState.collections.some((collection) => collection.id === requestedSpaceId)
+    ) {
+        selectedCollectionId = requestedSpaceId;
     }
 
     onMount(() => {
@@ -1908,8 +2079,18 @@
                 const message =
                     error instanceof Error ? error.message : String(error);
                 setNotice(`${localized("Encrypted offline state could not be opened", "Не удалось открыть зашифрованные офлайн-данные")}: ${message}`);
+            } finally {
+                stopManualSyncRegistration = registerManualSync(() => {
+                    void syncNow();
+                });
+                autoSync.start(window, document);
             }
         })();
+    });
+
+    onDestroy(() => {
+        autoSync.stop();
+        stopManualSyncRegistration();
     });
 </script>
 
@@ -1938,34 +2119,104 @@
     </Card>
 {/if}
 
-<div class="grid gap-4 md:grid-cols-2">
+{#if $appState.collections.length === 0 && $syncState.lastSuccessAt === null}
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">{t("Dashboard")}</h2>
-        <div class="mt-3 space-y-2 text-sm text-slate/80">
-            <p>{t("Current user")}: {$appState.currentUsername || t("Not signed in")}</p>
-            <p>{t("Collections")}: {$appState.collections.length}</p>
-            <p>{t("Operation states on device")}: {$appState.syncedItemsTotal}</p>
-            <p>{t("Last synced seq")}: {$appState.lastSyncedSeq}</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-moss">
+            {$locale === "ru" ? "Зашифрованные данные" : "Encrypted data"}
+        </p>
+        <h1 class="mt-2 font-heading text-2xl font-semibold text-slate">
+            {$syncState.phase === "offline"
+                ? ($locale === "ru" ? "Нет подключения к сети" : "You are offline")
+                : $syncState.phase === "error"
+                    ? ($locale === "ru" ? "Не удалось загрузить пространства" : "Spaces could not be loaded")
+                    : ($locale === "ru" ? "Загружаем пространства…" : "Loading your spaces…")}
+        </h1>
+        {#if $syncState.error}
+            <p class="mt-3 text-sm text-coral" role="alert">{$syncState.error}</p>
+        {/if}
+        {#if $syncState.phase === "offline" || $syncState.phase === "error"}
+            <div class="mt-4">
+                <Button on:click={syncNow}>{$locale === "ru" ? "Повторить" : "Retry"}</Button>
+            </div>
+        {/if}
+    </Card>
+{:else if $appState.collections.length === 0 && view !== "spaces" && view !== "sharing"}
+    <Card>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-moss">
+            {$locale === "ru" ? "Первый шаг" : "First step"}
+        </p>
+        <h1 class="mt-2 font-heading text-2xl font-semibold text-slate">
+            {$locale === "ru" ? "Создайте первое пространство" : "Create your first space"}
+        </h1>
+        <p class="mt-3 max-w-2xl text-sm leading-6 text-slate/75">
+            {$locale === "ru"
+                ? "Пространство хранит ваши задачи, события и контакты и определяет, кому разрешён доступ. Только после его создания можно добавлять данные."
+                : "A space stores your tasks, events, and contacts and defines who may access them. Create one before adding data."}
+        </p>
+        <a
+            class="mt-5 inline-flex bg-slate px-4 py-2.5 text-sm font-semibold text-white hover:bg-moss"
+            href="/app/spaces"
+        >{$locale === "ru" ? "Создать личное пространство →" : "Create personal space →"}</a>
+    </Card>
+{:else}
+<div class="space-y-4">
+    {#if view === "today"}
+    <Card>
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-moss">
+            {$locale === "ru" ? "Сегодня" : "Today"}
+        </p>
+        <h1 class="mt-2 font-heading text-2xl font-semibold text-slate">
+            {$locale === "ru"
+                ? `Здравствуйте, ${$appState.currentUsername}`
+                : `Hello, ${$appState.currentUsername}`}
+        </h1>
+        <div class="mt-5 grid gap-3 sm:grid-cols-3">
+            <a class="border border-slate/15 bg-white/70 p-4 hover:bg-sand/40" href="/app/tasks">
+                <strong class="block text-2xl text-slate">{pimItems.filter((item) => item.kind === "task" && !item.completed).length}</strong>
+                <span class="text-sm text-slate/65">{$locale === "ru" ? "открытых задач" : "open tasks"}</span>
+            </a>
+            <a class="border border-slate/15 bg-white/70 p-4 hover:bg-sand/40" href="/app/calendar">
+                <strong class="block text-2xl text-slate">{pimItems.filter((item) => item.kind === "calendar_event").length}</strong>
+                <span class="text-sm text-slate/65">{$locale === "ru" ? "событий" : "events"}</span>
+            </a>
+            <a class="border border-slate/15 bg-white/70 p-4 hover:bg-sand/40" href="/app/contacts">
+                <strong class="block text-2xl text-slate">{pimItems.filter((item) => item.kind === "contact").length}</strong>
+                <span class="text-sm text-slate/65">{$locale === "ru" ? "контактов" : "contacts"}</span>
+            </a>
         </div>
-        <div class="mt-3">
+        <div class="mt-4">
             <Button on:click={syncNow} disabled={loadingAction === "sync-now"}>
                 {loadingAction === "sync-now" ? t("Syncing...") : t("Sync Now")}
             </Button>
         </div>
     </Card>
+    {/if}
 
+    {#if view === "spaces"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
-            {t("Collections")}
+            {t("Spaces")}
         </h2>
+        <p class="mt-2 max-w-2xl text-sm text-slate/70">
+            {$locale === "ru"
+                ? "Пространство — независимая граница шифрования и совместного доступа для задач, календаря и контактов."
+                : "A space is an independent encryption and sharing boundary for tasks, calendar events, and contacts."}
+        </p>
+        <a
+            class="mt-3 inline-flex text-sm font-semibold text-slate underline underline-offset-2"
+            href="/app/sharing"
+        >{$locale === "ru" ? "Принять код приглашения →" : "Redeem invite code →"}</a>
         <div class="mt-3 space-y-2">
-            <Input bind:value={collectionName} placeholder={t("Collection name")} />
-            <Button on:click={createCollection}>{t("Create Collection")}</Button>
+            <Input bind:value={collectionName} placeholder={t("Space name")} />
+            <Button on:click={createCollection}>{t("Create Space")}</Button>
+            {#if collectionFormError}
+                <p class="text-sm text-coral" role="alert">{collectionFormError}</p>
+            {/if}
         </div>
 
         <div class="mt-4 space-y-2">
             {#if $appState.collections.length === 0}
-                <p class="text-sm text-slate/70">{t("No collections yet.")}</p>
+                <p class="text-sm text-slate/70">{t("No spaces yet.")}</p>
             {:else}
                 {#each $appState.collections as collection}
                     <div
@@ -1984,7 +2235,11 @@
                                 : t("Approval required on another device")}
                         </p>
                         {#if collection.role === "owner"}
-                        <div class="mt-2">
+                        <div class="mt-2 flex flex-wrap gap-2">
+                            <a
+                                class="inline-flex border border-slate/20 px-3 py-2 text-xs font-semibold text-slate hover:bg-sand/50"
+                                href={`/app/sharing?space=${encodeURIComponent(collection.id)}`}
+                            >{$locale === "ru" ? "Участники и доступ" : "Members and access"}</a>
                             <Button
                                 variant="danger"
                                 on:click={() =>
@@ -2019,7 +2274,9 @@
             </div>
         {/if}
     </Card>
+    {/if}
 
+    {#if view === "tasks"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">{t("Tasks")}</h2>
         <p class="mt-2 text-xs text-slate/70">
@@ -2034,16 +2291,25 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={taskTitle} placeholder={t("New task")} />
+
+            {#if !canWriteSelectedCollection}
+                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
+                </p>
+            {/if}
+            <Input bind:value={taskTitle} placeholder={t("New task")} disabled={!canWriteSelectedCollection} />
             <Button
                 on:click={createTask}
-                disabled={loadingAction === "task-create"}
+                disabled={loadingAction === "task-create" || !canWriteSelectedCollection}
             >
                 {loadingAction === "task-create" ? t("Saving...") : t("Add Task")}
             </Button>
+            {#if taskFormError}
+                <p class="text-sm text-coral" role="alert">{taskFormError}</p>
+            {/if}
         </div>
         <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "task") as item}
+            {#each pimItems.filter((item) => item.kind === "task" && item.spaceId === selectedCollectionId) as item}
                 <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
                     <p class="font-semibold text-slate">{item.title}</p>
                     <p class="text-xs text-slate/65">
@@ -2055,14 +2321,14 @@
                             variant="ghost"
                             on:click={() =>
                                 setTaskCompleted(item, !item.completed)}
-                            disabled={loadingAction === `task-${item.resourceId}`}
+                            disabled={loadingAction === `task-${item.resourceId}` || !canWriteSelectedCollection}
                         >
                             {item.completed ? t("Reopen") : t("Complete")}
                         </Button>
                         <Button
                             variant="danger"
                             on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}`}
+                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
                         >{t("Delete")}</Button>
                     </div>
                 </div>
@@ -2071,7 +2337,9 @@
             {/each}
         </div>
     </Card>
+    {/if}
 
+    {#if view === "calendar"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">{t("Calendar")}</h2>
         <div class="mt-3 space-y-2">
@@ -2083,18 +2351,26 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={eventTitle} placeholder={t("Event title")} />
-            <Input bind:value={eventStart} type="datetime-local" />
-            <Input bind:value={eventEnd} type="datetime-local" />
+            {#if !canWriteSelectedCollection}
+                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
+                </p>
+            {/if}
+            <Input bind:value={eventTitle} placeholder={t("Event title")} disabled={!canWriteSelectedCollection} />
+            <Input bind:value={eventStart} type="datetime-local" disabled={!canWriteSelectedCollection} />
+            <Input bind:value={eventEnd} type="datetime-local" disabled={!canWriteSelectedCollection} />
             <Button
                 on:click={createCalendarEvent}
-                disabled={loadingAction === "event-create"}
+                disabled={loadingAction === "event-create" || !canWriteSelectedCollection}
             >
                 {loadingAction === "event-create" ? t("Saving...") : t("Add Event")}
             </Button>
+            {#if eventFormError}
+                <p class="text-sm text-coral" role="alert">{eventFormError}</p>
+            {/if}
         </div>
         <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "calendar_event") as item}
+            {#each pimItems.filter((item) => item.kind === "calendar_event" && item.spaceId === selectedCollectionId) as item}
                 <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
                     <p class="font-semibold text-slate">{item.title}</p>
                     <p class="text-xs text-slate/65">
@@ -2107,7 +2383,7 @@
                         <Button
                             variant="danger"
                             on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}`}
+                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
                         >{t("Delete")}</Button>
                     </div>
                 </div>
@@ -2116,7 +2392,9 @@
             {/each}
         </div>
     </Card>
+    {/if}
 
+    {#if view === "contacts"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">{t("Contacts")}</h2>
         <div class="mt-3 space-y-2">
@@ -2128,18 +2406,26 @@
                     <option value={collection.id}>{collection.name}</option>
                 {/each}
             </select>
-            <Input bind:value={contactName} placeholder={t("Full name")} />
-            <Input bind:value={contactEmail} type="email" placeholder={t("Email")} />
-            <Input bind:value={contactPhone} type="tel" placeholder={t("Phone")} />
+            {#if !canWriteSelectedCollection}
+                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
+                </p>
+            {/if}
+            <Input bind:value={contactName} placeholder={t("Full name")} disabled={!canWriteSelectedCollection} />
+            <Input bind:value={contactEmail} type="email" placeholder={t("Email")} disabled={!canWriteSelectedCollection} />
+            <Input bind:value={contactPhone} type="tel" placeholder={t("Phone")} disabled={!canWriteSelectedCollection} />
             <Button
                 on:click={createContact}
-                disabled={loadingAction === "contact-create"}
+                disabled={loadingAction === "contact-create" || !canWriteSelectedCollection}
             >
                 {loadingAction === "contact-create" ? t("Saving...") : t("Add Contact")}
             </Button>
+            {#if contactFormError}
+                <p class="text-sm text-coral" role="alert">{contactFormError}</p>
+            {/if}
         </div>
         <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "contact") as item}
+            {#each pimItems.filter((item) => item.kind === "contact" && item.spaceId === selectedCollectionId) as item}
                 <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
                     <p class="font-semibold text-slate">{item.title}</p>
                     {#if textField(item, "email")}
@@ -2152,7 +2438,7 @@
                         <Button
                             variant="danger"
                             on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}`}
+                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
                         >{t("Delete")}</Button>
                     </div>
                 </div>
@@ -2161,7 +2447,9 @@
             {/each}
         </div>
     </Card>
+    {/if}
 
+    {#if view === "sharing"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
             {t("Invite Codes")}
@@ -2198,13 +2486,23 @@
                 bind:value={selectedCollectionId}
             >
                 {#if $appState.collections.length === 0}
-                    <option value="">{t("No collections")}</option>
+                    <option value="">{t("No spaces")}</option>
                 {:else}
                     {#each $appState.collections as collection}
                         <option value={collection.id}>{collection.name}</option>
                     {/each}
                 {/if}
             </select>
+
+            {#if !selectedCollection}
+                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                    {$locale === "ru" ? "Создайте пространство, чтобы приглашать участников. Принять чужой код можно ниже." : "Create a space before inviting members. You can still redeem someone else's code below."}
+                </p>
+            {:else if selectedCollection.role !== "owner"}
+                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                    {$locale === "ru" ? "Только владелец пространства может создавать приглашения." : "Only the space owner can create invitations."}
+                </p>
+            {/if}
 
             <select
                 class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
@@ -2232,7 +2530,7 @@
 
             <Button
                 on:click={issueInviteCode}
-                disabled={loadingAction === "invite-generate"}
+                disabled={loadingAction === "invite-generate" || selectedCollection?.role !== "owner"}
             >
                 {loadingAction === "invite-generate"
                     ? t("Generating...")
@@ -2307,11 +2605,13 @@
             {/if}
         </div>
     </Card>
+    {/if}
 </div>
+{/if}
 
 <Modal
     open={deleteModalOpen}
-    title={t("Delete Collection")}
+    title={t("Delete Space")}
     onClose={() => (deleteModalOpen = false)}
 >
     <div class="space-y-3">
