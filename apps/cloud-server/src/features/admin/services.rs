@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use serde_json::Value;
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
-use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
+use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential, WebauthnError};
 
 use crate::{
     features::{
@@ -35,6 +35,36 @@ use crate::{
 const ADMIN_SESSION_MINUTES: i64 = 15;
 const ADMIN_REAUTH_MINUTES: i64 = 5;
 const ADMIN_KEY_ENROLLMENT_PREFIX: &str = "admin:key-enrollment:";
+
+fn security_key_registration_failure(flow_id: Uuid, error: anyhow::Error) -> ApiError {
+    let attestation_rejected = error.downcast_ref::<WebauthnError>().is_some_and(|cause| {
+        matches!(
+            cause,
+            WebauthnError::MissingAttestationCredentialData
+                | WebauthnError::AttestationNotSupported
+                | WebauthnError::AttestationTrustFailure
+                | WebauthnError::AttestationNotVerifiable
+                | WebauthnError::AttestationUntrustedAaguid
+                | WebauthnError::AttestationFormatMissingAaguid
+                | WebauthnError::AttestationChainNotTrusted(_)
+                | WebauthnError::TrustFailure
+                | WebauthnError::CredentialMayNotBeHardwareBound
+        )
+    });
+    tracing::warn!(
+        %flow_id,
+        error = ?error,
+        attestation_rejected,
+        "operator security-key registration rejected"
+    );
+    if attestation_rejected {
+        unauthenticated(
+            "security-key attestation was not trusted; use a supported physical YubiKey and allow the browser to share device attestation",
+        )
+    } else {
+        unauthenticated("security-key registration failed; start a new enrollment attempt")
+    }
+}
 
 fn verify_admin_totp(
     state: &AppState,
@@ -135,7 +165,7 @@ pub(crate) async fn bootstrap_finish(
         .admin_passkeys
         .finish_security_key_registration(payload.flow_id, credential)
         .await
-        .map_err(|_| unauthenticated("security-key registration failed"))?;
+        .map_err(|error| security_key_registration_failure(payload.flow_id, error))?;
     let changed = repositories::activate_with_security_key(
         &state.pool,
         identity.id,
@@ -339,7 +369,7 @@ pub(crate) async fn add_security_key_finish(
         .admin_passkeys
         .finish_security_key_registration(payload.flow_id, credential)
         .await
-        .map_err(|_| unauthenticated("security-key registration failed"))?;
+        .map_err(|error| security_key_registration_failure(payload.flow_id, error))?;
     let client = client_metadata_from_headers(headers);
     repositories::add_security_key(
         &state.pool,
@@ -784,5 +814,21 @@ mod tests {
         assert!(validate_setting("max_blob_bytes", &Value::from(1024 * 1024)).is_ok());
         assert!(validate_setting("max_blob_bytes", &Value::from(1024)).is_err());
         assert!(validate_setting("unknown", &Value::Bool(false)).is_err());
+    }
+
+    #[test]
+    fn attestation_failure_returns_actionable_safe_message() {
+        let error = security_key_registration_failure(
+            Uuid::nil(),
+            anyhow::Error::new(WebauthnError::AttestationTrustFailure),
+        );
+        assert_eq!(error.0, axum::http::StatusCode::UNAUTHORIZED);
+        assert!(
+            error
+                .1
+                .0
+                .message
+                .starts_with("security-key attestation was not trusted")
+        );
     }
 }

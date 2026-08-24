@@ -129,8 +129,14 @@ Run `cloud-server admin-bootstrap <username>` only in a trusted terminal on an
 app host. Immediately add the printed TOTP seed to the operator authenticator,
 enroll a supported roaming security key at `admin.kamori.app`, and clear the
 terminal. The current strict attestation catalog accepts supported Yubico
-devices; this is an explicit beta allowlist, not a claim that other keys are
-insecure.
+devices through the three pinned official production roots (legacy U2F, FIDO,
+and Attestation Root 1 for firmware 5.7.4+). This is an explicit beta allowlist,
+not a claim that other keys are insecure. If the browser asks to disclose the
+key's make and model, allow it; the control plane rejects platform and
+synchronized passkeys because they cannot provide the required hardware
+attestation. Review Yubico's published root list before every server dependency
+upgrade and pin additions through the normal code-review path; never fetch
+mutable trust roots during server startup.
 
 Sign in, add a second independently stored roaming key, and verify both keys
 before opening registration. The control plane rejects the transition to open

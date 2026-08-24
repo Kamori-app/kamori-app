@@ -17,7 +17,31 @@ use webauthn_rs::prelude::{
     RegisterPublicKeyCredential, SecurityKey, SecurityKeyAuthentication, SecurityKeyRegistration,
     Webauthn, WebauthnBuilder,
 };
-use webauthn_rs_device_catalog::Data;
+
+// Official production roots published by Yubico. The legacy device-catalog
+// crate bundled only one 2014 root and has not been updated since 2023, while
+// Yubico added a FIDO root and rotated to Attestation Root 1 for firmware
+// 5.7.4+. Keep these trust anchors pinned and reviewed as source artifacts;
+// never download mutable trust material while starting the service.
+const YUBICO_ATTESTATION_ROOTS: [&[u8]; 3] = [
+    include_bytes!("yubico-roots/yubico-attestation-root-1.pem"),
+    include_bytes!("yubico-roots/yubico-u2f-root-ca.pem"),
+    include_bytes!("yubico-roots/yubico-fido-root-ca.pem"),
+];
+
+fn yubico_attestation_ca_list() -> Result<AttestationCaList> {
+    let mut roots = AttestationCaList::default();
+    for pem in YUBICO_ATTESTATION_ROOTS {
+        let root = AttestationCaList::try_from(pem)
+            .map_err(|error| anyhow!("parse pinned Yubico attestation root: {error:?}"))?;
+        roots.union(&root);
+    }
+    anyhow::ensure!(
+        roots.len() == YUBICO_ATTESTATION_ROOTS.len(),
+        "pinned Yubico attestation roots contain a duplicate"
+    );
+    Ok(roots)
+}
 
 /// In-memory passkey service state using Valkey for challenge storage.
 #[derive(Clone)]
@@ -75,22 +99,7 @@ impl PasskeyService {
             &config.admin_webauthn_rp_origin,
             &config.admin_webauthn_rp_name,
         )?;
-        let device_catalog = Data::strict();
-        let mut attestation_ca_list = AttestationCaList::default();
-        for device in device_catalog.iter() {
-            for authority in &device.aaguid.ca {
-                let pem = authority.ca.to_pem().map_err(|error| {
-                    anyhow!("encode strict security-key attestation CA: {error:?}")
-                })?;
-                let next = AttestationCaList::try_from(pem.as_slice()).map_err(|error| {
-                    anyhow!("parse strict security-key attestation CA: {error:?}")
-                })?;
-                attestation_ca_list.union(&next);
-            }
-        }
-        if attestation_ca_list.is_empty() {
-            anyhow::bail!("strict security-key attestation catalog is empty");
-        }
+        let attestation_ca_list = yubico_attestation_ca_list()?;
         let security_key_attestation_ca_list = Some(attestation_ca_list);
         Ok(Self {
             webauthn,
@@ -269,7 +278,7 @@ impl PasskeyService {
         let state: SecurityKeyRegistration = serde_json::from_slice(&state)?;
         self.webauthn
             .finish_securitykey_registration(&credential, &state)
-            .map_err(|error| anyhow!("security-key registration finish failed: {error:?}"))
+            .map_err(anyhow::Error::new)
     }
 
     /// Starts authentication against an explicit set of operator security keys.
@@ -426,6 +435,12 @@ fn map_store_error(err: StateStoreError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_yubico_attestation_roots_are_distinct_and_parseable() {
+        let roots = yubico_attestation_ca_list().expect("parse pinned Yubico roots");
+        assert_eq!(roots.len(), 3);
+    }
 
     #[test]
     fn extract_challenge_from_json_accepts_base64url() {
