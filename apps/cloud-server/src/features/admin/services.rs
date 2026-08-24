@@ -14,7 +14,7 @@ use crate::{
             dto::{
                 AdminAuditResponse, AdminAuthFinishRequest, AdminAuthFinishResponse,
                 AdminAuthStartRequest, AdminAuthStartResponse, AdminDashboardResponse,
-                AdminMutationResponse, AdminSecurityKeyAddFinishRequest,
+                AdminMutationResponse, AdminPasskeyRenameRequest, AdminSecurityKeyAddFinishRequest,
                 AdminSecurityKeyRegistrationFinishRequest, AdminSecurityKeyRegistrationResponse,
                 AdminSecurityKeyRegistrationStartRequest, AdminSecurityKeyRemoveRequest,
                 RuntimeSetting, RuntimeSettingsResponse, SuspendAccountRequest,
@@ -102,6 +102,17 @@ fn validate_operator_username(username: &str) -> Result<&str, ApiError> {
         return Err(bad_request("invalid operator username"));
     }
     Ok(username)
+}
+
+fn validate_passkey_name(name: &str) -> Result<&str, ApiError> {
+    let name = name.trim();
+    let length = name.chars().count();
+    if !(3..=64).contains(&length) || name.chars().any(char::is_control) {
+        return Err(bad_request(
+            "passkey name must contain 3 to 64 printable characters",
+        ));
+    }
+    Ok(name)
 }
 
 pub(crate) async fn bootstrap_start(
@@ -328,10 +339,7 @@ pub(crate) async fn add_security_key_finish(
     payload: AdminSecurityKeyAddFinishRequest,
 ) -> Result<AdminMutationResponse, ApiError> {
     let actor = authorize_admin(state, headers).await?;
-    let name = payload.name.trim();
-    if !(3..=64).contains(&name.len()) {
-        return Err(bad_request("passkey name must contain 3 to 64 characters"));
-    }
+    let name = validate_passkey_name(&payload.name)?;
     let reason = validate_reason(&payload.reason)?;
     if payload.confirmation != "ADD PASSKEY" {
         return Err(bad_request("typed passkey confirmation does not match"));
@@ -355,7 +363,7 @@ pub(crate) async fn add_security_key_finish(
         .await
         .map_err(|error| passkey_registration_failure(payload.flow_id, error))?;
     let client = client_metadata_from_headers(headers);
-    repositories::add_security_key(
+    let added = repositories::add_security_key(
         &state.pool,
         actor.id,
         name,
@@ -365,7 +373,47 @@ pub(crate) async fn add_security_key_finish(
     )
     .await
     .map_err(internal_error)?;
+    if !added {
+        return Err(conflict("passkey name or credential is already enrolled"));
+    }
     Ok(AdminMutationResponse { changed: true })
+}
+
+pub(crate) async fn rename_passkey(
+    state: &AppState,
+    headers: &HeaderMap,
+    payload: AdminPasskeyRenameRequest,
+) -> Result<AdminMutationResponse, ApiError> {
+    let actor = authorize_admin(state, headers).await?;
+    let name = validate_passkey_name(&payload.name)?;
+    let reason = validate_reason(&payload.reason)?;
+    if payload.confirmation != format!("RENAME PASSKEY {}", payload.key_id) {
+        return Err(bad_request("typed passkey confirmation does not match"));
+    }
+    consume_reauth(state, actor.id, &payload.reauth_token).await?;
+    let client = client_metadata_from_headers(headers);
+    match repositories::rename_passkey(
+        &state.pool,
+        actor.id,
+        payload.key_id,
+        name,
+        reason,
+        client.ip_address.as_deref(),
+    )
+    .await
+    .map_err(internal_error)?
+    {
+        repositories::RenamePasskeyResult::Renamed => Ok(AdminMutationResponse { changed: true }),
+        repositories::RenamePasskeyResult::Unchanged => {
+            Ok(AdminMutationResponse { changed: false })
+        }
+        repositories::RenamePasskeyResult::NotFound => {
+            Err(bad_request("operator passkey not found"))
+        }
+        repositories::RenamePasskeyResult::NameConflict => {
+            Err(conflict("another operator passkey already uses this name"))
+        }
+    }
 }
 
 pub(crate) async fn remove_security_key(
@@ -386,7 +434,6 @@ pub(crate) async fn remove_security_key(
         payload.key_id,
         reason,
         client.ip_address.as_deref(),
-        state.config.registration_enabled,
     )
     .await
     .map_err(internal_error)?
@@ -397,12 +444,8 @@ pub(crate) async fn remove_security_key(
         repositories::RemoveSecurityKeyResult::NotFound => {
             Err(bad_request("operator passkey not found"))
         }
-        repositories::RemoveSecurityKeyResult::WouldViolateMinimum { required } => {
-            Err(bad_request(if required == 2 {
-                "close registration or enroll a replacement before removing this passkey"
-            } else {
-                "the last operator passkey cannot be removed"
-            }))
+        repositories::RemoveSecurityKeyResult::WouldRemoveLast => {
+            Err(bad_request("the last operator passkey cannot be removed"))
         }
     }
 }
@@ -677,9 +720,6 @@ pub(crate) async fn update_setting(
         repositories::SetRuntimeValueResult::VersionConflict => Err(conflict(
             "runtime setting version changed; reload and retry",
         )),
-        repositories::SetRuntimeValueResult::SecurityKeyMinimum => Err(bad_request(
-            "enroll a second independent passkey before opening registration",
-        )),
     }
 }
 
@@ -806,5 +846,14 @@ mod tests {
             error.1.0.message,
             "passkey registration failed; start a new enrollment attempt"
         );
+    }
+
+    #[test]
+    fn passkey_name_validation_counts_characters_and_rejects_controls() {
+        assert_eq!(validate_passkey_name("  Bitwarden  ").unwrap(), "Bitwarden");
+        assert!(validate_passkey_name("🔑🔑🔑").is_ok());
+        assert!(validate_passkey_name("ab").is_err());
+        assert!(validate_passkey_name("one\ntwo").is_err());
+        assert!(validate_passkey_name(&"a".repeat(65)).is_err());
     }
 }

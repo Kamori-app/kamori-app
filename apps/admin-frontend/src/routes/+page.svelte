@@ -28,7 +28,9 @@
   let suspensionEnabled = true;
   let suspensionConfirmation = "";
   let newSecurityKeyName = "Backup passkey";
+  let passkeyNames: Record<string, string> = {};
   let securityKeyConfirmation = "";
+  let renamePasskeyConfirmation = "";
   let removeSecurityKeyConfirmation = "";
 
   const requireWebAuthn = () => {
@@ -119,6 +121,9 @@
       adminApi.audit(baseUrl, sessionToken),
     ]);
     dashboard = nextDashboard;
+    passkeyNames = Object.fromEntries(
+      nextDashboard.security_keys.map((key) => [key.id, key.name]),
+    );
     settings = nextSettings.settings;
     audit = nextAudit.entries;
     drafts = Object.fromEntries(
@@ -245,6 +250,28 @@
     }
   };
 
+  const renamePasskey = async (keyId: string) => {
+    busy = `rename-passkey-${keyId}`;
+    try {
+      const reauthToken = await reauthenticate();
+      const result = await adminApi.renamePasskey(baseUrl, sessionToken, {
+        key_id: keyId,
+        name: passkeyNames[keyId]?.trim() ?? "",
+        reauth_token: reauthToken,
+        reason: mutationReason,
+        confirmation: renamePasskeyConfirmation,
+      });
+      mutationReason = "";
+      renamePasskeyConfirmation = "";
+      await refresh();
+      notice = result.changed ? "Passkey renamed and audited." : "Passkey name was unchanged.";
+    } catch (error) {
+      notice = `Passkey rename failed: ${errorMessage(error)}`;
+    } finally {
+      busy = "";
+    }
+  };
+
   const signOut = async () => {
     const activeToken = sessionToken;
     sessionToken = "";
@@ -327,25 +354,29 @@
         {/if}
       </section>
 
-      <section class:danger={dashboard.security_keys.length < 2}>
+      <section>
         <h2>Operator passkeys</h2>
         {#if dashboard.security_keys.length < 2}
-          <p class="notice">Enrollment is not resilient yet. Add and test a second passkey from an independent authenticator or provider before opening registration.</p>
+          <p class="notice">A second passkey from an independent authenticator or provider is recommended for recovery, but it is not required to operate the public alpha.</p>
         {/if}
         <div class="rows">
           {#each dashboard.security_keys as key}
-            <div>
-              <span><strong>{key.name}</strong><small>Added {new Date(key.created_at_unix_ms).toLocaleDateString()}</small></span>
-              <code>{key.id}</code>
-              <button class="danger-button" on:click={() => removeSecurityKey(key.id)} disabled={Boolean(busy)}>Remove</button>
+            <div class="passkey-row">
+              <span><small>Added {new Date(key.created_at_unix_ms).toLocaleDateString()}</small><code>{key.id}</code></span>
+              <input bind:value={passkeyNames[key.id]} aria-label={`Name for passkey ${key.id}`} />
+              <div class="passkey-actions">
+                <button class="secondary" on:click={() => renamePasskey(key.id)} disabled={Boolean(busy)}>Rename</button>
+                <button class="danger-button" on:click={() => removeSecurityKey(key.id)} disabled={Boolean(busy)}>Remove</button>
+              </div>
             </div>
           {/each}
         </div>
+        <label>Typed rename confirmation<input bind:value={renamePasskeyConfirmation} placeholder="RENAME PASSKEY &lt;uuid&gt;" /></label>
         <label>New passkey name<input bind:value={newSecurityKeyName} /></label>
         <label>Typed confirmation<input bind:value={securityKeyConfirmation} placeholder="ADD PASSKEY" /></label>
         <button on:click={addSecurityKey} disabled={Boolean(busy)}>Enroll another passkey</button>
         <label>Typed removal confirmation<input bind:value={removeSecurityKeyConfirmation} placeholder="REMOVE PASSKEY &lt;uuid&gt;" /></label>
-        <p class="muted">This action also uses the fresh TOTP, reason, and current passkey entered below.</p>
+        <p class="muted">Rename, enrollment, and removal also use the fresh TOTP, reason, and current passkey entered below. The last passkey cannot be removed.</p>
       </section>
     {/if}
 
@@ -431,6 +462,8 @@
   .rows > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 10px; background: #08111f; padding: 11px; }
   .rows span { display: grid; gap: 3px; }
   .settings input { max-width: 280px; }
+  .passkey-row > input { max-width: 280px; }
+  .passkey-actions { display: flex; gap: 8px; }
   .bad { color: #fb7185; }
   .danger { border-color: #7f1d3d; }
   .danger-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
@@ -443,6 +476,7 @@
   @media (max-width: 700px) {
     main { width: min(100% - 20px, 1120px); padding-top: 24px; }
     header, .rows > div { align-items: stretch; flex-direction: column; }
-    .settings input { max-width: none; }
+    .settings input, .passkey-row > input { max-width: none; }
+    .passkey-actions { align-items: stretch; flex-direction: column; }
   }
 </style>

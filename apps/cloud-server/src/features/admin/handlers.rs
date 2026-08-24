@@ -8,7 +8,7 @@ use crate::{
             dto::{
                 AdminAuditResponse, AdminAuthFinishRequest, AdminAuthFinishResponse,
                 AdminAuthStartRequest, AdminAuthStartResponse, AdminDashboardResponse,
-                AdminMutationResponse, AdminSecurityKeyAddFinishRequest,
+                AdminMutationResponse, AdminPasskeyRenameRequest, AdminSecurityKeyAddFinishRequest,
                 AdminSecurityKeyRegistrationFinishRequest, AdminSecurityKeyRegistrationResponse,
                 AdminSecurityKeyRegistrationStartRequest, AdminSecurityKeyRemoveRequest,
                 RuntimeSettingsResponse, SuspendAccountRequest, UpdateRuntimeSettingRequest,
@@ -101,6 +101,16 @@ pub async fn remove_security_key(
 ) -> Result<MsgPack<AdminMutationResponse>, ApiError> {
     Ok(MsgPack(
         services::remove_security_key(&state, &headers, payload).await?,
+    ))
+}
+
+pub async fn rename_passkey(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    MsgPack(payload): MsgPack<AdminPasskeyRenameRequest>,
+) -> Result<MsgPack<AdminMutationResponse>, ApiError> {
+    Ok(MsgPack(
+        services::rename_passkey(&state, &headers, payload).await?,
     ))
 }
 
