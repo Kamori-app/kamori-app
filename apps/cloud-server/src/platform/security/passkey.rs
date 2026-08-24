@@ -129,7 +129,11 @@ impl PasskeyService {
             .await
             .map_err(map_store_error)?;
 
-        let creation_options_bytes = serde_json::to_vec(&creation_options)
+        // The API field is explicitly a PublicKeyCredentialCreationOptions
+        // payload. `webauthn-rs` wraps it in CredentialCreationOptions as
+        // `{ "publicKey": ... }` for direct browser use, so serialize the
+        // inner value here and keep the transport contract unambiguous.
+        let creation_options_bytes = serde_json::to_vec(&creation_options.public_key)
             .map_err(|e| anyhow!("serialize passkey creation options: {e}"))?;
         let challenge = extract_challenge_from_json(&creation_options_bytes)?;
 
@@ -183,7 +187,7 @@ impl PasskeyService {
             .await
             .map_err(map_store_error)?;
 
-        let request_options_bytes = serde_json::to_vec(&request_options)
+        let request_options_bytes = serde_json::to_vec(&request_options.public_key)
             .map_err(|e| anyhow!("serialize passkey request options: {e}"))?;
         let challenge = extract_challenge_from_json(&request_options_bytes)?;
 
@@ -242,7 +246,7 @@ impl PasskeyService {
             )
             .await
             .map_err(map_store_error)?;
-        let options = serde_json::to_vec(&creation_options)?;
+        let options = serde_json::to_vec(&creation_options.public_key)?;
         Ok(PasskeyRegistrationChallenge {
             challenge: extract_challenge_from_json(&options)?,
             public_key_credential_creation_options: options,
@@ -286,7 +290,7 @@ impl PasskeyService {
             )
             .await
             .map_err(map_store_error)?;
-        let options = serde_json::to_vec(&request_options)?;
+        let options = serde_json::to_vec(&request_options.public_key)?;
         Ok(PasskeyChallenge {
             challenge: extract_challenge_from_json(&options)?,
             public_key_credential_request_options: options,

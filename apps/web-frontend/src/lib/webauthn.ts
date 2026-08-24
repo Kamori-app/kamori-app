@@ -47,19 +47,39 @@ const normalizeDescriptor = (
   return descriptor;
 };
 
+type JsonObject = Record<string, unknown>;
+
+const asObject = (value: unknown, context: string): JsonObject => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Server returned invalid ${context}.`);
+  }
+  return value as JsonObject;
+};
+
+const unwrapPublicKey = (value: unknown, context: string): JsonObject => {
+  const envelope = asObject(value, context);
+  return "publicKey" in envelope
+    ? asObject(envelope.publicKey, context)
+    : envelope;
+};
+
 /**
  * Converts cloud passkey add options bytes to browser WebAuthn options.
  */
 export const parseCreationOptions = (
   raw: Uint8Array,
 ): PublicKeyCredentialCreationOptions => {
-  const json = JSON.parse(
-    new TextDecoder().decode(raw),
-  ) as PublicKeyCredentialCreationOptions & {
+  const json = unwrapPublicKey(
+    JSON.parse(new TextDecoder().decode(raw)),
+    "WebAuthn creation options",
+  ) as unknown as PublicKeyCredentialCreationOptions & {
     challenge: string | number[];
     user: { id: string | number[]; name: string; displayName: string };
     excludeCredentials?: PublicKeyCredentialDescriptor[];
   };
+  if (json.challenge === undefined || json.user?.id === undefined) {
+    throw new Error("Server returned incomplete WebAuthn creation options.");
+  }
 
   return {
     ...json,
@@ -80,12 +100,16 @@ export const parseCreationOptions = (
 export const parseRequestOptions = (
   raw: Uint8Array,
 ): PublicKeyCredentialRequestOptions => {
-  const json = JSON.parse(
-    new TextDecoder().decode(raw),
-  ) as PublicKeyCredentialRequestOptions & {
+  const json = unwrapPublicKey(
+    JSON.parse(new TextDecoder().decode(raw)),
+    "WebAuthn request options",
+  ) as unknown as PublicKeyCredentialRequestOptions & {
     challenge: string | number[];
     allowCredentials?: PublicKeyCredentialDescriptor[];
   };
+  if (json.challenge === undefined) {
+    throw new Error("Server returned incomplete WebAuthn request options.");
+  }
   const allowCredentials = json.allowCredentials?.map(normalizeDescriptor);
 
   return {
