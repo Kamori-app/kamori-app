@@ -1,3 +1,21 @@
+x-cloud-runtime: &cloud-runtime
+  image: ${CLOUD_IMAGE:?CLOUD_IMAGE is required}
+  env_file:
+    - /etc/kamori/cloud.env
+  volumes:
+    - /etc/kamori/postgres-ca.crt:/run/secrets/postgres-ca.crt:ro
+    - /etc/kamori/postgres-client.crt:/run/secrets/postgres-client.crt:ro
+    - /etc/kamori/postgres-client.key:/run/secrets/postgres-client.key:ro
+    - /etc/kamori/secrets/opaque-server-setup:/run/secrets/opaque-server-setup:ro
+    - /etc/kamori/secrets/refresh-rotation-key:/run/secrets/refresh-rotation-key:ro
+  read_only: true
+  tmpfs:
+    - /tmp:noexec,nosuid,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
 services:
   edge:
     image: ${EDGE_IMAGE:?EDGE_IMAGE is required}
@@ -24,23 +42,8 @@ services:
         condition: service_started
 
   cloud:
-    image: ${CLOUD_IMAGE:?CLOUD_IMAGE is required}
-    env_file:
-      - /etc/kamori/cloud.env
-    volumes:
-      - /etc/kamori/postgres-ca.crt:/run/secrets/postgres-ca.crt:ro
-      - /etc/kamori/postgres-client.crt:/run/secrets/postgres-client.crt:ro
-      - /etc/kamori/postgres-client.key:/run/secrets/postgres-client.key:ro
-      - /etc/kamori/secrets/opaque-server-setup:/run/secrets/opaque-server-setup:ro
-      - /etc/kamori/secrets/refresh-rotation-key:/run/secrets/refresh-rotation-key:ro
-    read_only: true
-    tmpfs:
-      - /tmp:noexec,nosuid,size=64m
+    <<: *cloud-runtime
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
     networks:
       kamori_internal:
         ipv4_address: 172.30.0.3
@@ -50,6 +53,14 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+  migration:
+    <<: *cloud-runtime
+    profiles:
+      - migration
+    restart: "no"
+    networks:
+      - kamori_internal
 
   web:
     image: ${WEB_IMAGE:?WEB_IMAGE is required}
