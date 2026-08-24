@@ -328,16 +328,63 @@ func TestMigrationUsesTheServiceComposeEnvironment(t *testing.T) {
 	for _, required := range []string{
 		"--file /opt/kamori/release/compose.yaml",
 		`--env-file "$temporary_release"`,
-		"run --rm --no-deps cloud migrate",
+		"run --rm --no-deps migration migrate",
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("migration command is missing %q", required)
 		}
 	}
 	release := strings.Index(script, "temporary_release=$(mktemp")
-	migration := strings.Index(script, "run --rm --no-deps cloud migrate")
+	migration := strings.Index(script, "run --rm --no-deps migration migrate")
 	if release < 0 || migration < 0 || release >= migration {
 		t.Fatal("immutable release environment must be rendered before the migration starts")
+	}
+}
+
+func TestMigrationServiceDoesNotClaimTheRuntimeAddress(t *testing.T) {
+	t.Parallel()
+
+	compose, err := deploymentAsset("cloud-server/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationStart := strings.Index(compose, "\n  migration:\n")
+	webStart := strings.Index(compose, "\n  web:\n")
+	if migrationStart < 0 || webStart <= migrationStart {
+		t.Fatal("compose file is missing the isolated migration service")
+	}
+	migration := compose[migrationStart:webStart]
+	for _, required := range []string{"profiles:", "- migration", "- kamori_internal"} {
+		if !strings.Contains(migration, required) {
+			t.Fatalf("migration service is missing %q", required)
+		}
+	}
+	if strings.Contains(migration, "ipv4_address:") || strings.Contains(migration, "ports:") {
+		t.Fatal("migration service must use a dynamic private address and expose no host ports")
+	}
+	var parsed struct {
+		Services map[string]struct {
+			Image       string   `yaml:"image"`
+			Environment []string `yaml:"env_file"`
+			Volumes     []string `yaml:"volumes"`
+			ReadOnly    bool     `yaml:"read_only"`
+			Profiles    []string `yaml:"profiles"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(compose), &parsed); err != nil {
+		t.Fatalf("cloud compose is not valid YAML: %v", err)
+	}
+	cloud, cloudExists := parsed.Services["cloud"]
+	migrationService, migrationExists := parsed.Services["migration"]
+	if !cloudExists || !migrationExists {
+		t.Fatal("cloud compose must define runtime and migration services")
+	}
+	if migrationService.Image != cloud.Image || len(migrationService.Environment) == 0 ||
+		len(migrationService.Volumes) != len(cloud.Volumes) || !migrationService.ReadOnly {
+		t.Fatal("migration service must inherit the cloud image, environment, secrets, and hardening")
+	}
+	if len(migrationService.Profiles) != 1 || migrationService.Profiles[0] != "migration" {
+		t.Fatal("migration service must remain excluded from the normal runtime profile")
 	}
 }
 
