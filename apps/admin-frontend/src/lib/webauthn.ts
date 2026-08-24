@@ -29,15 +29,41 @@ const descriptor = (
       : item.id,
 });
 
+type JsonObject = Record<string, unknown>;
+
+const asObject = (value: unknown, context: string): JsonObject => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Server returned invalid ${context}.`);
+  }
+  return value as JsonObject;
+};
+
+// Older servers serialized webauthn-rs' browser envelope (`{ publicKey: ... }`)
+// even though the API field promises the inner PublicKeyCredential options.
+// Accept both during rolling upgrades while always returning the browser's
+// actual `publicKey` value.
+const unwrapPublicKey = (value: unknown, context: string): JsonObject => {
+  const envelope = asObject(value, context);
+  return "publicKey" in envelope
+    ? asObject(envelope.publicKey, context)
+    : envelope;
+};
+
 export const parseCreationOptions = (
   raw: Uint8Array,
 ): PublicKeyCredentialCreationOptions => {
-  const value = JSON.parse(new TextDecoder().decode(raw)) as
+  const value = unwrapPublicKey(
+    JSON.parse(new TextDecoder().decode(raw)),
+    "WebAuthn creation options",
+  ) as unknown as
     PublicKeyCredentialCreationOptions & {
       challenge: string | number[];
       user: PublicKeyCredentialUserEntity & { id: string | number[] };
       excludeCredentials?: PublicKeyCredentialDescriptor[];
     };
+  if (value.challenge === undefined || value.user?.id === undefined) {
+    throw new Error("Server returned incomplete WebAuthn creation options.");
+  }
   return {
     ...value,
     challenge: toBuffer(value.challenge),
@@ -49,11 +75,17 @@ export const parseCreationOptions = (
 export const parseRequestOptions = (
   raw: Uint8Array,
 ): PublicKeyCredentialRequestOptions => {
-  const value = JSON.parse(new TextDecoder().decode(raw)) as
+  const value = unwrapPublicKey(
+    JSON.parse(new TextDecoder().decode(raw)),
+    "WebAuthn request options",
+  ) as unknown as
     PublicKeyCredentialRequestOptions & {
       challenge: string | number[];
       allowCredentials?: PublicKeyCredentialDescriptor[];
     };
+  if (value.challenge === undefined) {
+    throw new Error("Server returned incomplete WebAuthn request options.");
+  }
   return {
     ...value,
     challenge: toBuffer(value.challenge),

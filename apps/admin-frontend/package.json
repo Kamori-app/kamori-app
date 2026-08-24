@@ -9,7 +9,8 @@
     "build": "svelte-kit sync && vite build",
     "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json",
     "lint": "bun run check",
-    "test": "bun run check"
+    "test:unit": "bun test src/lib",
+    "test": "bun run check && bun run test:unit"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",
