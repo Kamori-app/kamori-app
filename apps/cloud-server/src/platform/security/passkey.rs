@@ -12,36 +12,10 @@ use std::time::Duration;
 use url::Url;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
-    AttestationCaList, AuthenticationResult, AuthenticatorAttachment, DiscoverableAuthentication,
-    DiscoverableKey, Passkey, PasskeyRegistration, PublicKeyCredential,
-    RegisterPublicKeyCredential, SecurityKey, SecurityKeyAuthentication, SecurityKeyRegistration,
+    AuthenticationResult, DiscoverableAuthentication, DiscoverableKey, Passkey,
+    PasskeyAuthentication, PasskeyRegistration, PublicKeyCredential, RegisterPublicKeyCredential,
     Webauthn, WebauthnBuilder,
 };
-
-// Official production roots published by Yubico. The legacy device-catalog
-// crate bundled only one 2014 root and has not been updated since 2023, while
-// Yubico added a FIDO root and rotated to Attestation Root 1 for firmware
-// 5.7.4+. Keep these trust anchors pinned and reviewed as source artifacts;
-// never download mutable trust material while starting the service.
-const YUBICO_ATTESTATION_ROOTS: [&[u8]; 3] = [
-    include_bytes!("yubico-roots/yubico-attestation-root-1.pem"),
-    include_bytes!("yubico-roots/yubico-u2f-root-ca.pem"),
-    include_bytes!("yubico-roots/yubico-fido-root-ca.pem"),
-];
-
-fn yubico_attestation_ca_list() -> Result<AttestationCaList> {
-    let mut roots = AttestationCaList::default();
-    for pem in YUBICO_ATTESTATION_ROOTS {
-        let root = AttestationCaList::try_from(pem)
-            .map_err(|error| anyhow!("parse pinned Yubico attestation root: {error:?}"))?;
-        roots.union(&root);
-    }
-    anyhow::ensure!(
-        roots.len() == YUBICO_ATTESTATION_ROOTS.len(),
-        "pinned Yubico attestation roots contain a duplicate"
-    );
-    Ok(roots)
-}
 
 /// In-memory passkey service state using Valkey for challenge storage.
 #[derive(Clone)]
@@ -49,7 +23,6 @@ pub struct PasskeyService {
     webauthn: Webauthn,
     state_store: Arc<dyn StateStore>,
     challenge_ttl: Duration,
-    security_key_attestation_ca_list: Option<AttestationCaList>,
 }
 
 /// Envelope for passkey challenge and options.
@@ -88,7 +61,6 @@ impl PasskeyService {
             webauthn,
             state_store,
             challenge_ttl: Duration::from_secs(config.valkey_ttl_seconds),
-            security_key_attestation_ca_list: None,
         })
     }
 
@@ -99,13 +71,10 @@ impl PasskeyService {
             &config.admin_webauthn_rp_origin,
             &config.admin_webauthn_rp_name,
         )?;
-        let attestation_ca_list = yubico_attestation_ca_list()?;
-        let security_key_attestation_ca_list = Some(attestation_ca_list);
         Ok(Self {
             webauthn,
             state_store,
             challenge_ttl: Duration::from_secs(config.valkey_ttl_seconds),
-            security_key_attestation_ca_list,
         })
     }
 
@@ -229,28 +198,31 @@ impl PasskeyService {
             .map_err(|e| anyhow!("passkey discoverable login finish failed: {e:?}"))
     }
 
-    /// Starts registration restricted to a roaming security-key UX.
-    pub async fn start_security_key_registration(
+    /// Starts operator passkey registration without choosing a provider or attachment.
+    pub async fn start_operator_passkey_registration(
         &self,
         flow_id: Uuid,
         user_id: Uuid,
         username: &str,
+        existing_passkeys: &[Passkey],
     ) -> Result<PasskeyRegistrationChallenge> {
+        let excluded_credentials = (!existing_passkeys.is_empty()).then(|| {
+            existing_passkeys
+                .iter()
+                .map(|passkey| passkey.cred_id().clone())
+                .collect()
+        });
         let (creation_options, state) = self
             .webauthn
-            .start_securitykey_registration(
-                user_id,
-                username,
-                username,
-                None,
-                self.security_key_attestation_ca_list.clone(),
-                Some(AuthenticatorAttachment::CrossPlatform),
-            )
-            .map_err(|error| anyhow!("security-key registration start failed: {error:?}"))?;
+            .start_passkey_registration(user_id, username, username, excluded_credentials)
+            .map_err(|error| anyhow!("operator passkey registration start failed: {error:?}"))?;
         self.state_store
             .put(
-                &security_key_registration_flow_key(flow_id),
-                &serde_json::to_vec(&state)?,
+                &operator_passkey_registration_flow_key(flow_id),
+                &serde_json::to_vec(&UserPasskeyRegistrationState {
+                    user_id,
+                    registration: state,
+                })?,
                 self.challenge_ttl,
             )
             .await
@@ -262,38 +234,43 @@ impl PasskeyService {
         })
     }
 
-    /// Completes a roaming security-key registration flow.
-    pub async fn finish_security_key_registration(
+    /// Completes an operator passkey registration flow bound to its operator.
+    pub async fn finish_operator_passkey_registration(
         &self,
         flow_id: Uuid,
+        expected_user_id: Uuid,
         credential: RegisterPublicKeyCredential,
-    ) -> Result<SecurityKey> {
-        let key = security_key_registration_flow_key(flow_id);
+    ) -> Result<Passkey> {
+        let key = operator_passkey_registration_flow_key(flow_id);
         let state = self
             .state_store
             .take(&key)
             .await
             .map_err(map_store_error)?
-            .ok_or_else(|| anyhow!("missing security-key registration state"))?;
-        let state: SecurityKeyRegistration = serde_json::from_slice(&state)?;
+            .ok_or_else(|| anyhow!("missing operator passkey registration state"))?;
+        let state: UserPasskeyRegistrationState = serde_json::from_slice(&state)?;
+        anyhow::ensure!(
+            state.user_id == expected_user_id,
+            "operator passkey registration account mismatch"
+        );
         self.webauthn
-            .finish_securitykey_registration(&credential, &state)
+            .finish_passkey_registration(&credential, &state.registration)
             .map_err(anyhow::Error::new)
     }
 
-    /// Starts authentication against an explicit set of operator security keys.
-    pub async fn start_security_key_authentication(
+    /// Starts authentication against an explicit set of operator passkeys.
+    pub async fn start_operator_passkey_authentication(
         &self,
         flow_id: Uuid,
-        keys: &[SecurityKey],
+        passkeys: &[Passkey],
     ) -> Result<PasskeyChallenge> {
         let (request_options, state) = self
             .webauthn
-            .start_securitykey_authentication(keys)
-            .map_err(|error| anyhow!("security-key authentication start failed: {error:?}"))?;
+            .start_passkey_authentication(passkeys)
+            .map_err(|error| anyhow!("operator passkey authentication start failed: {error:?}"))?;
         self.state_store
             .put(
-                &security_key_authentication_flow_key(flow_id),
+                &operator_passkey_authentication_flow_key(flow_id),
                 &serde_json::to_vec(&state)?,
                 self.challenge_ttl,
             )
@@ -306,23 +283,23 @@ impl PasskeyService {
         })
     }
 
-    /// Completes an operator security-key authentication flow.
-    pub async fn finish_security_key_authentication(
+    /// Completes an operator passkey authentication flow.
+    pub async fn finish_operator_passkey_authentication(
         &self,
         flow_id: Uuid,
         credential: PublicKeyCredential,
     ) -> Result<AuthenticationResult> {
-        let key = security_key_authentication_flow_key(flow_id);
+        let key = operator_passkey_authentication_flow_key(flow_id);
         let state = self
             .state_store
             .take(&key)
             .await
             .map_err(map_store_error)?
-            .ok_or_else(|| anyhow!("missing security-key authentication state"))?;
-        let state: SecurityKeyAuthentication = serde_json::from_slice(&state)?;
+            .ok_or_else(|| anyhow!("missing operator passkey authentication state"))?;
+        let state: PasskeyAuthentication = serde_json::from_slice(&state)?;
         self.webauthn
-            .finish_securitykey_authentication(&credential, &state)
-            .map_err(|error| anyhow!("security-key authentication failed: {error:?}"))
+            .finish_passkey_authentication(&credential, &state)
+            .map_err(|error| anyhow!("operator passkey authentication failed: {error:?}"))
     }
 }
 
@@ -344,16 +321,6 @@ pub fn encode_passkey(passkey: &Passkey) -> Result<Vec<u8>> {
 /// Deserializes a passkey from bytes.
 pub fn decode_passkey(bytes: &[u8]) -> Result<Passkey> {
     serde_json::from_slice(bytes).map_err(|e| anyhow!("deserialize passkey: {e}"))
-}
-
-/// Serializes an operator security key into bytes.
-pub fn encode_security_key(key: &SecurityKey) -> Result<Vec<u8>> {
-    serde_json::to_vec(key).map_err(|error| anyhow!("serialize security key: {error}"))
-}
-
-/// Deserializes an operator security key from bytes.
-pub fn decode_security_key(bytes: &[u8]) -> Result<SecurityKey> {
-    serde_json::from_slice(bytes).map_err(|error| anyhow!("deserialize security key: {error}"))
 }
 
 /// Extracts challenge bytes from serialized options.
@@ -419,12 +386,12 @@ fn registration_flow_key(flow_id: Uuid) -> String {
     format!("passkey:reg:flow:{flow_id}")
 }
 
-fn security_key_registration_flow_key(flow_id: Uuid) -> String {
-    format!("admin:security-key:reg:{flow_id}")
+fn operator_passkey_registration_flow_key(flow_id: Uuid) -> String {
+    format!("admin:passkey:reg:{flow_id}")
 }
 
-fn security_key_authentication_flow_key(flow_id: Uuid) -> String {
-    format!("admin:security-key:auth:{flow_id}")
+fn operator_passkey_authentication_flow_key(flow_id: Uuid) -> String {
+    format!("admin:passkey:auth:{flow_id}")
 }
 
 /// Maps store errors into anyhow.
@@ -437,9 +404,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pinned_yubico_attestation_roots_are_distinct_and_parseable() {
-        let roots = yubico_attestation_ca_list().expect("parse pinned Yubico roots");
-        assert_eq!(roots.len(), 3);
+    fn passkey_registration_leaves_authenticator_choice_to_user() {
+        let webauthn = build_webauthn(
+            "admin.example.test",
+            "https://admin.example.test",
+            "Example operator console",
+        )
+        .expect("build WebAuthn verifier");
+        let (options, _) = webauthn
+            .start_passkey_registration(Uuid::new_v4(), "operator", "Operator", None)
+            .expect("start passkey registration");
+        let options = serde_json::to_value(options.public_key).expect("serialize options");
+
+        assert_eq!(
+            options.get("attestation"),
+            Some(&Value::String("none".into()))
+        );
+        assert_eq!(
+            options.pointer("/authenticatorSelection/userVerification"),
+            Some(&Value::String("required".into()))
+        );
+        assert!(
+            options
+                .pointer("/authenticatorSelection/authenticatorAttachment")
+                .is_none(),
+            "the relying party must not choose a platform or cross-platform authenticator"
+        );
     }
 
     #[test]

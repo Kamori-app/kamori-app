@@ -9,11 +9,11 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
-use webauthn_rs::prelude::{AuthenticationResult, SecurityKey};
+use webauthn_rs::prelude::{AuthenticationResult, Passkey};
 
 use crate::{
     features::admin::dto::{AdminAuditEntry, AdminSecurityKeySummary, OperatorJobStatus},
-    platform::security::passkey::{decode_security_key, encode_security_key},
+    platform::security::passkey::{decode_passkey, encode_passkey},
 };
 
 #[derive(Debug)]
@@ -21,7 +21,7 @@ pub(crate) struct AdminIdentity {
     pub(crate) id: Uuid,
     pub(crate) username: String,
     pub(crate) totp_secret_ciphertext: Vec<u8>,
-    pub(crate) security_keys: Vec<SecurityKey>,
+    pub(crate) security_keys: Vec<Passkey>,
 }
 
 #[derive(Debug)]
@@ -175,7 +175,7 @@ pub(crate) async fn activate_with_security_key(
     pool: &PgPool,
     admin_id: Uuid,
     bootstrap_token: &str,
-    key: &SecurityKey,
+    key: &Passkey,
 ) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
     let bootstrap_id: Option<Uuid> = sqlx::query_scalar(
@@ -197,13 +197,13 @@ pub(crate) async fn activate_with_security_key(
     sqlx::query(
         r#"
         INSERT INTO admin_security_keys (id, admin_user_id, name, credential_id, security_key_data)
-        VALUES ($1, $2, 'Primary security key', $3, $4)
+        VALUES ($1, $2, 'Primary passkey', $3, $4)
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(admin_id)
     .bind(key.cred_id().as_ref())
-    .bind(encode_security_key(key)?)
+    .bind(encode_passkey(key)?)
     .execute(&mut *tx)
     .await?;
     sqlx::query("UPDATE admin_bootstrap_tokens SET used_at = now() WHERE id = $1")
@@ -250,7 +250,7 @@ pub(crate) async fn load_active_identity(
     .await?;
     let security_keys = key_rows
         .iter()
-        .map(|row| decode_security_key(&row.try_get::<Vec<u8>, _>("security_key_data")?))
+        .map(|row| decode_passkey(&row.try_get::<Vec<u8>, _>("security_key_data")?))
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(Some(AdminIdentity {
         id,
@@ -272,7 +272,7 @@ pub(crate) async fn persist_security_key_result(
     .bind(result.cred_id().as_ref())
     .fetch_one(pool)
     .await?;
-    let mut key = decode_security_key(&row.try_get::<Vec<u8>, _>("security_key_data")?)?;
+    let mut key = decode_passkey(&row.try_get::<Vec<u8>, _>("security_key_data")?)?;
     let changed = key
         .update_credential(result)
         .ok_or_else(|| anyhow::anyhow!("operator credential mismatch"))?;
@@ -287,7 +287,7 @@ pub(crate) async fn persist_security_key_result(
     .bind(admin_id)
     .bind(result.cred_id().as_ref())
     .bind(changed)
-    .bind(encode_security_key(&key)?)
+    .bind(encode_passkey(&key)?)
     .execute(pool)
     .await?;
     sqlx::query("UPDATE admin_users SET last_login_at = now() WHERE id = $1")
@@ -301,7 +301,7 @@ pub(crate) async fn add_security_key(
     pool: &PgPool,
     admin_id: Uuid,
     name: &str,
-    key: &SecurityKey,
+    key: &Passkey,
     reason: &str,
     ip_address: Option<&str>,
 ) -> anyhow::Result<()> {
@@ -318,14 +318,14 @@ pub(crate) async fn add_security_key(
     .bind(admin_id)
     .bind(name)
     .bind(key.cred_id().as_ref())
-    .bind(encode_security_key(key)?)
+    .bind(encode_passkey(key)?)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
         r#"
         INSERT INTO admin_audit_log (
             id, actor_admin_user_id, event_kind, target_kind, target_id, reason, ip_address
-        ) VALUES ($1, $2, 'operator_security_key_added', 'admin_security_key', $3, $4, $5)
+        ) VALUES ($1, $2, 'operator_passkey_added', 'admin_passkey', $3, $4, $5)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -392,7 +392,7 @@ pub(crate) async fn remove_security_key(
         r#"
         INSERT INTO admin_audit_log (
             id, actor_admin_user_id, event_kind, target_kind, target_id, reason, ip_address
-        ) VALUES ($1, $2, 'operator_security_key_removed', 'admin_security_key', $3, $4, $5)
+        ) VALUES ($1, $2, 'operator_passkey_removed', 'admin_passkey', $3, $4, $5)
         "#,
     )
     .bind(Uuid::new_v4())

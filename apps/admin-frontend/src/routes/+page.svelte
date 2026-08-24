@@ -27,18 +27,27 @@
   let suspensionUserId = "";
   let suspensionEnabled = true;
   let suspensionConfirmation = "";
-  let newSecurityKeyName = "Backup security key";
+  let newSecurityKeyName = "Backup passkey";
   let securityKeyConfirmation = "";
   let removeSecurityKeyConfirmation = "";
 
   const requireWebAuthn = () => {
     if (!("PublicKeyCredential" in window) || !navigator.credentials) {
-      throw new Error("This browser cannot use WebAuthn security keys.");
+      throw new Error("This browser does not support passkeys.");
     }
   };
 
-  const errorMessage = (error: unknown) =>
-    error instanceof Error ? error.message : String(error);
+  const errorMessage = (error: unknown) => {
+    if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+      if (error.name === "NotAllowedError") {
+        return "The passkey request was cancelled, timed out, or blocked by the selected provider. Try again and complete the browser prompt.";
+      }
+      if (error.name === "InvalidStateError") {
+        return "That passkey is already enrolled. Choose a different passkey or provider.";
+      }
+    }
+    return error instanceof Error ? error.message : String(error);
+  };
 
   const enroll = async () => {
     busy = "enroll";
@@ -52,7 +61,7 @@
       const credential = (await navigator.credentials.create({
         publicKey: parseCreationOptions(start.public_key_credential_creation_options),
       })) as PublicKeyCredential | null;
-      if (!credential) throw new Error("Security-key enrollment was cancelled.");
+      if (!credential) throw new Error("Passkey enrollment was cancelled.");
       await adminApi.bootstrapFinish(baseUrl, {
         username: username.trim(),
         bootstrap_token: bootstrapToken.trim(),
@@ -62,7 +71,7 @@
       });
       bootstrapToken = "";
       totpCode = "";
-      notice = "Operator enrolled. Sign in with the security key and TOTP.";
+      notice = "Operator enrolled. Sign in with the passkey and TOTP.";
     } catch (error) {
       notice = `Enrollment failed: ${errorMessage(error)}`;
     } finally {
@@ -75,7 +84,7 @@
     const credential = (await navigator.credentials.get({
       publicKey: parseRequestOptions(options),
     })) as PublicKeyCredential | null;
-    if (!credential) throw new Error("Security-key request was cancelled.");
+    if (!credential) throw new Error("Passkey request was cancelled.");
     return serializeAssertion(credential);
   };
 
@@ -195,7 +204,7 @@
       const credential = (await navigator.credentials.create({
         publicKey: parseCreationOptions(start.public_key_credential_creation_options),
       })) as PublicKeyCredential | null;
-      if (!credential) throw new Error("Security-key enrollment was cancelled.");
+      if (!credential) throw new Error("Passkey enrollment was cancelled.");
       await adminApi.addSecurityKeyFinish(baseUrl, sessionToken, {
         flow_id: start.flow_id,
         credential: serializeAttestation(credential),
@@ -207,9 +216,9 @@
       mutationReason = "";
       securityKeyConfirmation = "";
       await refresh();
-      notice = "Backup security key enrolled and audited.";
+      notice = "Backup passkey enrolled and audited.";
     } catch (error) {
-      notice = `Security-key enrollment failed: ${errorMessage(error)}`;
+      notice = `Passkey enrollment failed: ${errorMessage(error)}`;
     } finally {
       busy = "";
     }
@@ -228,9 +237,9 @@
       mutationReason = "";
       removeSecurityKeyConfirmation = "";
       await signOut();
-      notice = "Security key removed, all operator sessions revoked. Sign in again.";
+      notice = "Passkey removed, all operator sessions revoked. Sign in again.";
     } catch (error) {
-      notice = `Security-key removal failed: ${errorMessage(error)}`;
+      notice = `Passkey removal failed: ${errorMessage(error)}`;
     } finally {
       busy = "";
     }
@@ -282,14 +291,14 @@
       <label>Operator username<input bind:value={username} autocomplete="username" /></label>
       <label>Current TOTP<input bind:value={totpCode} inputmode="numeric" autocomplete="one-time-code" /></label>
       <div class="actions">
-        <button on:click={signIn} disabled={Boolean(busy)}>Use security key and sign in</button>
+        <button on:click={signIn} disabled={Boolean(busy)}>Continue with passkey</button>
       </div>
       <details>
         <summary>First-time enrollment</summary>
         <p>Run <code>cloud-server admin-bootstrap &lt;username&gt;</code> in the cloud container on a trusted app host. The token expires in 15 minutes.</p>
-        <p>Use a physical YubiKey. If the browser asks whether this site may see the key's make and model, allow it: hardware attestation is required. Platform and synchronized passkeys are not accepted for operator access.</p>
+        <p>Your browser will show the available passkey providers. Choose the authenticator you prefer, such as Bitwarden, a device passkey, or a physical security key. Kamori requires user verification but does not select a provider or device type.</p>
         <label>One-time bootstrap token<input bind:value={bootstrapToken} type="password" autocomplete="off" /></label>
-        <button on:click={enroll} disabled={Boolean(busy)}>Enroll roaming security key</button>
+        <button on:click={enroll} disabled={Boolean(busy)}>Enroll passkey</button>
       </details>
     </section>
   {:else}
@@ -319,9 +328,9 @@
       </section>
 
       <section class:danger={dashboard.security_keys.length < 2}>
-        <h2>Operator security keys</h2>
+        <h2>Operator passkeys</h2>
         {#if dashboard.security_keys.length < 2}
-          <p class="notice">Enrollment is not resilient yet. Add a second roaming key and store it separately before opening registration.</p>
+          <p class="notice">Enrollment is not resilient yet. Add and test a second passkey from an independent authenticator or provider before opening registration.</p>
         {/if}
         <div class="rows">
           {#each dashboard.security_keys as key}
@@ -332,17 +341,17 @@
             </div>
           {/each}
         </div>
-        <label>New key name<input bind:value={newSecurityKeyName} /></label>
-        <label>Typed confirmation<input bind:value={securityKeyConfirmation} placeholder="ADD SECURITY KEY" /></label>
-        <button on:click={addSecurityKey} disabled={Boolean(busy)}>Enroll another roaming key</button>
-        <label>Typed removal confirmation<input bind:value={removeSecurityKeyConfirmation} placeholder="REMOVE SECURITY KEY &lt;uuid&gt;" /></label>
-        <p class="muted">This action also uses the fresh TOTP, reason, and current security key entered below.</p>
+        <label>New passkey name<input bind:value={newSecurityKeyName} /></label>
+        <label>Typed confirmation<input bind:value={securityKeyConfirmation} placeholder="ADD PASSKEY" /></label>
+        <button on:click={addSecurityKey} disabled={Boolean(busy)}>Enroll another passkey</button>
+        <label>Typed removal confirmation<input bind:value={removeSecurityKeyConfirmation} placeholder="REMOVE PASSKEY &lt;uuid&gt;" /></label>
+        <p class="muted">This action also uses the fresh TOTP, reason, and current passkey entered below.</p>
       </section>
     {/if}
 
     <section>
       <h2>Runtime controls</h2>
-      <p class="muted">Every write needs a fresh security-key assertion, TOTP, reason, exact typed confirmation, and optimistic version match.</p>
+      <p class="muted">Every write needs a fresh passkey assertion, TOTP, reason, exact typed confirmation, and optimistic version match.</p>
       <div class="danger-grid">
         <label>Fresh TOTP for next action<input bind:value={mutationTotp} inputmode="numeric" autocomplete="one-time-code" /></label>
         <label>Reason (10–500 characters)<textarea bind:value={mutationReason}></textarea></label>

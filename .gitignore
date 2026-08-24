@@ -43,7 +43,6 @@ AUDIT_FOLLOWUPS.local.md
 
 # Key material & certificates (never in VCS)
 *.pem
-!apps/cloud-server/src/platform/security/yubico-roots/*.pem
 *.key
 *.crt
 *.p12
