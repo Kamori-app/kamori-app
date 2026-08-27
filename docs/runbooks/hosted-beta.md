@@ -70,11 +70,15 @@ apply the encrypted host archive, bootstrap PostgreSQL, run pgBackRest, or
 probe an application endpoint. It is idempotent after the `replace` phase and
 is deliberately rejected during `retire`.
 
-Host delivery retries only SSH transport status `255`, which covers a newly
-created or temporarily unreachable machine. If a command reached a host and
-failed, the workflow stops on that error instead of rerunning database or
-container work. PostgreSQL runs `stanza-create` and `pgbackrest check` on a new
-host or whenever the rendered backup configuration fingerprint changes.
+Host delivery retries SSH status `255` only when the recorded error describes
+a connection failure from a newly created or temporarily unreachable machine.
+Authentication, private-key, and pinned-host-key failures stop immediately;
+retries cannot repair those configuration errors. If a command reached a host
+and failed, the workflow likewise stops instead of rerunning database or
+container work. Every accepted archive restores the `deploy` home and SSH
+directory ownership/modes before SSH validation. PostgreSQL runs
+`stanza-create` and `pgbackrest check` on a new host or whenever the rendered
+backup configuration fingerprint changes.
 Unchanged routine infrastructure updates skip that blocking repository check;
 the scheduled backup job remains responsible for ongoing archive checks and
 operator heartbeats.

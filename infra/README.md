@@ -168,8 +168,12 @@ restart only the root-owned egress units: ops first, followed by the database
 and both app nodes. It cannot run a shell, pull or restart application
 containers, bootstrap PostgreSQL, access object-storage configuration, or
 perform an availability probe. SSH transport failures are retried while a host
-is temporarily unreachable; a command that reached the host and failed exits
-immediately instead of repeating a deterministic server-side error.
+is temporarily unreachable. Authentication and pinned-host-key failures stop
+immediately because retries cannot repair invalid trust material; a command
+that reached the host and failed likewise exits immediately instead of
+repeating a deterministic server-side error. Every successful configuration
+install also restores the exact owner and modes of the `deploy` home, SSH
+directory, and authorized-key file before validating and restarting SSH.
 
 PostgreSQL bootstrap fingerprints the rendered pgBackRest repository
 configuration. A new host, changed repository credential, bucket, endpoint, or

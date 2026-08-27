@@ -801,6 +801,10 @@ encrypted configuration SSH identity and pinned host keys, then invokes only
 the role-bound NAT/route/resolver repair entrypoint. Use it only after the
 initial `replace` phase. It performs no Pulumi update, secret rotation,
 PostgreSQL bootstrap, container deployment, or availability probe.
+Temporary connection failures are retried, but an invalid configuration key,
+private-key file, or pinned host key fails immediately because waiting cannot
+repair SSH trust. A successful role update also restores the owner and strict
+modes of the `deploy` SSH directory and authorized-key file.
 
 Cloud-init contains only the immutable machine baseline, raw host identity, and
 the public half of a dedicated configuration identity. Runtime secrets,

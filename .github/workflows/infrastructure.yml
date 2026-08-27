@@ -132,21 +132,32 @@ jobs:
             host=$1
             command=$2
             input_path=${3:-}
+            ssh_error="$ssh_dir/ssh-error"
             for attempt in $(seq 1 60); do
+              : >"$ssh_error"
               set +e
               if [[ -n "$input_path" ]]; then
-                ssh -F "$ssh_dir/config" "$host" "$command" <"$input_path"
+                ssh -F "$ssh_dir/config" "$host" "$command" <"$input_path" \
+                  2>"$ssh_error"
               else
-                ssh -F "$ssh_dir/config" "$host" "$command"
+                ssh -F "$ssh_dir/config" "$host" "$command" \
+                  2>"$ssh_error"
               fi
               status=$?
               set -e
+              cat "$ssh_error" >&2
               if [[ "$status" == 0 ]]; then
                 return 0
               fi
               if [[ "$status" != 255 ]]; then
                 echo "$command failed on $host with remote status $status; not retrying a deterministic host error" >&2
                 return "$status"
+              fi
+              if grep -Eqi \
+                'Permission denied|Too many authentication failures|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No ED25519 host key is known|Offending .* key|Load key .*: (bad permissions|error in libcrypto|invalid format)|Bad owner or permissions on' \
+                "$ssh_error"; then
+                echo "SSH authentication or host trust failed for $host; not retrying a permanent configuration error" >&2
+                return 255
               fi
               if [[ "$attempt" == 60 ]]; then
                 echo "SSH transport for $host did not recover after $attempt attempts" >&2
