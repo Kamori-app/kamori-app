@@ -76,7 +76,8 @@ Authentication, private-key, and pinned-host-key failures stop immediately;
 retries cannot repair those configuration errors. If a command reached a host
 and failed, the workflow likewise stops instead of rerunning database or
 container work. Every accepted archive restores the `deploy` home and SSH
-directory ownership/modes before SSH validation. PostgreSQL runs
+directory ownership/modes before the fingerprint no-op decision and again
+after changed files are installed. PostgreSQL runs
 `stanza-create` and `pgbackrest check` on a new host or whenever the rendered
 backup configuration fingerprint changes.
 Unchanged routine infrastructure updates skip that blocking repository check;

@@ -804,7 +804,9 @@ PostgreSQL bootstrap, container deployment, or availability probe.
 Temporary connection failures are retried, but an invalid configuration key,
 private-key file, or pinned host key fails immediately because waiting cannot
 repair SSH trust. A successful role update also restores the owner and strict
-modes of the `deploy` SSH directory and authorized-key file.
+modes of the `deploy` SSH directory and authorized-key file. That repair runs
+before the archive fingerprint no-op decision, so it also heals permission
+drift without restarting the role's services.
 
 Cloud-init contains only the immutable machine baseline, raw host identity, and
 the public half of a dedicated configuration identity. Runtime secrets,
