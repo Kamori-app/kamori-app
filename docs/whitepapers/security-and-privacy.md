@@ -51,6 +51,12 @@ Registration creates a 24-word data recovery kit. Store it offline, separately
 from the device and password manager used for daily access. Kamori support
 cannot reconstruct it and cannot decrypt your data without it.
 
+During registration the web app can download a plaintext file named
+`kamori-recovery-<random>.txt`. The browser creates it locally; its contents and
+filename are never sent to Kamori. The file is a convenience copy, not
+encrypted storage: move it out of Downloads into a password manager, encrypted
+drive, or offline backup, and never share it.
+
 Recovery replaces the password record, disables TOTP, revokes existing
 sessions, passkeys, and devices, and creates a clean device identity. The kit
 derives a separate recovery encryption identity; a current HPKE-wrapped copy of
