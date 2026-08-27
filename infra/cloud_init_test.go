@@ -235,8 +235,33 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 	if resolver != "[Resolve]\nDNS=185.12.64.1 185.12.64.2\n" {
 		t.Fatalf("private resolver configuration = %q", resolver)
 	}
+	if _, ok := files["root/usr/local/sbin/kamori-repair-egress"]; !ok {
+		t.Fatal("host configuration is missing the restricted egress repair entrypoint")
+	}
+	for _, required := range []string{
+		"/usr/local/sbin/kamori-apply-host-config app",
+		"/usr/local/sbin/kamori-repair-egress app",
+	} {
+		if !strings.Contains(files["root/etc/sudoers.d/kamori-configure"], required) {
+			t.Fatalf("configuration sudoers is missing exact command %q", required)
+		}
+	}
 
 	applyScript, err := deploymentAsset("host-config/kamori-apply-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"/usr/local/sbin/kamori-repair-egress app",
+		"/usr/local/sbin/kamori-repair-egress ops",
+		"/usr/local/sbin/kamori-repair-egress db-primary",
+	} {
+		if !strings.Contains(applyScript, required) {
+			t.Fatalf("host configuration does not delegate to %q", required)
+		}
+	}
+
+	repairScript, err := deploymentAsset("host-config/kamori-repair-egress")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,9 +271,87 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		"systemctl restart kamori-nat-gateway.service",
 		"resolvectl flush-caches",
 	} {
-		if !strings.Contains(applyScript, required) {
-			t.Fatalf("host configuration is missing egress recovery command %q", required)
+		if !strings.Contains(repairScript, required) {
+			t.Fatalf("egress repair is missing recovery command %q", required)
 		}
+	}
+	for _, forbidden := range []string{
+		"docker compose",
+		"bootstrap-primary",
+		"pgbackrest",
+		"curl ",
+		"/health",
+		"resolvectl query",
+	} {
+		if strings.Contains(repairScript, forbidden) {
+			t.Fatalf("restricted egress repair must not contain %q", forbidden)
+		}
+	}
+}
+
+func TestConfigurationDispatchAllowsOnlyExactReviewedCommands(t *testing.T) {
+	t.Parallel()
+
+	dispatch, err := deploymentAsset("host-config/kamori-config-dispatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`"apply ${role}")`,
+		`"repair-egress ${role}")`,
+		`exec sudo /usr/local/sbin/kamori-apply-host-config "$role"`,
+		`exec sudo /usr/local/sbin/kamori-repair-egress "$role"`,
+	} {
+		if !strings.Contains(dispatch, required) {
+			t.Fatalf("configuration dispatch is missing %q", required)
+		}
+	}
+}
+
+func TestUnchangedHostConfigurationSkipsRoleActivation(t *testing.T) {
+	t.Parallel()
+
+	apply, err := deploymentAsset("host-config/kamori-apply-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`configuration_marker="/var/lib/kamori/host-configuration-${role}.sha256"`,
+		`configuration_fingerprint=$(sha256sum "$archive"`,
+		`if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`,
+		`mv "$marker_temporary" "$configuration_marker"`,
+	} {
+		if !strings.Contains(apply, required) {
+			t.Fatalf("host configuration installer is missing %q", required)
+		}
+	}
+	skip := strings.Index(apply, `if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`)
+	copyFiles := strings.Index(apply, `cp -a "$work_dir/root/." /`)
+	writeMarker := strings.Index(apply, `mv "$marker_temporary" "$configuration_marker"`)
+	if skip < 0 || copyFiles < 0 || writeMarker < 0 || skip >= copyFiles || copyFiles >= writeMarker {
+		t.Fatal("configuration must skip before activation and record its fingerprint only after activation")
+	}
+}
+
+func TestPostgresRepositoryCheckRunsOnlyForChangedBackupConfiguration(t *testing.T) {
+	t.Parallel()
+
+	bootstrap, err := deploymentAsset("postgres/bootstrap-primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"backup_config_marker=/var/lib/kamori/pgbackrest-configuration.sha256",
+		"backup_config_fingerprint=$(sha256sum /etc/pgbackrest/pgbackrest.conf",
+		`if [[ "$installed_backup_config_fingerprint" != "$backup_config_fingerprint" ]]`,
+		`mv "$temporary_marker" "$backup_config_marker"`,
+	} {
+		if !strings.Contains(bootstrap, required) {
+			t.Fatalf("PostgreSQL bootstrap is missing %q", required)
+		}
+	}
+	if count := strings.Count(bootstrap, "pgbackrest --stanza=kamori check"); count != 1 {
+		t.Fatalf("PostgreSQL bootstrap contains %d repository checks, want one guarded check", count)
 	}
 }
 

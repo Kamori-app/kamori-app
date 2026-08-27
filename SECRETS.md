@@ -795,6 +795,13 @@ complete plan and run it again with `up`. App nodes must receive the same OPAQUE
 setup file. Sticky sessions are neither required nor accepted as an
 authentication correctness mechanism.
 
+The workflow's `repair-egress` choice is an incident-recovery command, not a
+third deployment phase. It needs no additional secret: it reads the existing
+encrypted configuration SSH identity and pinned host keys, then invokes only
+the role-bound NAT/route/resolver repair entrypoint. Use it only after the
+initial `replace` phase. It performs no Pulumi update, secret rotation,
+PostgreSQL bootstrap, container deployment, or availability probe.
+
 Cloud-init contains only the immutable machine baseline, raw host identity, and
 the public half of a dedicated configuration identity. Runtime secrets,
 PostgreSQL TLS leaves, SSH host certificates, and role assets are rendered as

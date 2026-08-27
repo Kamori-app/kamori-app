@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: Pulumi operation
+        description: Pulumi operation or restricted host recovery action
         required: true
         default: preview
         type: choice
         options:
           - preview
           - up
+          - repair-egress
 
 concurrency:
   group: hosted-infrastructure-production
@@ -27,10 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: inputs.command != 'repair-egress'
         with:
           go-version-file: infra/go.mod
           cache-dependency-path: infra/go.sum
-      - uses: pulumi/actions@8582a9e8cc630786854029b4e09281acd6794b58 # v6
+      - uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        if: inputs.command != 'repair-egress'
         with:
           command: ${{ inputs.command }}
           # Keep this pin and backend URL aligned with infra/Pulumi.yaml and
@@ -50,10 +53,16 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      - name: Apply encrypted host configuration
-        if: inputs.command == 'up'
+      - name: Install Pulumi CLI for restricted host recovery
+        if: inputs.command == 'repair-egress'
+        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        with:
+          pulumi-version: 3.259.0
+      - name: Configure hosts or repair egress
+        if: inputs.command == 'up' || inputs.command == 'repair-egress'
         working-directory: infra
         env:
+          HOST_ACTION: ${{ inputs.command }}
           AWS_ACCESS_KEY_ID: ${{ secrets.B2_PULUMI_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.B2_PULUMI_APPLICATION_KEY }}
           AWS_REGION: eu-central-003
@@ -68,6 +77,10 @@ jobs:
 
           host_phase=$(pulumi config get kamori:hostProvisioningPhase)
           if [[ "$host_phase" == "retire" ]]; then
+            if [[ "$HOST_ACTION" == "repair-egress" ]]; then
+              echo "egress repair is unavailable while the configuration identity is retired" >&2
+              exit 1
+            fi
             echo "retire phase updates protection and state only; host configuration starts after replacement"
             exit 0
           fi
@@ -81,9 +94,7 @@ jobs:
           ops_host=$(pulumi stack output opsPublicIPv4)
 
           cat >"$ssh_dir/config" <<EOF
-          Host kamori-beta-ops
-            HostName $ops_host
-            HostKeyAlias kamori-beta-ops
+          Host kamori-beta-*
             User deploy
             Port 2022
             IdentityFile $ssh_dir/config-key
@@ -91,65 +102,83 @@ jobs:
             StrictHostKeyChecking yes
             UserKnownHostsFile $ssh_dir/known_hosts
             HostKeyAlgorithms ssh-ed25519
+            ConnectionAttempts 1
+            ConnectTimeout 10
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+
+          Host kamori-beta-ops
+            HostName $ops_host
+            HostKeyAlias kamori-beta-ops
 
           Host kamori-beta-app-1
             HostName 10.42.0.11
             HostKeyAlias kamori-beta-app-1
-            User deploy
-            Port 2022
-            IdentityFile $ssh_dir/config-key
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-            UserKnownHostsFile $ssh_dir/known_hosts
-            HostKeyAlgorithms ssh-ed25519
             ProxyJump kamori-beta-ops
 
           Host kamori-beta-app-2
             HostName 10.42.0.12
             HostKeyAlias kamori-beta-app-2
-            User deploy
-            Port 2022
-            IdentityFile $ssh_dir/config-key
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-            UserKnownHostsFile $ssh_dir/known_hosts
-            HostKeyAlgorithms ssh-ed25519
             ProxyJump kamori-beta-ops
 
           Host kamori-beta-db-primary
             HostName 10.42.0.21
             HostKeyAlias kamori-beta-db-primary
-            User deploy
-            Port 2022
-            IdentityFile $ssh_dir/config-key
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-            UserKnownHostsFile $ssh_dir/known_hosts
-            HostKeyAlgorithms ssh-ed25519
             ProxyJump kamori-beta-ops
           EOF
           chmod 0600 "$ssh_dir/config"
 
-          apply_configuration() {
-            output_name=$1
-            host=$2
-            role=$3
+          run_host_command() {
+            host=$1
+            command=$2
+            input_path=${3:-}
             for attempt in $(seq 1 60); do
-              if pulumi stack output "$output_name" --show-secrets \
-                | ssh -F "$ssh_dir/config" "$host" "apply $role"; then
+              set +e
+              if [[ -n "$input_path" ]]; then
+                ssh -F "$ssh_dir/config" "$host" "$command" <"$input_path"
+              else
+                ssh -F "$ssh_dir/config" "$host" "$command"
+              fi
+              status=$?
+              set -e
+              if [[ "$status" == 0 ]]; then
                 return 0
               fi
+              if [[ "$status" != 255 ]]; then
+                echo "$command failed on $host with remote status $status; not retrying a deterministic host error" >&2
+                return "$status"
+              fi
               if [[ "$attempt" == 60 ]]; then
-                echo "could not apply $role configuration to $host" >&2
+                echo "SSH transport for $host did not recover after $attempt attempts" >&2
                 return 1
               fi
               sleep 10
             done
           }
 
-          # Ops establishes NAT for the private-only hosts. Database setup must
-          # complete before app containers are subsequently deployed.
-          apply_configuration opsHostConfiguration kamori-beta-ops ops
-          apply_configuration databaseHostConfiguration kamori-beta-db-primary db-primary
-          apply_configuration appOneHostConfiguration kamori-beta-app-1 app
-          apply_configuration appTwoHostConfiguration kamori-beta-app-2 app
+          apply_configuration() {
+            output_name=$1
+            host=$2
+            role=$3
+            payload="$ssh_dir/${role}-configuration.b64"
+            pulumi stack output "$output_name" --show-secrets >"$payload"
+            chmod 0600 "$payload"
+            run_host_command "$host" "apply $role" "$payload"
+          }
+
+          if [[ "$HOST_ACTION" == "repair-egress" ]]; then
+            # Restore the public NAT gateway first, then the private hosts that
+            # depend on it. These forced commands do not run Pulumi updates,
+            # database bootstrap, container pulls, or availability probes.
+            run_host_command kamori-beta-ops "repair-egress ops"
+            run_host_command kamori-beta-db-primary "repair-egress db-primary"
+            run_host_command kamori-beta-app-1 "repair-egress app"
+            run_host_command kamori-beta-app-2 "repair-egress app"
+          else
+            # Ops establishes NAT for the private-only hosts. Database setup
+            # must complete before app containers are subsequently deployed.
+            apply_configuration opsHostConfiguration kamori-beta-ops ops
+            apply_configuration databaseHostConfiguration kamori-beta-db-primary db-primary
+            apply_configuration appOneHostConfiguration kamori-beta-app-1 app
+            apply_configuration appTwoHostConfiguration kamori-beta-app-2 app
+          fi
