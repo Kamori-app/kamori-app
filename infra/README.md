@@ -171,9 +171,11 @@ perform an availability probe. SSH transport failures are retried while a host
 is temporarily unreachable. Authentication and pinned-host-key failures stop
 immediately because retries cannot repair invalid trust material; a command
 that reached the host and failed likewise exits immediately instead of
-repeating a deterministic server-side error. Every successful configuration
-install also restores the exact owner and modes of the `deploy` home, SSH
-directory, and authorized-key file before validating and restarting SSH.
+repeating a deterministic server-side error. Every accepted configuration
+archive restores the exact owner and modes of the `deploy` home, SSH directory,
+and authorized-key file before the fingerprint no-op decision and again after
+installing changed files. Permission drift is therefore repaired without
+restarting services when the role configuration itself is unchanged.
 
 PostgreSQL bootstrap fingerprints the rendered pgBackRest repository
 configuration. A new host, changed repository credential, bucket, endpoint, or

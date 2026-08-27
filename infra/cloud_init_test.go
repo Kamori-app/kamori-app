@@ -342,6 +342,16 @@ func TestUnchangedHostConfigurationSkipsRoleActivation(t *testing.T) {
 	if skip < 0 || installFiles < 0 || writeMarker < 0 || skip >= installFiles || installFiles >= writeMarker {
 		t.Fatal("configuration must skip before activation and record its fingerprint only after activation")
 	}
+
+	const repairCall = "\nrestore_deploy_ssh_permissions\n"
+	if count := strings.Count(installer, repairCall); count != 2 {
+		t.Fatalf("deploy SSH permissions are repaired %d times, want before no-op and after file install", count)
+	}
+	firstRepair := strings.Index(installer, repairCall)
+	lastRepair := strings.LastIndex(installer, repairCall)
+	if firstRepair >= skip || lastRepair <= installFiles {
+		t.Fatal("deploy SSH permissions must be repaired before the no-op check and after file installation")
+	}
 }
 
 func TestHostConfigurationFilesAreInstalledAtomically(t *testing.T) {
