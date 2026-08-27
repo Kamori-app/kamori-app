@@ -55,8 +55,10 @@ changed host configuration restarts the private egress service and
 reconstructs the ops NAT rules. The installer records the role archive's
 SHA-256 fingerprint only after activation succeeds; an unchanged later `up`
 skips service restarts, package installation, container pulls, and database
-bootstrap. Release registry login and immutable image pulls use bounded
-retries, but still fail closed after five attempts.
+bootstrap. Role files are replaced through same-directory atomic renames, so a
+configuration update cannot truncate the installer that is currently running.
+Release registry login and immutable image pulls use bounded retries, but still
+fail closed after five attempts.
 
 If only private-host egress is broken, run `Hosted infrastructure` with the
 `repair-egress` command. This is a restricted recovery path, not a Pulumi

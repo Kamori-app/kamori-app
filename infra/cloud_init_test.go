@@ -238,8 +238,14 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 	if _, ok := files["root/usr/local/sbin/kamori-repair-egress"]; !ok {
 		t.Fatal("host configuration is missing the restricted egress repair entrypoint")
 	}
+	if _, ok := files["root/usr/local/sbin/kamori-install-host-config"]; !ok {
+		t.Fatal("host configuration is missing the atomic configuration installer")
+	}
+	if _, ok := files["root/usr/local/sbin/kamori-apply-host-config"]; ok {
+		t.Fatal("host configuration must not overwrite the legacy running installer")
+	}
 	for _, required := range []string{
-		"/usr/local/sbin/kamori-apply-host-config app",
+		"/usr/local/sbin/kamori-install-host-config app",
 		"/usr/local/sbin/kamori-repair-egress app",
 	} {
 		if !strings.Contains(files["root/etc/sudoers.d/kamori-configure"], required) {
@@ -247,7 +253,7 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		}
 	}
 
-	applyScript, err := deploymentAsset("host-config/kamori-apply-host-config")
+	installScript, err := deploymentAsset("host-config/kamori-install-host-config")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +262,7 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		"/usr/local/sbin/kamori-repair-egress ops",
 		"/usr/local/sbin/kamori-repair-egress db-primary",
 	} {
-		if !strings.Contains(applyScript, required) {
+		if !strings.Contains(installScript, required) {
 			t.Fatalf("host configuration does not delegate to %q", required)
 		}
 	}
@@ -299,7 +305,7 @@ func TestConfigurationDispatchAllowsOnlyExactReviewedCommands(t *testing.T) {
 	for _, required := range []string{
 		`"apply ${role}")`,
 		`"repair-egress ${role}")`,
-		`exec sudo /usr/local/sbin/kamori-apply-host-config "$role"`,
+		`exec sudo /usr/local/sbin/kamori-install-host-config "$role"`,
 		`exec sudo /usr/local/sbin/kamori-repair-egress "$role"`,
 	} {
 		if !strings.Contains(dispatch, required) {
@@ -311,7 +317,7 @@ func TestConfigurationDispatchAllowsOnlyExactReviewedCommands(t *testing.T) {
 func TestUnchangedHostConfigurationSkipsRoleActivation(t *testing.T) {
 	t.Parallel()
 
-	apply, err := deploymentAsset("host-config/kamori-apply-host-config")
+	installer, err := deploymentAsset("host-config/kamori-install-host-config")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,15 +327,37 @@ func TestUnchangedHostConfigurationSkipsRoleActivation(t *testing.T) {
 		`if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`,
 		`mv "$marker_temporary" "$configuration_marker"`,
 	} {
-		if !strings.Contains(apply, required) {
+		if !strings.Contains(installer, required) {
 			t.Fatalf("host configuration installer is missing %q", required)
 		}
 	}
-	skip := strings.Index(apply, `if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`)
-	copyFiles := strings.Index(apply, `cp -a "$work_dir/root/." /`)
-	writeMarker := strings.Index(apply, `mv "$marker_temporary" "$configuration_marker"`)
-	if skip < 0 || copyFiles < 0 || writeMarker < 0 || skip >= copyFiles || copyFiles >= writeMarker {
+	skip := strings.Index(installer, `if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`)
+	installFiles := strings.Index(installer, `while IFS= read -r -d '' source; do`)
+	writeMarker := strings.Index(installer, `mv "$marker_temporary" "$configuration_marker"`)
+	if skip < 0 || installFiles < 0 || writeMarker < 0 || skip >= installFiles || installFiles >= writeMarker {
 		t.Fatal("configuration must skip before activation and record its fingerprint only after activation")
+	}
+}
+
+func TestHostConfigurationFilesAreInstalledAtomically(t *testing.T) {
+	t.Parallel()
+
+	installer, err := deploymentAsset("host-config/kamori-install-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`install_temporary=$(mktemp "$destination_directory/.kamori-host-config.XXXXXX")`,
+		`chmod --reference="$source" "$install_temporary"`,
+		`mv -fT "$install_temporary" "$destination"`,
+		"rm -f /usr/local/sbin/kamori-apply-host-config",
+	} {
+		if !strings.Contains(installer, required) {
+			t.Fatalf("atomic host configuration installer is missing %q", required)
+		}
+	}
+	if strings.Contains(installer, `cp -a "$work_dir/root/." /`) {
+		t.Fatal("host configuration must not overwrite a running shell script in place")
 	}
 }
 

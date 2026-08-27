@@ -86,7 +86,7 @@ assert_case "web application" "$web" apps/web-frontend/src/routes/+page.svelte
 assert_case "shared mobile Dart" "$mobile_shared" apps/dav-bridge-mobile/lib/main.dart
 assert_case "iOS platform" "$ios_only" apps/dav-bridge-mobile/ios/Runner/Info.plist
 assert_case "cloud server" "$cloud" apps/cloud-server/src/main.rs
-assert_case "host configuration" "$host_config" deploy/host-config/kamori-apply-host-config
+assert_case "host configuration" "$host_config" deploy/host-config/kamori-install-host-config
 assert_case "CI definition" "$all" .github/workflows/ci.yml
 
 actual_all=$(bash "$detector" --all)

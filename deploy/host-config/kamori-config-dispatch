@@ -8,7 +8,7 @@ fi
 role=$1
 case "${SSH_ORIGINAL_COMMAND:-}" in
   "apply ${role}")
-    exec sudo /usr/local/sbin/kamori-apply-host-config "$role"
+    exec sudo /usr/local/sbin/kamori-install-host-config "$role"
     ;;
   "repair-egress ${role}")
     exec sudo /usr/local/sbin/kamori-repair-egress "$role"
