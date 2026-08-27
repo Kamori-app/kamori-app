@@ -145,7 +145,8 @@ pub(crate) async fn update_passkey_name_for_user(
     Ok(metadata)
 }
 
-/// Deletes passkey by id for the specific user.
+/// Deletes passkey by id for the specific user, including their final passkey.
+/// OPAQUE password authentication is independent and remains available.
 pub(crate) async fn delete_passkey_for_user(
     pool: &PgPool,
     user_id: Uuid,

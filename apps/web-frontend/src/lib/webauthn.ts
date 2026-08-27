@@ -176,18 +176,16 @@ export const buildDefaultPasskeyLabel = (
 ): string => {
   const attachment =
     credential.authenticatorAttachment === "platform"
-      ? "Platform"
+      ? "Platform passkey"
       : credential.authenticatorAttachment === "cross-platform"
-        ? "Security key"
+        ? "External passkey"
         : "Passkey";
   const response = credential.response as AuthenticatorAttestationResponse;
   const transports =
     typeof response.getTransports === "function"
-      ? response.getTransports().join(",")
+      ? response.getTransports().join(", ")
       : "";
-  const browser = navigator.userAgent || "Browser";
-  const suffix = transports ? `${browser}, ${transports}` : browser;
-  return `${attachment} (${suffix})`;
+  return transports ? `${attachment} · ${transports}` : attachment;
 };
 
 /**

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCreationOptions, parseRequestOptions } from "./webauthn.ts";
+import {
+  buildDefaultPasskeyLabel,
+  parseCreationOptions,
+  parseRequestOptions,
+} from "./webauthn.ts";
 
 const encoded = (value) => new TextEncoder().encode(JSON.stringify(value));
 
@@ -27,5 +31,16 @@ describe("web WebAuthn option parsing", () => {
 
     expect(creation.user.name).toBe("user");
     expect([...new Uint8Array(request.challenge)]).toEqual([1, 2, 3]);
+  });
+
+  test("builds a concise local authenticator label without the user agent", () => {
+    const credential = {
+      authenticatorAttachment: "platform",
+      response: { getTransports: () => ["internal", "hybrid"] },
+    };
+
+    expect(buildDefaultPasskeyLabel(credential)).toBe(
+      "Platform passkey · internal, hybrid",
+    );
   });
 });

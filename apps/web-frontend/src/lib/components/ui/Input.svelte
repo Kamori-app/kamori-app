@@ -10,6 +10,7 @@
     export let required = false;
     export let disabled = false;
     export let autocomplete: HTMLInputAttributes["autocomplete"] = undefined;
+    export let maxlength: number | undefined = undefined;
 </script>
 
 <input
@@ -20,4 +21,5 @@
     {required}
     {disabled}
     {autocomplete}
+    {maxlength}
 />
