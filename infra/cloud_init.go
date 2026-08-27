@@ -168,13 +168,13 @@ func releaseAuthorizedKey(role, publicKey string) string {
 }
 
 func configurationSudoers(role string) string {
-	return fmt.Sprintf(`deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s
+	return fmt.Sprintf(`deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-install-host-config %s
 deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-repair-egress %s
 `, role, role)
 }
 
 func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFile, firstBootScript string) (string, error) {
-	applyHostConfig, err := deploymentAsset("host-config/kamori-apply-host-config")
+	installHostConfig, err := deploymentAsset("host-config/kamori-install-host-config")
 	if err != nil {
 		return "", err
 	}
@@ -194,7 +194,7 @@ func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFi
 		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key", owner: "root:root", permissions: "0600", content: common.hostPrivateKey},
 		{path: "/var/lib/kamori/bootstrap/ssh_host_ed25519_key.pub", owner: "root:root", permissions: "0644", content: common.hostPublicKey},
 		{path: "/etc/kamori/config-authorized-key", owner: "root:root", permissions: "0600", content: configAuthorizedKey(role, common.configPublicKey)},
-		{path: "/usr/local/sbin/kamori-apply-host-config", owner: "root:root", permissions: "0755", content: applyHostConfig},
+		{path: "/usr/local/sbin/kamori-install-host-config", owner: "root:root", permissions: "0755", content: installHostConfig},
 		{path: "/usr/local/sbin/kamori-config-dispatch", owner: "root:root", permissions: "0755", content: configDispatch},
 		{path: "/usr/local/sbin/kamori-repair-egress", owner: "root:root", permissions: "0755", content: repairEgress},
 		{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: configurationSudoers(role)},
@@ -336,9 +336,9 @@ systemctl reset-failed cloud-init-hotplugd.service || true
 
 func commonHostConfigurationFiles(role string, material commonHostMaterial, releasePublicKey string) ([]cloudInitFile, error) {
 	files, err := deploymentFiles(map[string]string{
-		"/usr/local/sbin/kamori-apply-host-config": "host-config/kamori-apply-host-config",
-		"/usr/local/sbin/kamori-config-dispatch":   "host-config/kamori-config-dispatch",
-		"/usr/local/sbin/kamori-repair-egress":     "host-config/kamori-repair-egress",
+		"/usr/local/sbin/kamori-config-dispatch":     "host-config/kamori-config-dispatch",
+		"/usr/local/sbin/kamori-install-host-config": "host-config/kamori-install-host-config",
+		"/usr/local/sbin/kamori-repair-egress":       "host-config/kamori-repair-egress",
 	})
 	if err != nil {
 		return nil, err

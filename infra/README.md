@@ -133,6 +133,9 @@ activation succeeds. The same encrypted archive on a later `up` is therefore a
 no-op on that host, while an interrupted or changed configuration is applied
 again. This keeps a no-change infrastructure update from reinstalling packages,
 restarting PostgreSQL, pulling ops containers, or restarting app services.
+Every regular file is staged in its destination directory and atomically
+renamed into place. In particular, the installer never truncates its own live
+script inode while Bash is still reading it.
 
 ## Application rollout
 
