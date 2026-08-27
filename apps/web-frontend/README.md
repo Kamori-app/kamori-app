@@ -18,7 +18,8 @@ Main responsibilities:
   from `otpauth_uri` + manual key fallback).
 - Separate security UX for:
   - one-time TOTP backup-code regeneration in settings,
-  - 24-word data recovery-kit display and account recovery.
+  - 24-word data recovery-kit display, browser-local plaintext download, and
+    account recovery.
 - Passkey login flow against `cloud-server` (discoverable flow - no username input required).
 - Passkey management API support with client-encrypted passkey labels.
 - Client-side collection keys, device keys, materialized PIM state, and a
@@ -133,6 +134,10 @@ Server-side token TTL policy (cloud-server env):
 - Recovery is a dedicated `/app/recovery` flow and is not embedded in Sign In.
   It uses the 24-word data recovery kit; TOTP backup codes cannot perform data
   recovery.
+- Registration can download a plaintext
+  `kamori-recovery-<random>.txt` file generated entirely in the browser. Its
+  filename contains no username, the file is never uploaded, and the UI warns
+  users to move it out of Downloads into protected or offline storage.
 - Flow:
   - derive the recovery verifier and account master key locally from the words;
   - call `POST /auth/account-recovery/start` with `username`,

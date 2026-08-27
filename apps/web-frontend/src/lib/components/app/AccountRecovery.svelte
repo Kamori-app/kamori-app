@@ -37,6 +37,7 @@
             title: "Recover account",
             body: "Use your 24-word Data Recovery Kit only when you can no longer sign in. Recovery resets the password, revokes every session, passkey, and enrolled device, and disables TOTP.",
             warning: "You will need to sign in again and approve your devices after recovery. TOTP backup codes cannot replace the Data Recovery Kit.",
+            fileHint: "Downloaded a recovery file during registration? Look for kamori-recovery-<random>.txt in Downloads, your password manager, encrypted drive, or backups. Open it and paste the 24 words below. The file is plaintext, so keep it secret.",
             username: "Username",
             phrase: "24-word Data Recovery Kit",
             password: "New password",
@@ -55,6 +56,7 @@
             title: "Восстановить аккаунт",
             body: "Используйте Data Recovery Kit из 24 слов, только если больше не можете войти. Восстановление меняет пароль, отзывает все сессии, passkey и устройства и отключает TOTP.",
             warning: "После восстановления потребуется снова войти и одобрить устройства. Backup-коды TOTP не заменяют Data Recovery Kit.",
+            fileHint: "Скачивали файл при регистрации? Ищите kamori-recovery-<случайный код>.txt в Downloads, менеджере паролей, на зашифрованном диске или в резервных копиях. Откройте его и вставьте 24 слова ниже. Файл не зашифрован — храните его в секрете.",
             username: "Имя пользователя",
             phrase: "Data Recovery Kit из 24 слов",
             password: "Новый пароль",
@@ -174,6 +176,9 @@
     <h1 class="mt-2 font-heading text-2xl font-semibold text-slate">{text.title}</h1>
     <p class="mt-3 text-sm leading-6 text-slate/80">{text.body}</p>
     <p class="mt-3 border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">{text.warning}</p>
+    <p class="mt-3 border border-slate/15 bg-white/70 p-3 text-sm leading-6 text-slate/80">
+        {text.fileHint}
+    </p>
 
     {#if formError}
         <p class="mt-4 border border-coral/30 bg-coral/10 p-3 text-sm text-slate" role="alert">

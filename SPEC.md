@@ -77,7 +77,11 @@ keys remain discoverable when needed to verify existing log entries.
 At web registration Kamori creates a 24-word BIP39 data recovery kit. It
 deterministically derives an account master key and a separate X25519 account-
 recovery identity. The server receives only a domain-separated kit verifier,
-the recovery public bundle, and HPKE-wrapped current space keys. Recovery:
+the recovery public bundle, and HPKE-wrapped current space keys. The browser
+may also generate a plaintext `kamori-recovery-<random>.txt` copy entirely
+client-side. Neither that file nor its name is uploaded; the UI warns the user
+to move it out of Downloads and keep it separately from the password and daily
+device. Recovery:
 
 1. proves possession of the 24 words;
 2. creates a new OPAQUE password record;

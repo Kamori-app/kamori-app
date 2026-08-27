@@ -15,22 +15,31 @@
     import { wrapAccountMasterKey } from "$lib/opaqueClient";
     import { locale } from "$lib/i18n";
     import { notify } from "$lib/stores/notifications";
+    import {
+        buildRecoveryKitFilename,
+        buildRecoveryKitText,
+    } from "$lib/recoveryKitFile";
 
     const signupCopy = {
         en: {
             title: "Create account",
             required: "Username, password, and confirmation are required.",
             mismatch: "Password confirmation does not match.",
-            saveKit: "Save the 24-word data recovery kit, then confirm its final word.",
+            saveKit: "Save the 24-word Data Recovery Kit, then type the 24th word—not the number 24.",
             failed: "Account creation failed",
             finalMismatch: "The final recovery word does not match.",
             created: "Account created. Sign in to continue.",
             copied: "Data recovery kit copied. Store it offline.",
             copyFailed: "Copy failed. Select the words and copy them manually.",
+            downloaded: "Recovery file downloaded. Move it to a secure place and remove it from Downloads.",
+            downloadFailed: "The recovery file could not be downloaded. Copy the words manually instead.",
             finishFirst: "Finish saving the recovery kit before closing account setup.",
-            kitBody: "This is the only offline recovery secret for your encrypted data. Kamori support cannot recreate it. Write it down or print it, keep it away from your password, and never send it to anyone.",
+            kitBody: "This is the only offline recovery secret for your encrypted data. Kamori support cannot recreate it. Write it down, print it, or download the local plaintext file. Keep every copy away from your password and never send it to anyone.",
+            downloadWarning: "The downloaded file is not encrypted. Move it out of Downloads into a password manager, encrypted drive, or offline storage.",
             copyWords: "Copy 24 words",
-            confirmWord: "Type word 24 to confirm",
+            downloadWords: "Download recovery file",
+            confirmHelp: "Type the 24th (last) word below—the word next to #24, not the number 24.",
+            confirmWord: "24th word (word #24), not the number 24",
             creating: "Creating…",
             saved: "I saved the kit — create account",
             username: "Username",
@@ -44,16 +53,21 @@
             title: "Создать аккаунт",
             required: "Нужны имя пользователя, пароль и подтверждение пароля.",
             mismatch: "Пароли не совпадают.",
-            saveKit: "Сохраните recovery kit из 24 слов и подтвердите последнее слово.",
+            saveKit: "Сохраните Data Recovery Kit из 24 слов и введите слово №24, а не число 24.",
             failed: "Не удалось создать аккаунт",
             finalMismatch: "Последнее слово recovery kit не совпадает.",
             created: "Аккаунт создан. Теперь войдите.",
             copied: "Recovery kit скопирован. Храните его офлайн.",
             copyFailed: "Не удалось скопировать. Выделите и скопируйте слова вручную.",
+            downloaded: "Файл восстановления скачан. Переместите его в безопасное место и удалите из Downloads.",
+            downloadFailed: "Не удалось скачать файл восстановления. Скопируйте слова вручную.",
             finishFirst: "Сначала завершите сохранение recovery kit.",
-            kitBody: "Это единственный офлайн-секрет для восстановления зашифрованных данных. Поддержка Kamori не сможет его воссоздать. Запишите или распечатайте слова, храните отдельно от пароля и никому не отправляйте.",
+            kitBody: "Это единственный офлайн-секрет для восстановления зашифрованных данных. Поддержка Kamori не сможет его воссоздать. Запишите или распечатайте слова либо скачайте локальный незашифрованный файл. Любую копию храните отдельно от пароля и никому не отправляйте.",
+            downloadWarning: "Скачанный файл не зашифрован. Переместите его из Downloads в менеджер паролей, на зашифрованный диск или в офлайн-хранилище.",
             copyWords: "Скопировать 24 слова",
-            confirmWord: "Введите 24-е слово",
+            downloadWords: "Скачать файл восстановления",
+            confirmHelp: "Введите последнее слово — слово рядом с №24, а не число 24.",
+            confirmWord: "Слово №24 (не число 24)",
             creating: "Создаём…",
             saved: "Kit сохранён — создать аккаунт",
             username: "Имя пользователя",
@@ -234,6 +248,33 @@
         }
     };
 
+    const downloadRecoveryKit = () => {
+        if (!pendingSignup) {
+            return;
+        }
+        try {
+            const contents = buildRecoveryKitText(
+                pendingSignup.username,
+                pendingSignup.phrase,
+            );
+            const filename = buildRecoveryKitFilename(randomBytes(8));
+            const url = URL.createObjectURL(
+                new Blob([contents], { type: "text/plain;charset=utf-8" }),
+            );
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = filename;
+            anchor.hidden = true;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 0);
+            setNotice(copy.downloaded);
+        } catch {
+            setNotice(copy.downloadFailed);
+        }
+    };
+
     const requestClose = () => {
         if (pendingSignup) {
             setNotice(
@@ -263,9 +304,20 @@
                     <li>{index + 1}. {word}</li>
                 {/each}
             </ol>
-            <Button variant="secondary" on:click={copyRecoveryKit}>
-                {copy.copyWords}
-            </Button>
+            <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
+                {copy.downloadWarning}
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <Button variant="secondary" on:click={downloadRecoveryKit}>
+                    {copy.downloadWords}
+                </Button>
+                <Button variant="ghost" on:click={copyRecoveryKit}>
+                    {copy.copyWords}
+                </Button>
+            </div>
+            <p class="text-sm font-medium text-slate">
+                {copy.confirmHelp}
+            </p>
             <Input
                 bind:value={recoveryConfirmation}
                 autocomplete="off"

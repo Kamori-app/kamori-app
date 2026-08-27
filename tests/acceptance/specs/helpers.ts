@@ -39,8 +39,11 @@ export const signup = async (
     entry.replace(/^\d+\.\s*/, "").trim(),
   );
   const recoveryPhrase = recoveryWords.join(" ");
+  await expect(
+    surface.getByRole("button", { name: "Download recovery file" }),
+  ).toBeVisible();
   await surface
-    .getByPlaceholder("Type word 24 to confirm")
+    .getByPlaceholder(/24th word/)
     .fill(recoveryWords.at(-1) ?? "");
   await surface
     .getByRole("button", { name: "I saved the kit — create account" })
