@@ -89,6 +89,8 @@ func TestRestrictedEgressRepairSkipsPulumiUpdateAndHostBootstrap(t *testing.T) {
 		`run_host_command kamori-beta-db-primary "repair-egress db-primary"`,
 		`run_host_command kamori-beta-app-1 "repair-egress app"`,
 		`if [[ "$status" != 255 ]]`,
+		`Permission denied|Too many authentication failures|Host key verification failed`,
+		`not retrying a permanent configuration error`,
 	} {
 		if !strings.Contains(contents, required) {
 			t.Fatalf("infrastructure workflow is missing %q", required)

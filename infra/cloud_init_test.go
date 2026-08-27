@@ -261,6 +261,11 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		"/usr/local/sbin/kamori-repair-egress app",
 		"/usr/local/sbin/kamori-repair-egress ops",
 		"/usr/local/sbin/kamori-repair-egress db-primary",
+		"chown deploy:deploy \\",
+		"/home/deploy/.ssh/authorized_keys",
+		"chmod 0755 /home/deploy",
+		"chmod 0700 /home/deploy/.ssh",
+		"chmod 0600 /home/deploy/.ssh/authorized_keys",
 	} {
 		if !strings.Contains(installScript, required) {
 			t.Fatalf("host configuration does not delegate to %q", required)

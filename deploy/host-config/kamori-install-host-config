@@ -100,7 +100,12 @@ while IFS= read -r -d '' source; do
   install_temporary=""
 done < <(find "$work_dir/root" -type f -print0)
 
-chown deploy:deploy /home/deploy/.ssh/authorized_keys
+chown deploy:deploy \
+  /home/deploy \
+  /home/deploy/.ssh \
+  /home/deploy/.ssh/authorized_keys
+chmod 0755 /home/deploy
+chmod 0700 /home/deploy/.ssh
 chmod 0600 /home/deploy/.ssh/authorized_keys
 sshd -t
 systemctl daemon-reload
