@@ -24,6 +24,15 @@ Password authentication uses OPAQUE. The server verifies a login without
 storing a password-equivalent database entry that can be used for an offline
 guessing attack in the same way as a conventional password hash.
 
+Web passkeys are optional and managed from Security settings. The browser—not
+Kamori—offers the available password manager, device, phone, or physical-key
+providers. Passkey names are encrypted locally with the account master key
+before upload. Adding or deleting a passkey requires a fresh password check
+and current TOTP when enabled; names can be changed locally at any time. A user
+may remove the final passkey because the independent OPAQUE password login
+remains available. Removing a passkey does not revoke already active sessions;
+those are managed separately in the session list.
+
 Every approved device has its own signing and encryption keys. Its signature
 lets other clients reject operations that were not admitted from an authorized
 writer. Removing a device prevents future writes and future key delivery; it

@@ -6,6 +6,7 @@
         type DeviceSummary,
         type OwnershipResourceKind,
         type OwnershipTransferOffer,
+        type PasskeyMetadata,
         type SessionSummary,
         type SpaceMemberSummary,
         type SpaceSummary,
@@ -22,6 +23,7 @@
         wrapAccountMasterKey,
         wrapSpaceKeyForDevice,
         decryptVaultBytes,
+        encryptVaultBytes,
     } from "$lib/opaqueClient";
     import {
         getActiveWebDevice,
@@ -39,6 +41,18 @@
     import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
     import { locale } from "$lib/i18n";
     import { notify } from "$lib/stores/notifications";
+    import {
+        buildDefaultPasskeyLabel,
+        parseCreationOptions,
+        serializeAttestationCredential,
+        toUtf8Bytes,
+    } from "$lib/webauthn";
+    import {
+        decodePasskeyLabel,
+        encodePasskeyLabel,
+        normalizePasskeyName,
+        PASSKEY_NAME_MAX_LENGTH,
+    } from "$lib/passkeyLabels";
 
     const ruCopy: Record<string, string> = {
         "Web Settings": "Настройки веб-приложения", "Cloud Base URL": "Адрес сервиса Kamori", "Save Settings": "Сохранить настройки",
@@ -91,6 +105,14 @@
     let passwordChangeTotp = "";
     let dataRecoveryKit = "";
     let sessions: SessionSummary[] = [];
+    let passkeys: Array<{
+        passkey: PasskeyMetadata;
+        name: string;
+        draftName: string;
+    }> = [];
+    let passkeysLoading = false;
+    let passkeySupported = false;
+    let newPasskeyName = "";
     let deviceApprovals: Array<{
         device: DeviceSummary;
         label: string;
@@ -596,6 +618,227 @@
         }
     };
 
+    const requirePasskeySupport = () => {
+        if (!passkeySupported || !navigator.credentials) {
+            throw new Error(localized(
+                "This browser does not support passkeys.",
+                "Этот браузер не поддерживает passkey.",
+            ));
+        }
+    };
+
+    const describePasskeyError = (error: unknown): string => {
+        if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+            if (error.name === "NotAllowedError") {
+                return localized(
+                    "The passkey request was cancelled, timed out, or blocked by the selected provider.",
+                    "Запрос passkey был отменён, истёк по времени или заблокирован выбранным провайдером.",
+                );
+            }
+            if (error.name === "InvalidStateError") {
+                return localized(
+                    "That passkey is already registered. Choose another passkey or provider.",
+                    "Этот passkey уже зарегистрирован. Выберите другой passkey или провайдер.",
+                );
+            }
+            if (error.name === "SecurityError") {
+                return localized(
+                    "The browser rejected the Kamori passkey origin. Check the service domain and HTTPS configuration.",
+                    "Браузер отклонил origin Kamori для passkey. Проверьте домен сервиса и настройку HTTPS.",
+                );
+            }
+        }
+        return error instanceof Error ? error.message : String(error);
+    };
+
+    const encryptedPasskeyName = (name: string): Promise<Uint8Array> =>
+        withActiveMasterKey((masterKey) =>
+            encryptVaultBytes(masterKey, encodePasskeyLabel(name)),
+        );
+
+    const normalizeLocalizedPasskeyName = (value: string): string => {
+        try {
+            return normalizePasskeyName(value);
+        } catch {
+            if (!value.trim()) {
+                throw new Error(localized(
+                    "Enter a passkey name.",
+                    "Введите название passkey.",
+                ));
+            }
+            throw new Error(localized(
+                `Passkey name must be ${PASSKEY_NAME_MAX_LENGTH} characters or fewer.`,
+                `Название passkey должно содержать не более ${PASSKEY_NAME_MAX_LENGTH} символов.`,
+            ));
+        }
+    };
+
+    const loadPasskeys = async () => {
+        if (!tokenStore.getAccessToken()) {
+            passkeys = [];
+            return;
+        }
+        passkeysLoading = true;
+        try {
+            const response = await withAccessRetry((accessToken) =>
+                cloudApi.listPasskeys($appState.cloudBaseUrl, accessToken),
+            );
+            const fallbackNames = response.passkeys.map((passkey) =>
+                localized(
+                    `Passkey · ${passkey.id.slice(0, 8)}`,
+                    `Passkey · ${passkey.id.slice(0, 8)}`,
+                ),
+            );
+            let names = fallbackNames;
+            try {
+                names = await withActiveMasterKey((masterKey) =>
+                    Promise.all(
+                        response.passkeys.map(async (passkey, index) => {
+                            try {
+                                return decodePasskeyLabel(
+                                    await decryptVaultBytes(
+                                        masterKey,
+                                        passkey.encrypted_name,
+                                    ),
+                                );
+                            } catch {
+                                return fallbackNames[index];
+                            }
+                        }),
+                    ),
+                );
+            } catch {
+                // Keep opaque id-based labels while the local vault is locked.
+            }
+            passkeys = response.passkeys.map((passkey, index) => ({
+                passkey,
+                name: names[index],
+                draftName: names[index],
+            }));
+        } catch (error) {
+            passkeys = [];
+            setNotice(
+                `${localized("Failed to load passkeys", "Не удалось загрузить passkey")}: ${describePasskeyError(error)}`,
+            );
+        } finally {
+            passkeysLoading = false;
+        }
+    };
+
+    const addPasskey = async () => {
+        setBusyAction("passkey-add");
+        try {
+            requirePasskeySupport();
+            const reauthToken = await createSecurityReauth();
+            const start = await withAccessRetry((accessToken) =>
+                cloudApi.passkeyAddStart(
+                    $appState.cloudBaseUrl,
+                    reauthToken,
+                    accessToken,
+                ),
+            );
+            const credential = (await navigator.credentials.create({
+                publicKey: parseCreationOptions(
+                    start.public_key_credential_creation_options,
+                ),
+            })) as PublicKeyCredential | null;
+            if (!credential) {
+                throw new DOMException("Passkey enrollment cancelled", "NotAllowedError");
+            }
+            const name = normalizeLocalizedPasskeyName(
+                newPasskeyName || buildDefaultPasskeyLabel(credential),
+            );
+            const serializedCredential = toUtf8Bytes(
+                JSON.stringify(serializeAttestationCredential(credential)),
+            );
+            const encryptedName = await encryptedPasskeyName(name);
+            await withAccessRetry((accessToken) =>
+                cloudApi.passkeyAddFinish(
+                    $appState.cloudBaseUrl,
+                    start.flow_id,
+                    serializedCredential,
+                    encryptedName,
+                    accessToken,
+                ),
+            );
+            newPasskeyName = "";
+            securityCurrentPassword = "";
+            securityCurrentTotp = "";
+            await loadPasskeys();
+            setNotice(
+                localized(
+                    "Passkey added. You can now use it from Sign In.",
+                    "Passkey добавлен. Теперь его можно использовать при входе.",
+                ),
+            );
+        } catch (error) {
+            setNotice(
+                `${localized("Passkey enrollment failed", "Не удалось добавить passkey")}: ${describePasskeyError(error)}`,
+            );
+        } finally {
+            clearBusyAction();
+        }
+    };
+
+    const renamePasskey = async (entry: (typeof passkeys)[number]) => {
+        setBusyAction(`passkey-rename-${entry.passkey.id}`);
+        try {
+            const name = normalizeLocalizedPasskeyName(entry.draftName);
+            const encryptedName = await encryptedPasskeyName(name);
+            await withAccessRetry((accessToken) =>
+                cloudApi.updatePasskey(
+                    $appState.cloudBaseUrl,
+                    entry.passkey.id,
+                    encryptedName,
+                    accessToken,
+                ),
+            );
+            await loadPasskeys();
+            setNotice(localized("Passkey renamed.", "Passkey переименован."));
+        } catch (error) {
+            setNotice(
+                `${localized("Passkey rename failed", "Не удалось переименовать passkey")}: ${describePasskeyError(error)}`,
+            );
+        } finally {
+            clearBusyAction();
+        }
+    };
+
+    const deletePasskey = async (entry: (typeof passkeys)[number]) => {
+        if (!window.confirm(localized(
+            `Delete “${entry.name}”? Password sign-in remains available, even when this is your last passkey.`,
+            `Удалить «${entry.name}»? Вход по паролю останется доступен, даже если это последний passkey.`,
+        ))) return;
+
+        setBusyAction(`passkey-delete-${entry.passkey.id}`);
+        try {
+            const reauthToken = await createSecurityReauth();
+            await withAccessRetry((accessToken) =>
+                cloudApi.deletePasskey(
+                    $appState.cloudBaseUrl,
+                    entry.passkey.id,
+                    reauthToken,
+                    accessToken,
+                ),
+            );
+            securityCurrentPassword = "";
+            securityCurrentTotp = "";
+            await loadPasskeys();
+            setNotice(
+                localized(
+                    "Passkey deleted. Existing sessions remain active; password sign-in is still available.",
+                    "Passkey удалён. Текущие сессии продолжают работать; вход по паролю остаётся доступен.",
+                ),
+            );
+        } catch (error) {
+            setNotice(
+                `${localized("Passkey deletion failed", "Не удалось удалить passkey")}: ${describePasskeyError(error)}`,
+            );
+        } finally {
+            clearBusyAction();
+        }
+    };
+
     const loadSessions = async () => {
         if (!tokenStore.getAccessToken()) {
             sessions = [];
@@ -1069,7 +1312,12 @@
 
     $: if (open && !wasOpen) {
         settingsCloudBaseUrl = $appState.cloudBaseUrl;
+        passkeySupported =
+            typeof window !== "undefined" &&
+            "PublicKeyCredential" in window &&
+            Boolean(navigator.credentials);
         void loadTotpStatus();
+        void loadPasskeys();
         void loadSessions();
         void loadDevices();
         void loadConsents();
@@ -1088,6 +1336,10 @@
         clearBusyAction();
         dataRecoveryKit = "";
         sessions = [];
+        passkeys = [];
+        passkeysLoading = false;
+        passkeySupported = false;
+        newPasskeyName = "";
         deviceApprovals = [];
         resetConsents();
         incomingOwnershipOffers = [];
@@ -1478,6 +1730,50 @@
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
+                {localized("Security confirmation", "Подтверждение безопасности")}
+            </p>
+            {#if !$appState.accessToken}
+                <p class="mt-2 text-xs text-slate/70">
+                    {localized(
+                        "Sign in to manage security settings.",
+                        "Войдите, чтобы управлять настройками безопасности.",
+                    )}
+                </p>
+            {:else}
+                <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                    <Input
+                        bind:value={securityCurrentPassword}
+                        type="password"
+                        autocomplete="current-password"
+                        placeholder={localized(
+                            "Current password for protected changes",
+                            "Текущий пароль для защищённых изменений",
+                        )}
+                    />
+                    {#if totpEnabled}
+                        <Input
+                            bind:value={securityCurrentTotp}
+                            autocomplete="one-time-code"
+                            placeholder={localized(
+                                "Current TOTP or backup code",
+                                "Текущий TOTP или backup-код",
+                            )}
+                        />
+                    {/if}
+                </div>
+                <p class="mt-2 text-xs text-slate/70">
+                    {localized(
+                        "Adding or deleting a passkey and changing two-factor settings require a fresh password check. These values stay in memory only and are cleared after a successful protected change.",
+                        "Добавление или удаление passkey и изменение двухфакторной защиты требуют свежей проверки пароля. Эти значения хранятся только в памяти и очищаются после успешного защищённого изменения.",
+                    )}
+                </p>
+            {/if}
+        </div>
+
+        <div class="border-t border-slate/15 pt-3">
+            <p
+                class="text-xs font-semibold uppercase tracking-wide text-slate/70"
+            >
                 {t("Security: Data Recovery Kit")}
             </p>
             <p class="mt-2 text-xs text-slate/70">
@@ -1510,6 +1806,124 @@
         </div>
 
         <div class="border-t border-slate/15 pt-3">
+            <div class="flex items-center justify-between gap-2">
+                <p
+                    class="text-xs font-semibold uppercase tracking-wide text-slate/70"
+                >
+                    {localized("Security: Passkeys", "Безопасность: passkey")}
+                </p>
+                {#if $appState.accessToken}
+                    <Button
+                        variant="ghost"
+                        on:click={loadPasskeys}
+                        disabled={passkeysLoading || Boolean(totpBusyAction)}
+                    >{t("Refresh")}</Button>
+                {/if}
+            </div>
+            <p class="mt-2 text-xs text-slate/70">
+                {localized(
+                    "Passkeys provide passwordless account authentication. Your browser shows the available providers and lets you choose a password manager, device passkey, phone, or physical security key; Kamori does not select one for you.",
+                    "Passkey позволяют входить в аккаунт без пароля. Браузер покажет доступные провайдеры и позволит выбрать менеджер паролей, passkey устройства, телефон или физический ключ; Kamori не выбирает вариант за вас.",
+                )}
+            </p>
+            {#if !$appState.accessToken}
+                <p class="mt-2 text-xs text-slate/70">
+                    {localized(
+                        "Sign in to manage passkeys.",
+                        "Войдите, чтобы управлять passkey.",
+                    )}
+                </p>
+            {:else}
+                {#if !passkeySupported}
+                    <p class="mt-2 rounded-xl border border-coral/30 bg-coral/10 p-3 text-xs text-slate">
+                        {localized(
+                            "This browser does not support passkeys.",
+                            "Этот браузер не поддерживает passkey.",
+                        )}
+                    </p>
+                {/if}
+                <div class="mt-3 space-y-2 rounded-xl border border-slate/15 p-3">
+                    <Input
+                        bind:value={newPasskeyName}
+                        maxlength={PASSKEY_NAME_MAX_LENGTH}
+                        placeholder={localized(
+                            "Name, for example: MacBook · Bitwarden",
+                            "Название, например: MacBook · Bitwarden",
+                        )}
+                    />
+                    <Button
+                        variant="secondary"
+                        on:click={addPasskey}
+                        disabled={!passkeySupported || Boolean(totpBusyAction)}
+                    >
+                        {totpBusyAction === "passkey-add"
+                            ? localized("Waiting for browser…", "Ожидание браузера…")
+                            : localized("Add passkey", "Добавить passkey")}
+                    </Button>
+                    <p class="text-xs text-slate/65">
+                        {localized(
+                            "Enter the security confirmation above. If the name is empty, Kamori creates a local generic name that you can change later. Names are encrypted before upload.",
+                            "Введите данные подтверждения безопасности выше. Если название пустое, Kamori создаст локальное общее название, которое можно изменить позже. Названия шифруются до отправки.",
+                        )}
+                    </p>
+                </div>
+
+                {#if passkeysLoading}
+                    <p class="mt-3 text-xs text-slate/70">
+                        {localized("Loading passkeys…", "Загрузка passkey…")}
+                    </p>
+                {:else if passkeys.length === 0}
+                    <p class="mt-3 text-xs text-slate/70">
+                        {localized(
+                            "No passkeys are registered yet.",
+                            "Passkey пока не добавлены.",
+                        )}
+                    </p>
+                {:else}
+                    <div class="mt-3 space-y-2">
+                        {#each passkeys as entry (entry.passkey.id)}
+                            <div class="space-y-2 rounded-xl border border-slate/15 bg-white/70 p-3">
+                                <Input
+                                    bind:value={entry.draftName}
+                                    maxlength={PASSKEY_NAME_MAX_LENGTH}
+                                />
+                                <p class="break-all text-[11px] text-slate/55">
+                                    ID {entry.passkey.id}
+                                </p>
+                                <div class="flex flex-wrap gap-2">
+                                    <Button
+                                        variant="ghost"
+                                        on:click={() => renamePasskey(entry)}
+                                        disabled={Boolean(totpBusyAction)}
+                                    >
+                                        {totpBusyAction === `passkey-rename-${entry.passkey.id}`
+                                            ? localized("Saving…", "Сохранение…")
+                                            : localized("Rename", "Переименовать")}
+                                    </Button>
+                                    <Button
+                                        variant="danger"
+                                        on:click={() => deletePasskey(entry)}
+                                        disabled={Boolean(totpBusyAction)}
+                                    >
+                                        {totpBusyAction === `passkey-delete-${entry.passkey.id}`
+                                            ? localized("Deleting…", "Удаление…")
+                                            : localized("Delete", "Удалить")}
+                                    </Button>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+                <p class="mt-3 text-xs text-slate/70">
+                    {localized(
+                        "You may delete the last passkey. Your password remains available for sign-in, and existing sessions are not revoked by passkey deletion.",
+                        "Можно удалить последний passkey. Вход по паролю останется доступен, а текущие сессии при удалении passkey не отзываются.",
+                    )}
+                </p>
+            {/if}
+        </div>
+
+        <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
             >
@@ -1521,29 +1935,10 @@
                     {t("Sign in to manage TOTP.")}
                 </p>
             {:else}
-                <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                    <Input
-                        bind:value={securityCurrentPassword}
-                        type="password"
-                        placeholder={localized(
-                            "Current password for security changes",
-                            "Текущий пароль для изменений безопасности",
-                        )}
-                    />
-                    {#if totpEnabled}
-                        <Input
-                            bind:value={securityCurrentTotp}
-                            placeholder={localized(
-                                "Current TOTP or backup code",
-                                "Текущий TOTP или backup-код",
-                            )}
-                        />
-                    {/if}
-                </div>
                 <p class="mt-2 text-xs text-slate/70">
                     {localized(
-                        "Changing two-factor settings requires a fresh password check. Credentials stay in this dialog and are never persisted.",
-                        "Изменение двухфакторных настроек требует свежей проверки пароля. Данные остаются только в этом окне и не сохраняются.",
+                        "Use the security confirmation fields above for protected TOTP changes.",
+                        "Для защищённых изменений TOTP используйте поля подтверждения безопасности выше.",
                     )}
                 </p>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">

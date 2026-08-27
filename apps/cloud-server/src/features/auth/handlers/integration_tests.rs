@@ -35,7 +35,7 @@ use crate::{
                 SigninStartResponse, SignupFinishRequest, SignupFinishResponse, SignupStartRequest,
                 SignupStartResponse,
             },
-            repositories::consume_totp_backup_code,
+            repositories::{consume_totp_backup_code, delete_passkey_for_user},
             services::support::{hash_account_recovery_code, normalize_recovery_code},
             transport::{CSRF_HEADER, REFRESH_TRANSPORT_HEADER},
         },
@@ -846,6 +846,52 @@ async fn body_transport_refresh_and_logout_remain_compatible() {
     let logout_payload: LogoutResponse = decode_msgpack(&body);
     assert!(logout_payload.revoked);
     assert!(set_cookie_values(&response_headers).is_empty());
+
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn deleting_only_passkey_preserves_password_authentication() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+
+    let username = format!("it-last-passkey-{}", Uuid::new_v4());
+    let password = "P@ssword123!";
+    register_user(&app, &username, password).await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .expect("load registered user");
+    let passkey_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO user_passkeys (id, user_id, credential_id, passkey_data, encrypted_name) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(passkey_id)
+    .bind(user_id)
+    .bind(vec![31_u8; 32])
+    .bind(vec![32_u8])
+    .bind(vec![33_u8])
+    .execute(&app.state.pool)
+    .await
+    .expect("insert only passkey");
+
+    assert!(
+        delete_passkey_for_user(&app.state.pool, user_id, passkey_id)
+            .await
+            .expect("delete only passkey")
+    );
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_passkeys WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .expect("count remaining passkeys");
+    assert_eq!(remaining, 0);
+
+    let signin = signin_user(&app, &username, password, SigninTransport::Body).await;
+    assert!(!signin.access_token.is_empty());
 
     app.shutdown().await;
 }

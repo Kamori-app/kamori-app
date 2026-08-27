@@ -21,7 +21,9 @@ Main responsibilities:
   - 24-word data recovery-kit display, browser-local plaintext download, and
     account recovery.
 - Passkey login flow against `cloud-server` (discoverable flow - no username input required).
-- Passkey management API support with client-encrypted passkey labels.
+- Passkey management in routed Security settings: browser-selected enrollment,
+  listing, client-encrypted names, rename, and deletion (including the final
+  passkey while OPAQUE password sign-in remains available).
 - Client-side collection keys, device keys, materialized PIM state, and a
   causally ordered durable outbox encrypted at rest in IndexedDB.
 - Invite-code generation/redeem with client-side code handling.
@@ -128,6 +130,23 @@ Server-side token TTL policy (cloud-server env):
     with the current TOTP code.
 - Security note:
   - QR is generated client-side only; `otpauth_uri` is never sent to third-party QR services.
+
+## Passkey UX
+
+- Passkey management is available at `/app/settings/security` after the web
+  vault is unlocked.
+- Adding a passkey consumes a scoped OPAQUE reauthentication proof and, when
+  enabled, a current TOTP or backup code. The browser owns authenticator
+  selection: it may offer a password manager, device passkey, phone, or
+  physical security key; Kamori does not force a provider.
+- The user-supplied name is encoded as a versioned passkey-label envelope and
+  encrypted locally with the account master key before upload. Listing and
+  renaming decrypt/encrypt that label only in the unlocked client; the service
+  stores ciphertext.
+- Any passkey can be renamed. Deletion also requires scoped reauthentication.
+  The final passkey may be deleted because OPAQUE password sign-in remains an
+  independent authentication path. Deleting a passkey does not revoke existing
+  sessions.
 
 ## Account Recovery UX
 
