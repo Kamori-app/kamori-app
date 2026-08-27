@@ -167,12 +167,22 @@ func releaseAuthorizedKey(role, publicKey string) string {
 	return "restrict " + strings.TrimSpace(publicKey) + "\n"
 }
 
+func configurationSudoers(role string) string {
+	return fmt.Sprintf(`deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-repair-egress %s
+`, role, role)
+}
+
 func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFile, firstBootScript string) (string, error) {
 	applyHostConfig, err := deploymentAsset("host-config/kamori-apply-host-config")
 	if err != nil {
 		return "", err
 	}
 	configDispatch, err := deploymentAsset("host-config/kamori-config-dispatch")
+	if err != nil {
+		return "", err
+	}
+	repairEgress, err := deploymentAsset("host-config/kamori-repair-egress")
 	if err != nil {
 		return "", err
 	}
@@ -186,7 +196,8 @@ func renderCloudInit(role string, common commonHostMaterial, files []cloudInitFi
 		{path: "/etc/kamori/config-authorized-key", owner: "root:root", permissions: "0600", content: configAuthorizedKey(role, common.configPublicKey)},
 		{path: "/usr/local/sbin/kamori-apply-host-config", owner: "root:root", permissions: "0755", content: applyHostConfig},
 		{path: "/usr/local/sbin/kamori-config-dispatch", owner: "root:root", permissions: "0755", content: configDispatch},
-		{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: fmt.Sprintf("deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s\n", role)},
+		{path: "/usr/local/sbin/kamori-repair-egress", owner: "root:root", permissions: "0755", content: repairEgress},
+		{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: configurationSudoers(role)},
 		{path: "/etc/ssh/sshd_config.d/60-kamori-hardening.conf", owner: "root:root", permissions: "0644", content: fmt.Sprintf(`Port %s
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -327,6 +338,7 @@ func commonHostConfigurationFiles(role string, material commonHostMaterial, rele
 	files, err := deploymentFiles(map[string]string{
 		"/usr/local/sbin/kamori-apply-host-config": "host-config/kamori-apply-host-config",
 		"/usr/local/sbin/kamori-config-dispatch":   "host-config/kamori-config-dispatch",
+		"/usr/local/sbin/kamori-repair-egress":     "host-config/kamori-repair-egress",
 	})
 	if err != nil {
 		return nil, err
@@ -335,7 +347,7 @@ func commonHostConfigurationFiles(role string, material commonHostMaterial, rele
 		cloudInitFile{path: "/etc/ssh/ssh_host_ed25519_key-cert.pub", owner: "root:root", permissions: "0644", content: material.hostCertificate},
 		cloudInitFile{path: "/etc/ssh/sshd_config.d/61-kamori-host-certificate.conf", owner: "root:root", permissions: "0644", content: "HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub\n"},
 		cloudInitFile{path: "/home/deploy/.ssh/authorized_keys", owner: "deploy:deploy", permissions: "0600", content: configAuthorizedKey(role, material.configPublicKey) + releaseAuthorizedKey(role, releasePublicKey)},
-		cloudInitFile{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: fmt.Sprintf("deploy ALL=(root) NOPASSWD: /usr/local/sbin/kamori-apply-host-config %s\n", role)},
+		cloudInitFile{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: configurationSudoers(role)},
 	)
 	if role != "ops" {
 		files = append(files, cloudInitFile{

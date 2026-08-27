@@ -6,9 +6,15 @@ if [[ $# -ne 1 ]]; then
 fi
 
 role=$1
-if [[ "${SSH_ORIGINAL_COMMAND:-}" != "apply ${role}" ]]; then
-  echo "this identity may only apply the ${role} host configuration" >&2
-  exit 2
-fi
-
-exec sudo /usr/local/sbin/kamori-apply-host-config "$role"
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  "apply ${role}")
+    exec sudo /usr/local/sbin/kamori-apply-host-config "$role"
+    ;;
+  "repair-egress ${role}")
+    exec sudo /usr/local/sbin/kamori-repair-egress "$role"
+    ;;
+  *)
+    echo "this identity may only configure the ${role} host" >&2
+    exit 2
+    ;;
+esac

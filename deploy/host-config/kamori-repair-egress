@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 || $# -ne 1 ]]; then
+  echo "usage: kamori-repair-egress ROLE (as root)" >&2
+  exit 2
+fi
+
+role=$1
+case "$role" in
+  app|ops|db-primary) ;;
+  *) echo "unsupported host role: $role" >&2; exit 2 ;;
+esac
+
+installed_role=$(tr -d '\r\n' </etc/kamori/node-role)
+if [[ "$installed_role" != "$role" ]]; then
+  echo "egress role $role does not match host role $installed_role" >&2
+  exit 2
+fi
+
+exec 8>/run/lock/kamori-egress-repair.lock
+flock 8
+
+case "$role" in
+  app|db-primary)
+    systemctl enable kamori-private-egress.service
+    systemctl restart systemd-resolved.service
+    systemctl restart kamori-private-egress.service
+    resolvectl flush-caches
+    ;;
+  ops)
+    systemctl enable --now docker.service
+    systemctl enable kamori-nat-gateway.service
+    # Docker and package upgrades may rebuild netfilter chains while the
+    # oneshot NAT unit remains active. Restarting the unit reconstructs the
+    # allowlisted forwarding and masquerade rules from root-owned assets.
+    systemctl restart kamori-nat-gateway.service
+    ;;
+esac
+
+echo "repaired ${role} egress configuration"

@@ -86,8 +86,11 @@ through the ops NAT gateway. Their boot-time egress service also assigns
 Hetzner's two recursive DNS resolvers to the private interface before package
 installation. The same resolver pair is persisted in `systemd-resolved`, and
 the reviewed host-configuration channel reapplies both private routes and NAT
-rules after service or package changes. Private-network DHCP does not provide
-resolver addresses. No administrator source-IP configuration is required.
+rules whenever the desired role configuration changes. An unchanged role
+archive is identified by its last successfully applied SHA-256 fingerprint and
+does not restart services or repeat bootstrap work. Private-network DHCP does
+not provide resolver addresses. No administrator source-IP configuration is
+required.
 Application and provider secrets stay in encrypted Pulumi config. GitHub stores
 the passphrase that unlocks that config and the dedicated B2 credential needed
 to reach the state before it can be unlocked. Kamori does not use Pulumi Cloud
@@ -125,6 +128,12 @@ secret or a PostgreSQL/SSH leaf certificate therefore updates hosts in place;
 it does not put secrets in GitHub and does not replace a VM. No local PKI
 directory or manual `/etc/kamori` edits are part of provisioning.
 
+Each host records the SHA-256 fingerprint only after its complete role
+activation succeeds. The same encrypted archive on a later `up` is therefore a
+no-op on that host, while an interrupted or changed configuration is applied
+again. This keeps a no-change infrastructure update from reinstalling packages,
+restarting PostgreSQL, pulling ops containers, or restarting app services.
+
 ## Application rollout
 
 Cloud-init creates only the immutable host baseline, raw SSH trust, and the
@@ -148,6 +157,23 @@ stays read-only and only its non-persistent `/data` tmpfs is writable.
 Database bootstrap/PITR assets are in [`deploy/postgres`](../deploy/postgres),
 and cross-provider ciphertext replication is in
 [`deploy/backup`](../deploy/backup).
+
+The same workflow exposes a separate `repair-egress` recovery action for a
+host whose route, resolver, or NAT rules have become stale. It performs no
+Pulumi update and uses the existing forced-command configuration identity to
+restart only the root-owned egress units: ops first, followed by the database
+and both app nodes. It cannot run a shell, pull or restart application
+containers, bootstrap PostgreSQL, access object-storage configuration, or
+perform an availability probe. SSH transport failures are retried while a host
+is temporarily unreachable; a command that reached the host and failed exits
+immediately instead of repeating a deterministic server-side error.
+
+PostgreSQL bootstrap fingerprints the rendered pgBackRest repository
+configuration. A new host, changed repository credential, bucket, endpoint, or
+cipher must pass `stanza-create` and `pgbackrest check` before that fingerprint
+is accepted. Routine host updates with the same fingerprint do not block on a
+second repository check; the scheduled backup job continues to check the
+archive and report its heartbeat.
 
 The end-to-end bootstrap, secret boundaries, and release gates are in the
 [`hosted-beta` runbook](../docs/runbooks/hosted-beta.md). Pulumi provisioning
@@ -175,6 +201,11 @@ explicit and reviewable:
 Each transition requires a separate protected Pulumi preview and update. The
 application deployment remains a separate manually approved workflow. CI/CD
 does not perform service probes.
+
+After the initial `replace` update has installed the restricted host assets,
+the `repair-egress` workflow action is safe to repeat and does not depend on a
+new preview. It is rejected during `retire`, when the dedicated configuration
+identity is not yet trusted by the replacement hosts.
 
 ## Parameterized provider maintenance
 

@@ -74,6 +74,44 @@ func TestRetirePhaseDoesNotUseTheUntrustedConfigurationIdentity(t *testing.T) {
 	}
 }
 
+func TestRestrictedEgressRepairSkipsPulumiUpdateAndHostBootstrap(t *testing.T) {
+	t.Parallel()
+
+	workflow, err := os.ReadFile("../.github/workflows/infrastructure.yml")
+	if err != nil {
+		t.Fatalf("read infrastructure workflow: %v", err)
+	}
+	contents := string(workflow)
+	for _, required := range []string{
+		"- repair-egress",
+		"if: inputs.command != 'repair-egress'",
+		`run_host_command kamori-beta-ops "repair-egress ops"`,
+		`run_host_command kamori-beta-db-primary "repair-egress db-primary"`,
+		`run_host_command kamori-beta-app-1 "repair-egress app"`,
+		`if [[ "$status" != 255 ]]`,
+	} {
+		if !strings.Contains(contents, required) {
+			t.Fatalf("infrastructure workflow is missing %q", required)
+		}
+	}
+	if strings.Contains(contents, `pulumi stack output "$output_name" --show-secrets \`) {
+		t.Fatal("secret host configuration must be materialized once, not regenerated through every SSH retry")
+	}
+}
+
+func TestInfrastructureWorkflowUsesReviewedPulumiAction(t *testing.T) {
+	t.Parallel()
+
+	workflow, err := os.ReadFile("../.github/workflows/infrastructure.yml")
+	if err != nil {
+		t.Fatalf("read infrastructure workflow: %v", err)
+	}
+	const reviewedAction = "pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0"
+	if count := strings.Count(string(workflow), reviewedAction); count != 2 {
+		t.Fatalf("infrastructure workflow contains %d reviewed Pulumi action pins, want two", count)
+	}
+}
+
 func requiredMatch(t *testing.T, contents []byte, pattern string) string {
 	t.Helper()
 

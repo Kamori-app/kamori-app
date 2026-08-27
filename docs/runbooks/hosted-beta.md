@@ -51,11 +51,31 @@ NAT and is the only SSH bastion. The private-host egress service configures the
 default route and Hetzner's two recursive DNS resolvers before any package
 installation, because the private-only interface receives no resolver through
 DHCP. The resolver pair is also stored in `systemd-resolved`; every approved
-host-configuration update restarts the private egress service and reconstructs
-the ops NAT rules, so later Docker, network, or package restarts cannot leave a
-one-shot unit marked active with stale kernel state. Release registry login and
-immutable image pulls use bounded retries, but still fail closed after five
-attempts.
+changed host configuration restarts the private egress service and
+reconstructs the ops NAT rules. The installer records the role archive's
+SHA-256 fingerprint only after activation succeeds; an unchanged later `up`
+skips service restarts, package installation, container pulls, and database
+bootstrap. Release registry login and immutable image pulls use bounded
+retries, but still fail closed after five attempts.
+
+If only private-host egress is broken, run `Hosted infrastructure` with the
+`repair-egress` command. This is a restricted recovery path, not a Pulumi
+preview or update: it reconstructs ops NAT first and then restarts the
+route/resolver service on the database and two app nodes. The configuration SSH
+identity accepts only the exact role-bound command, and sudo permits only the
+root-owned repair entrypoint. The action cannot open a shell, pull containers,
+apply the encrypted host archive, bootstrap PostgreSQL, run pgBackRest, or
+probe an application endpoint. It is idempotent after the `replace` phase and
+is deliberately rejected during `retire`.
+
+Host delivery retries only SSH transport status `255`, which covers a newly
+created or temporarily unreachable machine. If a command reached a host and
+failed, the workflow stops on that error instead of rerunning database or
+container work. PostgreSQL runs `stanza-create` and `pgbackrest check` on a new
+host or whenever the rendered backup configuration fingerprint changes.
+Unchanged routine infrastructure updates skip that blocking repository check;
+the scheduled backup job remains responsible for ongoing archive checks and
+operator heartbeats.
 
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the

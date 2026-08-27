@@ -28,8 +28,25 @@ SELECT 'CREATE DATABASE kamori OWNER kamori_app'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kamori') \gexec
 SQL
 
-runuser -u postgres -- pgbackrest --stanza=kamori stanza-create
-runuser -u postgres -- pgbackrest --stanza=kamori check
+backup_config_marker=/var/lib/kamori/pgbackrest-configuration.sha256
+backup_config_fingerprint=$(sha256sum /etc/pgbackrest/pgbackrest.conf | awk '{print $1}')
+installed_backup_config_fingerprint=""
+if [[ -r "$backup_config_marker" ]]; then
+  installed_backup_config_fingerprint=$(tr -d '\r\n' <"$backup_config_marker")
+fi
+if [[ "$installed_backup_config_fingerprint" != "$backup_config_fingerprint" ]]; then
+  # A new host or changed repository credentials must prove that the stanza,
+  # encryption key, bucket, and WAL archive path work before configuration is
+  # accepted. Routine identical host updates leave this to the backup job and
+  # its heartbeat instead of blocking every infrastructure update.
+  runuser -u postgres -- pgbackrest --stanza=kamori stanza-create
+  runuser -u postgres -- pgbackrest --stanza=kamori check
+  install -d -o root -g root -m 0700 /var/lib/kamori
+  temporary_marker=$(mktemp /var/lib/kamori/pgbackrest-configuration.sha256.XXXXXX)
+  printf '%s\n' "$backup_config_fingerprint" >"$temporary_marker"
+  chmod 0600 "$temporary_marker"
+  mv "$temporary_marker" "$backup_config_marker"
+fi
 install -m 0644 /usr/local/lib/kamori/kamori-pgbackrest-backup.service /etc/systemd/system/
 install -m 0644 /usr/local/lib/kamori/kamori-pgbackrest-backup.timer /etc/systemd/system/
 systemctl daemon-reload
