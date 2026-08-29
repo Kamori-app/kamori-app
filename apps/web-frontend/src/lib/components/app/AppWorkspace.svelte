@@ -66,6 +66,12 @@
     import TaskWorkspace from "$lib/components/app/TaskWorkspace.svelte";
     import CalendarWorkspace from "$lib/components/app/CalendarWorkspace.svelte";
     import ContactsWorkspace from "$lib/components/app/ContactsWorkspace.svelte";
+    import TrashWorkspace from "$lib/components/app/TrashWorkspace.svelte";
+    import {
+        buildRestorePimOperation,
+        listDeletedPimItems,
+        type DeletedPimItem,
+    } from "$lib/pimHistory";
     import { locale } from "$lib/i18n";
     import { notify } from "$lib/stores/notifications";
     import {
@@ -93,7 +99,7 @@
         "Completed": "Выполнено", "Open": "Открыто", "Reopen": "Вернуть", "Complete": "Выполнить", "No tasks on this device yet.": "На этом устройстве задач пока нет.",
         "Calendar": "Календарь", "Event title": "Название события", "Add Event": "Добавить событие", "No events on this device yet.": "На этом устройстве событий пока нет.",
         "Contacts": "Контакты", "Full name": "Полное имя", "Email": "Email", "Phone": "Телефон", "Add Contact": "Добавить контакт", "No contacts on this device yet.": "На этом устройстве контактов пока нет.",
-        "Invite Codes": "Коды приглашений", "Generate": "Создать", "No spaces": "Нет пространств", "Editor": "Редактор", "Reader": "Чтение",
+        "Invite Codes": "Коды приглашений", "Generate": "Создать", "No spaces": "Нет пространств", "Read and Edit": "Чтение и Редактирование", "Read only": "Только Чтение",
         "Optional encrypted note for recipient": "Необязательная зашифрованная заметка получателю", "Generating...": "Создание…", "Generate Invite Code": "Создать код приглашения",
         "Redeem": "Принять", "Redeeming...": "Принимаем…", "Redeem Code": "Принять код", "Invite Note": "Заметка приглашения",
         "Delete Space": "Удалить пространство", "Cancel": "Отмена", "Move to Trash": "Переместить в корзину",
@@ -108,6 +114,7 @@
         | "calendar"
         | "contacts"
         | "spaces"
+        | "trash"
         | "sharing" = "today";
 
     /** Persistent encrypted data-plane controller and focused routed views. */
@@ -1087,12 +1094,41 @@
                 projection_resource_id: null,
             });
             setNotice(localized(
-                "Item moved to encrypted tombstone history.",
-                "Элемент перемещён в зашифрованную историю удалений.",
+                "Item moved to Trash. You can restore it from the Trash section.",
+                "Элемент перемещён в корзину. Его можно восстановить в разделе «Корзина».",
             ));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setNotice(`${localized("Delete failed", "Не удалось удалить")}: ${message}`);
+        } finally {
+            clearLoading();
+        }
+    };
+
+    const restorePimItem = async (item: DeletedPimItem) => {
+        selectedCollectionId = item.spaceId;
+        setLoading(`restore-${item.tombstoneOperationId}`);
+        try {
+            await commitPimOperation(buildRestorePimOperation(item));
+            notify(
+                localized(
+                    "Item restored from Trash.",
+                    "Элемент восстановлен из корзины.",
+                ),
+                {
+                    kind: "success",
+                    source: localized("Trash", "Корзина"),
+                },
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            notify(
+                `${localized("Restore failed", "Не удалось восстановить")}: ${message}`,
+                {
+                    kind: "error",
+                    source: localized("Trash", "Корзина"),
+                },
+            );
         } finally {
             clearLoading();
         }
@@ -2005,6 +2041,7 @@
         selectedCollection.keyAvailable &&
         selectedCollection.role !== "reader",
     );
+    $: deletedPimItems = listDeletedPimItems(operationStates);
     $: requestedSpaceId = $page.url.searchParams.get("space") ?? "";
     $: if (
         view === "spaces" &&
@@ -2099,7 +2136,7 @@
             </div>
         {/if}
     </Card>
-{:else if $appState.collections.length === 0 && view !== "spaces" && view !== "sharing"}
+{:else if $appState.collections.length === 0 && view !== "spaces" && view !== "sharing" && view !== "trash"}
     <Card>
         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-moss">
             {$locale === "ru" ? "Первый шаг" : "First step"}
@@ -2278,6 +2315,17 @@
     </Card>
     {/if}
 
+    {#if view === "trash"}
+    <Card>
+        <TrashWorkspace
+            spaces={$appState.collections}
+            items={deletedPimItems}
+            busy={loadingAction}
+            onRestore={restorePimItem}
+        />
+    </Card>
+    {/if}
+
     {#if view === "sharing"}
     <Card>
         <h2 class="font-heading text-xl font-semibold text-slate">
@@ -2338,8 +2386,8 @@
                 aria-label="Invite role"
                 bind:value={inviteRole}
             >
-                <option value="editor">{t("Editor")}</option>
-                <option value="reader">{t("Reader")}</option>
+                <option value="editor">{t("Read and Edit")}</option>
+                <option value="reader">{t("Read only")}</option>
             </select>
 
             <select
@@ -2383,7 +2431,7 @@
                         {#each (spaceMembers[selectedCollectionId] ?? []).filter((member) => member.role !== "owner") as member}
                             <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sand/50 p-2">
                                 <span class="text-xs text-slate">
-                                    {member.username} · {t(member.role === "editor" ? "Editor" : "Reader")}
+                                    {member.username} · {t(member.role === "editor" ? "Read and Edit" : "Read only")}
                                 </span>
                                 <Button
                                     variant="danger"

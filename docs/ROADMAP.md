@@ -22,6 +22,8 @@ Implemented PIM baseline for this milestone:
 - shared lossless iCalendar/vCard parsing, materialization, and DAV projection;
 - rich web/mobile task, calendar, and contact editors, completed-task views,
   calendar views, contact search/sort, event recurrence, reminders, and categories;
+- web Trash for deleted PIM branch heads, with lossless append-only restore
+  when the device possesses the prior encrypted version;
 - one-way opt-in projection of rich calendar/contact fields into Android/iOS
   system stores.
 

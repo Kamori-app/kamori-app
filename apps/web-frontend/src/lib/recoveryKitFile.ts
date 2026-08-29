@@ -48,3 +48,33 @@ export function buildRecoveryKitFilename(entropy: Uint8Array): string {
     .join("");
   return `kamori-recovery-${suffix}.txt`;
 }
+
+/**
+ * Downloads a locally generated plaintext recovery document. This helper must
+ * only run after an explicit user action in a browser; it never uploads the
+ * phrase or includes account data in the filename.
+ */
+export function downloadRecoveryKitFile(
+  username: string,
+  phrase: string,
+): string {
+  if (typeof document === "undefined" || typeof URL === "undefined") {
+    throw new Error("recovery kit download requires a browser");
+  }
+  const entropy = new Uint8Array(FILENAME_ENTROPY_BYTES);
+  globalThis.crypto.getRandomValues(entropy);
+  const filename = buildRecoveryKitFilename(entropy);
+  const contents = buildRecoveryKitText(username, phrase);
+  const url = URL.createObjectURL(
+    new Blob([contents], { type: "text/plain;charset=utf-8" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.hidden = true;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return filename;
+}
