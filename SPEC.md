@@ -302,9 +302,10 @@ legal review. The public beta is 18+.
 
 Planned artifacts are signed/notarized desktop packages for macOS and Windows,
 Linux AppImage/deb plus a signed Flatpak repository, Android Play AAB,
-Accrescent APKS and universal APK, and an iOS archive. Store submission and
-production signing credentials are external release steps. Flathub is not an
-MVP gate.
+Accrescent APKS and universal APK. The signed iOS IPA is an explicitly enabled
+channel and remains unavailable to users until its TestFlight and
+physical-device gates pass. Store submission and production signing
+credentials are external release steps. Flathub is not an MVP gate.
 
 ## 13. Release gates
 
@@ -316,5 +317,8 @@ and generated FRB/WASM bindings are committed.
 Before a public beta, operators must also execute and record the database PITR
 restore exercise, backup verification, supported DAV-client matrix,
 signed artifact smoke tests, mobile system-projection tests on physical
-devices, dependency/license review, and the legal checklist. No documentation
-may claim an independent security audit until one has actually occurred.
+devices for every released mobile channel, dependency/license review, and the
+legal checklist. Excluded channels must be explicitly recorded as not
+applicable in the release evidence rather than silently omitted. No
+documentation may claim an independent security audit until one has actually
+occurred.

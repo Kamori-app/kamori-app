@@ -8,7 +8,8 @@ decisions and implementation-facing documentation.
 - `ROADMAP.md` — milestone order and exit criteria.
 - `whitepapers/` — user-facing EN/RU security/privacy, mobile integration, and
   desktop DAV papers.
-- `runbooks/` — hosted deployment and recovery procedures.
+- `runbooks/` — hosted deployment, recovery, client-release, and evidence
+  procedures.
 
 Historical v1/v2/v3 documents were removed intentionally. Git history is the
 only project history; archived documents are not normative.
