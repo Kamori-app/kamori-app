@@ -45,6 +45,9 @@ The authenticated app shell stays mounted while its focused views change:
 - `/app/contacts` — searchable/sortable contacts with structured names,
   multiple labeled contact methods and addresses, organization, birthday,
   website, notes, categories, and favorites;
+- `/app/trash` — current deleted task/event/contact branch heads, with
+  type/space/search filters and append-only restoration when the previous
+  encrypted projection is available to this device;
 - `/app/spaces` — encrypted space creation, trash, and access entry points;
 - `/app/sharing?space=<id>` — invite and membership controls for one space;
 - `/app/settings/{general,security,devices,privacy,account,advanced}` — routed
@@ -60,6 +63,11 @@ Authentication is intentionally separate from recovery:
 An account without a space sees a dedicated first-run screen instead of empty
 task/calendar/contact forms. Write controls are also disabled for reader spaces
 and devices that have not received the current space key.
+
+The responsive app shell keeps tasks, calendar, and contacts in the bottom
+navigation and exposes every app/settings route through an explicit header
+menu. Both surfaces account for the mobile safe area. The sync control keeps a
+recognizable icon and short textual state at narrow widths.
 
 ## Browser Synchronization
 
@@ -165,6 +173,9 @@ Server-side token TTL policy (cloud-server env):
   `kamori-recovery-<random>.txt` file generated entirely in the browser. Its
   filename contains no username, the file is never uploaded, and the UI warns
   users to move it out of Downloads into protected or offline storage.
+- The same browser-local download is available later from
+  `/app/settings/security` → Data recovery after the encrypted web vault is
+  unlocked; revealing the words first is optional.
 - Flow:
   - derive the recovery verifier and account master key locally from the words;
   - call `POST /auth/account-recovery/start` with `username`,

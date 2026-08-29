@@ -53,6 +53,7 @@
         normalizePasskeyName,
         PASSKEY_NAME_MAX_LENGTH,
     } from "$lib/passkeyLabels";
+    import { downloadRecoveryKitFile } from "$lib/recoveryKitFile";
 
     const ruCopy: Record<string, string> = {
         "Web Settings": "Настройки веб-приложения", "Cloud Base URL": "Адрес сервиса Kamori", "Save Settings": "Сохранить настройки",
@@ -63,7 +64,7 @@
         "Revoke device": "Отозвать устройство", "Current device": "Текущее устройство",
         "Security: Sessions": "Безопасность: сессии", "Sign in to review sessions.": "Войдите, чтобы просмотреть сессии.", "No sessions found.": "Сессий нет.",
         "Last used": "Последнее использование", "Revoke": "Отозвать", "Security: Data Recovery Kit": "Безопасность: recovery kit данных",
-        "Reveal 24-word kit": "Показать набор из 24 слов", "Copy kit": "Копировать набор", "Sign in to reveal it.": "Войдите, чтобы показать его.",
+        "Reveal 24-word kit": "Показать набор из 24 слов", "Copy kit": "Копировать набор", "Download recovery file": "Скачать файл восстановления", "Sign in to reveal it.": "Войдите, чтобы показать его.",
         "Security: TOTP": "Безопасность: TOTP", "Sign in to manage TOTP.": "Войдите для управления TOTP.", "Manual Entry Key": "Ключ для ручного ввода",
         "Copy Manual Key": "Копировать ключ", "Copy URI": "Копировать URI", "Security: Password": "Безопасность: пароль",
         "Sign in to change password.": "Войдите, чтобы изменить пароль.", "Current password": "Текущий пароль", "New password": "Новый пароль",
@@ -616,6 +617,23 @@
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setNotice(`${localized("Unable to reveal data recovery kit", "Не удалось показать recovery kit")}: ${message}`);
+        }
+    };
+
+    const downloadDataRecoveryKit = async () => {
+        try {
+            const phrase = dataRecoveryKit || await withActiveMasterKey(
+                (masterKey) => masterKeyToRecoveryPhrase(masterKey),
+            );
+            dataRecoveryKit = phrase;
+            downloadRecoveryKitFile($appState.currentUsername, phrase);
+            setNotice(localized(
+                "Recovery file downloaded. Move it to a secure place and remove it from Downloads.",
+                "Файл восстановления скачан. Переместите его в безопасное место и удалите из Downloads.",
+            ));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNotice(`${localized("Unable to download data recovery kit", "Не удалось скачать recovery kit")}: ${message}`);
         }
     };
 
@@ -1495,8 +1513,8 @@
                                         >
                                             <span class="text-xs text-slate">
                                                 {member.username} · {localized(
-                                                    member.role,
-                                                    member.role === "owner" ? "владелец" : member.role === "editor" ? "редактор" : "чтение",
+                                                    member.role === "owner" ? "Owner" : member.role === "editor" ? "Read and Edit" : "Read only",
+                                                    member.role === "owner" ? "Владелец" : member.role === "editor" ? "Чтение и Редактирование" : "Только Чтение",
                                                 )}
                                             </span>
                                             <Button
@@ -1800,9 +1818,20 @@
             </p>
             {#if $appState.accessToken}
                 <div class="mt-2 space-y-2">
-                    <Button variant="ghost" on:click={revealDataRecoveryKit}>
-                        {t("Reveal 24-word kit")}
-                    </Button>
+                    <div class="flex flex-wrap gap-2">
+                        <Button variant="ghost" on:click={revealDataRecoveryKit}>
+                            {t("Reveal 24-word kit")}
+                        </Button>
+                        <Button variant="secondary" on:click={downloadDataRecoveryKit}>
+                            {t("Download recovery file")}
+                        </Button>
+                    </div>
+                    <p class="border-l-4 border-gold bg-sand/45 p-3 text-xs text-slate/70">
+                        {localized(
+                            "The downloaded file is plaintext and is created locally in this browser. Move it out of Downloads into a password manager, encrypted drive, or offline storage.",
+                            "Скачанный файл не зашифрован и создаётся локально в этом браузере. Переместите его из Downloads в менеджер паролей, на зашифрованный диск или в офлайн-хранилище.",
+                        )}
+                    </p>
                     {#if dataRecoveryKit}
                         <p
                             class="rounded-xl border border-coral/30 bg-coral/10 p-3 font-mono text-sm text-slate"

@@ -32,7 +32,9 @@
             calendar: "Calendar",
             contacts: "Contacts",
             spaces: "Spaces",
+            trash: "Trash",
             settings: "Settings",
+            menu: "Menu",
             signIn: "Sign in",
             signUp: "Create account",
             logout: "Log out",
@@ -54,7 +56,9 @@
             calendar: "Календарь",
             contacts: "Контакты",
             spaces: "Пространства",
+            trash: "Корзина",
             settings: "Настройки",
+            menu: "Меню",
             signIn: "Войти",
             signUp: "Создать аккаунт",
             logout: "Выйти",
@@ -78,6 +82,7 @@
         | "calendar"
         | "contacts"
         | "spaces"
+        | "trash"
         | "sharing" = "today";
     let settingsSection:
         | "general"
@@ -87,6 +92,8 @@
         | "account"
         | "advanced" = "general";
     let previouslyAuthenticated = false;
+    let mobileMenuOpen = false;
+    let lastNavigationPath = "";
 
     const normalizeSettingsSection = (
         value: string | undefined,
@@ -115,11 +122,16 @@
         firstSegment === "calendar" ||
         firstSegment === "contacts" ||
         firstSegment === "spaces" ||
+        firstSegment === "trash" ||
         firstSegment === "sharing"
             ? firstSegment
             : "today";
     $: settingsSection = normalizeSettingsSection(path.split("/")[1]);
     $: settingsOpen = firstSegment === "settings";
+    $: if (path !== lastNavigationPath) {
+        lastNavigationPath = path;
+        mobileMenuOpen = false;
+    }
     $: if (previouslyAuthenticated && !$appState.accessToken) {
         resetSyncState();
     }
@@ -140,7 +152,9 @@
         { href: "/app/calendar", key: "calendar" },
         { href: "/app/contacts", key: "contacts" },
         { href: "/app/spaces", key: "spaces" },
+        { href: "/app/trash", key: "trash" },
     ] as const;
+    const mobilePrimaryItems = navItems.slice(0, 4);
 
     const settingsItems = [
         { href: "/app/settings", key: "general" },
@@ -156,6 +170,7 @@
     const openRecovery = () => void goto("/app/recovery");
 
     const logout = async () => {
+        mobileMenuOpen = false;
         await bestEffortLogoutWithRefresh({
             accessToken: tokenStore.getAccessToken(),
             logout: (accessToken: string) =>
@@ -218,6 +233,12 @@
         }
     });
 </script>
+
+<svelte:window
+    on:keydown={(event) => {
+        if (event.key === "Escape") mobileMenuOpen = false;
+    }}
+/>
 
 {#if !$appState.accessToken}
     <main class="min-h-screen px-4 py-6 md:px-8">
@@ -285,7 +306,7 @@
             </div>
         </aside>
 
-        <div class="min-w-0 pb-20 md:pb-0">
+        <div class="mobile-content min-w-0 md:pb-0">
             <header class="sticky top-0 z-30 flex min-h-16 min-w-0 items-center gap-3 border-b border-slate/15 bg-paper/95 px-4 backdrop-blur md:px-7">
                 <a href="/app" class="inline-flex shrink-0 items-center gap-2 md:hidden" aria-label="Kamori">
                     <BrandMark size={28} />
@@ -297,9 +318,64 @@
                 <div class="ml-auto flex min-w-0 shrink-0 items-center gap-2">
                     <SyncStatus onSync={requestManualSync} />
                     <LocaleSwitch />
-                    <a class="px-2 py-2 text-sm text-slate md:hidden" href="/app/settings" aria-label={text.settings}>⚙</a>
+                    <button
+                        class="grid size-9 shrink-0 place-items-center border border-slate/20 bg-paper text-slate md:hidden"
+                        aria-label={text.menu}
+                        aria-expanded={mobileMenuOpen}
+                        aria-controls="mobile-application-menu"
+                        on:click={() => (mobileMenuOpen = true)}
+                    >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
                 </div>
             </header>
+
+            {#if mobileMenuOpen}
+                <div class="fixed inset-0 z-50 md:hidden">
+                    <button
+                        class="absolute inset-0 bg-slate/35"
+                        aria-label={text.menu === "Меню" ? "Закрыть меню" : "Close menu"}
+                        on:click={() => (mobileMenuOpen = false)}
+                    ></button>
+                    <aside
+                        id="mobile-application-menu"
+                        class="mobile-menu-panel absolute inset-y-0 right-0 flex w-[min(20rem,88vw)] flex-col overflow-y-auto border-l border-slate/20 bg-paper p-5 shadow-2xl"
+                        aria-label={text.menu}
+                    >
+                        <div class="flex items-center justify-between gap-3 border-b border-slate/15 pb-4">
+                            <span class="font-heading text-lg font-semibold text-slate">{text.menu}</span>
+                            <button
+                                class="grid size-9 place-items-center border border-slate/20 text-xl text-slate"
+                                aria-label={text.menu === "Меню" ? "Закрыть меню" : "Close menu"}
+                                on:click={() => (mobileMenuOpen = false)}
+                            >×</button>
+                        </div>
+                        <nav class="mt-4 space-y-1" aria-label="Application">
+                            {#each navItems as item}
+                                <a
+                                    href={item.href}
+                                    class:bg-slate={workspaceView === item.key && !settingsOpen}
+                                    class:text-white={workspaceView === item.key && !settingsOpen}
+                                    class="block px-3 py-3 text-base font-medium text-slate hover:bg-sand/60"
+                                    on:click={() => (mobileMenuOpen = false)}
+                                >{text[item.key]}</a>
+                            {/each}
+                            <a
+                                href="/app/settings"
+                                class:bg-slate={settingsOpen}
+                                class:text-white={settingsOpen}
+                                class="block px-3 py-3 text-base font-medium text-slate hover:bg-sand/60"
+                                on:click={() => (mobileMenuOpen = false)}
+                            >{text.settings}</a>
+                        </nav>
+                        <div class="mt-auto border-t border-slate/15 pt-4">
+                            <Button variant="ghost" fullWidth on:click={logout}>{text.logout}</Button>
+                        </div>
+                    </aside>
+                </div>
+            {/if}
 
             <main class="mx-auto max-w-5xl px-4 py-5 md:px-7 md:py-7">
                 <div class:hidden={settingsOpen} aria-hidden={settingsOpen}>
@@ -328,16 +404,44 @@
             </main>
         </div>
 
-        <nav class="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate/20 bg-paper md:hidden" aria-label="Application">
-            {#each navItems as item}
+        <nav class="mobile-bottom-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate/20 bg-paper md:hidden" aria-label="Application">
+            {#each mobilePrimaryItems as item}
                 <a
                     href={item.href}
                     class:bg-sand={workspaceView === item.key && !settingsOpen}
                     class="min-w-0 px-1 py-3 text-center text-[11px] font-semibold text-slate"
                 >{text[item.key]}</a>
             {/each}
+            <button
+                class:bg-sand={mobileMenuOpen || workspaceView === "spaces" || workspaceView === "trash" || settingsOpen}
+                class="min-w-0 px-1 py-3 text-center text-[11px] font-semibold text-slate"
+                aria-label={text.menu}
+                on:click={() => (mobileMenuOpen = true)}
+            >{text.menu}</button>
         </nav>
     </div>
 {/if}
 
 <slot />
+
+<style>
+    .mobile-content {
+        padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    }
+
+    .mobile-bottom-nav {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .mobile-menu-panel {
+        padding-top: max(1.25rem, env(safe-area-inset-top));
+        padding-right: max(1.25rem, env(safe-area-inset-right));
+        padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+    }
+
+    @media (min-width: 768px) {
+        .mobile-content {
+            padding-bottom: 0;
+        }
+    }
+</style>

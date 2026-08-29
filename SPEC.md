@@ -192,6 +192,11 @@ than a raw resource list:
   website, notes, categories, favorite state, search, and deterministic sorting;
 - all three support creation, editing, deletion, offline queueing, sharing, and
   visible conflict copies.
+- the web client exposes current deleted branch heads in Trash. A restore is a
+  new signed upsert whose semantic parent is the tombstone and whose encrypted
+  payload carries the last lossless projection available to that device. A
+  tombstone obtained without its earlier decryptable version is visible as
+  unavailable and cannot be reconstructed by the service.
 
 The version-2 PIM field schema has typed date, UTC-instant, and zoned local-time
 records plus multi-value records. A shared Rust parser/materializer is the
@@ -209,6 +214,11 @@ authored until occurrence/exception completion semantics are implemented.
 Attendees and scheduling, an advanced recurrence/exception editor, multiple
 alarms, contact photos/groups, semantic search, bulk import/export UX, and a
 polished conflict resolver remain post-MVP.
+
+The 24-word Data Recovery Kit can be copied, revealed, or downloaded as a
+browser-local plaintext file both during registration and later from Security.
+The file is never sent to the service and its randomized filename contains no
+account identifier.
 
 ## 8. Desktop DAV bridge
 

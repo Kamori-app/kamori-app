@@ -29,6 +29,20 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
   const account = await signupAndSignIn(page, uniqueAccount("smoke"));
   await createCollection(page, "Acceptance PIM");
 
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(page.getByRole("button", { name: "Sync now" })).toContainText(
+    "Sync",
+  );
+  await page
+    .getByRole("button", { name: "Menu", exact: true })
+    .first()
+    .click();
+  const mobileMenu = page.locator("#mobile-application-menu");
+  await expect(mobileMenu.getByRole("link", { name: "Calendar" })).toBeVisible();
+  await expect(mobileMenu.getByRole("link", { name: "Tasks" })).toBeVisible();
+  await mobileMenu.getByRole("button", { name: "Close menu" }).click();
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   await openAppSection(page, "Tasks");
   await context.setOffline(true);
   await createTask(page, "Offline acceptance task", { offline: true });
@@ -51,6 +65,22 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
 
   await openAppSection(page, "Contacts");
   await createContact(page, "Acceptance Contact", "acceptance@example.test");
+  const contactCard = page
+    .locator("article")
+    .filter({ has: page.getByText("Acceptance Contact", { exact: true }) });
+  await contactCard.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByText("Acceptance Contact", { exact: true })).toHaveCount(0);
+  await openAppSection(page, "Trash");
+  const trashedContact = page
+    .locator("article")
+    .filter({ has: page.getByText("Acceptance Contact", { exact: true }) });
+  await expect(trashedContact).toBeVisible();
+  await trashedContact.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("Item restored from Trash.")).toBeVisible();
+  await openAppSection(page, "Contacts");
+  await expect(
+    page.getByText("Acceptance Contact", { exact: true }),
+  ).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("region", { name: "Sign in" })).toBeVisible();

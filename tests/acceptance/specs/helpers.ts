@@ -6,7 +6,13 @@ export interface AcceptanceAccount {
   recoveryPhrase: string;
 }
 
-export type AppSection = "Today" | "Tasks" | "Calendar" | "Contacts" | "Spaces";
+export type AppSection =
+  | "Today"
+  | "Tasks"
+  | "Calendar"
+  | "Contacts"
+  | "Spaces"
+  | "Trash";
 
 export const openAppSection = async (
   page: Page,
