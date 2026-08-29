@@ -8,7 +8,10 @@ export interface AcceptanceAccount {
 
 export type AppSection = "Today" | "Tasks" | "Calendar" | "Contacts" | "Spaces";
 
-export const openAppSection = async (page: Page, section: AppSection): Promise<void> => {
+export const openAppSection = async (
+  page: Page,
+  section: AppSection,
+): Promise<void> => {
   await page
     .getByRole("link", { name: section, exact: true })
     .filter({ visible: true })
@@ -29,7 +32,9 @@ export const signup = async (
   const surface = page.getByRole("region", { name: "Create account" });
   await expect(surface).toBeVisible();
   await surface.getByPlaceholder("Username").fill(account.username);
-  await surface.getByPlaceholder("Password", { exact: true }).fill(account.password);
+  await surface
+    .getByPlaceholder("Password", { exact: true })
+    .fill(account.password);
   await surface.getByPlaceholder("Confirm password").fill(account.password);
   await surface.getByRole("button", { name: "Create account" }).click();
 
@@ -42,9 +47,7 @@ export const signup = async (
   await expect(
     surface.getByRole("button", { name: "Download recovery file" }),
   ).toBeVisible();
-  await surface
-    .getByPlaceholder(/24th word/)
-    .fill(recoveryWords.at(-1) ?? "");
+  await surface.getByPlaceholder(/24th word/).fill(recoveryWords.at(-1) ?? "");
   await surface
     .getByRole("button", { name: "I saved the kit — create account" })
     .click();
@@ -64,7 +67,9 @@ export const signIn = async (
   }
   await expect(surface).toBeVisible();
   await surface.getByPlaceholder("Username").fill(account.username);
-  await surface.getByPlaceholder("Password", { exact: true }).fill(account.password);
+  await surface
+    .getByPlaceholder("Password", { exact: true })
+    .fill(account.password);
   if (options.allowLocalUnlock) {
     await surface.getByRole("checkbox").check();
   }
@@ -98,6 +103,39 @@ export const createCollection = async (
   return id;
 };
 
+export const createTask = async (
+  page: Page,
+  title: string,
+  options: { offline?: boolean } = {},
+): Promise<void> => {
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New task" });
+  await editor.getByRole("textbox", { name: "Title" }).fill(title);
+  await editor.getByRole("button", { name: "Save task" }).click();
+  await expect(
+    page.getByText(
+      options.offline
+        ? "Changes saved to the encrypted offline outbox."
+        : "Changes encrypted and synced.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText(title, { exact: true })).toBeVisible();
+};
+
+export const createContact = async (
+  page: Page,
+  displayName: string,
+  email: string,
+): Promise<void> => {
+  await page.getByRole("button", { name: "New contact", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New contact" });
+  await editor.getByRole("textbox", { name: "Display name" }).fill(displayName);
+  await editor.getByPlaceholder("name@example.com").fill(email);
+  await editor.getByRole("button", { name: "Save contact" }).click();
+  await expect(page.getByText("Changes encrypted and synced.")).toBeVisible();
+  await expect(page.getByText(displayName, { exact: true })).toBeVisible();
+};
+
 export const syncNow = async (page: Page): Promise<void> => {
   await page.getByRole("button", { name: "Sync now", exact: true }).click();
   await expect(page.getByText(/Sync completed:/)).toBeVisible();
@@ -112,7 +150,8 @@ export const captureAccessToken = (page: Page): (() => string) => {
     }
   });
   return () => {
-    if (!token) throw new Error("no authenticated browser request was observed");
+    if (!token)
+      throw new Error("no authenticated browser request was observed");
     return token;
   };
 };
