@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import {
   createCollection,
+  createContact,
+  createTask,
   logout,
   openAppSection,
   signIn,
@@ -29,18 +31,7 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
 
   await openAppSection(page, "Tasks");
   await context.setOffline(true);
-  await page.getByRole("button", { name: "New task", exact: true }).click();
-  const taskEditor = page.getByRole("dialog", { name: "New task" });
-  await taskEditor
-    .getByRole("textbox", { name: "Title" })
-    .fill("Offline acceptance task");
-  await taskEditor.getByRole("button", { name: "Save task" }).click();
-  await expect(
-    page.getByText("Changes saved to the encrypted offline outbox."),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Offline acceptance task", { exact: true }),
-  ).toBeVisible();
+  await createTask(page, "Offline acceptance task", { offline: true });
   await page.getByRole("checkbox", { name: "Complete task" }).check();
   await expect(page.getByText("Task completed.")).toBeVisible();
 
@@ -59,16 +50,7 @@ test("@smoke infrastructure and encrypted offline PIM round-trip", async ({
   await expect(page.getByText("Changes encrypted and synced.")).toBeVisible();
 
   await openAppSection(page, "Contacts");
-  await page.getByRole("button", { name: "New contact", exact: true }).click();
-  const contactEditor = page.getByRole("dialog", { name: "New contact" });
-  await contactEditor
-    .getByRole("textbox", { name: "Display name" })
-    .fill("Acceptance Contact");
-  await contactEditor
-    .getByPlaceholder("name@example.com")
-    .fill("acceptance@example.test");
-  await contactEditor.getByRole("button", { name: "Save contact" }).click();
-  await expect(page.getByText("Changes encrypted and synced.")).toBeVisible();
+  await createContact(page, "Acceptance Contact", "acceptance@example.test");
 
   await page.reload();
   await expect(page.getByRole("region", { name: "Sign in" })).toBeVisible();
