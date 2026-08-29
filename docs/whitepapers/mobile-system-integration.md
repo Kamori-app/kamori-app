@@ -7,9 +7,11 @@ Status: MVP product and privacy contract
 ## The short version
 
 Kamori provides its own calendar, task, and contact screens on Android and iOS.
-The MVP field set is intentionally small and documented in `SPEC.md`. You do
-not need to install a profile, configure a DAV account, keep the app open, or
-connect another app to `127.0.0.1`.
+They include task completion, due time, priority, notes and reminders;
+recurring calendar/date views and rich event details; and searchable,
+sortable contacts with structured names and multiple labeled contact methods
+and addresses. You do not need to install a profile, configure a DAV account,
+keep the app open, or connect another app to `127.0.0.1`.
 
 If you want Kamori data to appear in the phone's built-in Calendar or Contacts
 apps, Kamori can create an optional system projection. The app asks first. You
@@ -44,6 +46,20 @@ model of each platform.
    system store.
 5. Changes made in Kamori still become signed encrypted operations and enter
    the durable local outbox before upload.
+
+Kamori records the opt-in before it starts copying plaintext. If projection is
+interrupted, the collection remains shown as enabled and the next sync resumes
+reconciliation; the UI never reports the integration as disabled while tracked
+copies may already exist.
+
+For enabled calendars, the system copy includes title, all-day or timed range,
+location, description, supported recurrence, and one reminder. For enabled
+contacts it includes the structured name, labeled email addresses, phone
+numbers and postal addresses, organization and job title, website, and
+birthday. Contact notes are projected on Android; iOS keeps them only in Kamori
+because writing contact notes requires a separately approved entitlement.
+Categories, favorite state, task data, and fields unsupported by the target OS
+remain available in Kamori without being forced into a lossy system field.
 
 Kamori never sends plaintext calendar entries, tasks, or contacts to the
 Kamori service.

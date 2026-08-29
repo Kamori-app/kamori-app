@@ -8,7 +8,7 @@ import '../lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `MobileCreateInviteCodeRequest`, `MobileCreateInviteCodeResponse`, `MobileCreateSpaceRequest`, `MobileCreateSpaceResponse`, `MobileDeviceKeyPackage`, `MobileDeviceSummary`, `MobileListRecoveryKeyPackagesResponse`, `MobileListSpaceDevicesResponse`, `MobileListSpaceMembersResponse`, `MobileListSpacesResponse`, `MobileLogoutRequest`, `MobileLogoutResponse`, `MobileMemberRecoveryKeyPackage`, `MobilePutDeviceKeyPackageRequest`, `MobilePutRecoveryKeyPackageRequest`, `MobileRecoverySpaceKeyPackage`, `MobileRedeemInviteCodeRequest`, `MobileRedeemInviteCodeResponse`, `MobileRefreshRequest`, `MobileRefreshResponse`, `MobileRegisterDeviceRequest`, `MobileRegisterDeviceResponse`, `MobileRotateSpaceKeyRequest`, `MobileRotateSpaceKeyResponse`, `MobileSigninFinishRequest`, `MobileSigninFinishResponse`, `MobileSigninStartRequest`, `MobileSigninStartResponse`, `MobileSigninTotpRequest`, `MobileSpaceDeviceSummary`, `MobileSpaceLifecycleResponse`, `MobileSpaceMemberSummary`, `MobileSpaceSummary`, `MobileStoredResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class MobileCollection {
   final String collectionId;
@@ -119,6 +119,30 @@ class MobileIssuedInviteCode {
           collectionKey == other.collectionKey;
 }
 
+class MobileLabeledValue {
+  final String label;
+  final String value;
+  final String? rawHead;
+
+  const MobileLabeledValue({
+    required this.label,
+    required this.value,
+    this.rawHead,
+  });
+
+  @override
+  int get hashCode => label.hashCode ^ value.hashCode ^ rawHead.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MobileLabeledValue &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          value == other.value &&
+          rawHead == other.rawHead;
+}
+
 class MobileLoginResult {
   final String? username;
   final String? accessToken;
@@ -158,6 +182,141 @@ class MobileLoginResult {
           accountMasterKey == other.accountMasterKey;
 }
 
+class MobilePimDraft {
+  final String spaceId;
+  final String? resourceId;
+  final String? projectionId;
+  final String? headOperationId;
+  final String resourceKind;
+  final String title;
+  final bool completed;
+  final String? completedAt;
+  final String? notes;
+  final MobilePimTemporal? startsAt;
+  final MobilePimTemporal? endsAt;
+  final MobilePimTemporal? dueAt;
+  final PlatformInt64 priority;
+  final String? location;
+  final String? recurrenceRule;
+  final PlatformInt64? reminderMinutes;
+  final List<String> categories;
+  final String namePrefix;
+  final String givenName;
+  final String middleName;
+  final String familyName;
+  final String nameSuffix;
+  final List<MobileLabeledValue> emails;
+  final List<MobileLabeledValue> phones;
+  final List<MobilePostalAddress> addresses;
+  final String? organization;
+  final String? jobTitle;
+  final String? birthday;
+  final String? url;
+  final bool favorite;
+
+  const MobilePimDraft({
+    required this.spaceId,
+    this.resourceId,
+    this.projectionId,
+    this.headOperationId,
+    required this.resourceKind,
+    required this.title,
+    required this.completed,
+    this.completedAt,
+    this.notes,
+    this.startsAt,
+    this.endsAt,
+    this.dueAt,
+    required this.priority,
+    this.location,
+    this.recurrenceRule,
+    this.reminderMinutes,
+    required this.categories,
+    required this.namePrefix,
+    required this.givenName,
+    required this.middleName,
+    required this.familyName,
+    required this.nameSuffix,
+    required this.emails,
+    required this.phones,
+    required this.addresses,
+    this.organization,
+    this.jobTitle,
+    this.birthday,
+    this.url,
+    required this.favorite,
+  });
+
+  @override
+  int get hashCode =>
+      spaceId.hashCode ^
+      resourceId.hashCode ^
+      projectionId.hashCode ^
+      headOperationId.hashCode ^
+      resourceKind.hashCode ^
+      title.hashCode ^
+      completed.hashCode ^
+      completedAt.hashCode ^
+      notes.hashCode ^
+      startsAt.hashCode ^
+      endsAt.hashCode ^
+      dueAt.hashCode ^
+      priority.hashCode ^
+      location.hashCode ^
+      recurrenceRule.hashCode ^
+      reminderMinutes.hashCode ^
+      categories.hashCode ^
+      namePrefix.hashCode ^
+      givenName.hashCode ^
+      middleName.hashCode ^
+      familyName.hashCode ^
+      nameSuffix.hashCode ^
+      emails.hashCode ^
+      phones.hashCode ^
+      addresses.hashCode ^
+      organization.hashCode ^
+      jobTitle.hashCode ^
+      birthday.hashCode ^
+      url.hashCode ^
+      favorite.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MobilePimDraft &&
+          runtimeType == other.runtimeType &&
+          spaceId == other.spaceId &&
+          resourceId == other.resourceId &&
+          projectionId == other.projectionId &&
+          headOperationId == other.headOperationId &&
+          resourceKind == other.resourceKind &&
+          title == other.title &&
+          completed == other.completed &&
+          completedAt == other.completedAt &&
+          notes == other.notes &&
+          startsAt == other.startsAt &&
+          endsAt == other.endsAt &&
+          dueAt == other.dueAt &&
+          priority == other.priority &&
+          location == other.location &&
+          recurrenceRule == other.recurrenceRule &&
+          reminderMinutes == other.reminderMinutes &&
+          categories == other.categories &&
+          namePrefix == other.namePrefix &&
+          givenName == other.givenName &&
+          middleName == other.middleName &&
+          familyName == other.familyName &&
+          nameSuffix == other.nameSuffix &&
+          emails == other.emails &&
+          phones == other.phones &&
+          addresses == other.addresses &&
+          organization == other.organization &&
+          jobTitle == other.jobTitle &&
+          birthday == other.birthday &&
+          url == other.url &&
+          favorite == other.favorite;
+}
+
 class MobilePimItem {
   final String spaceId;
   final String resourceId;
@@ -166,10 +325,29 @@ class MobilePimItem {
   final String resourceKind;
   final String title;
   final bool completed;
-  final String? email;
-  final String? phone;
-  final String? startsAt;
-  final String? endsAt;
+  final String? completedAt;
+  final String? notes;
+  final MobilePimTemporal? startsAt;
+  final MobilePimTemporal? endsAt;
+  final MobilePimTemporal? dueAt;
+  final PlatformInt64 priority;
+  final String? location;
+  final String? recurrenceRule;
+  final PlatformInt64? reminderMinutes;
+  final List<String> categories;
+  final String namePrefix;
+  final String givenName;
+  final String middleName;
+  final String familyName;
+  final String nameSuffix;
+  final List<MobileLabeledValue> emails;
+  final List<MobileLabeledValue> phones;
+  final List<MobilePostalAddress> addresses;
+  final String? organization;
+  final String? jobTitle;
+  final String? birthday;
+  final String? url;
+  final bool favorite;
   final bool conflict;
 
   const MobilePimItem({
@@ -180,10 +358,29 @@ class MobilePimItem {
     required this.resourceKind,
     required this.title,
     required this.completed,
-    this.email,
-    this.phone,
+    this.completedAt,
+    this.notes,
     this.startsAt,
     this.endsAt,
+    this.dueAt,
+    required this.priority,
+    this.location,
+    this.recurrenceRule,
+    this.reminderMinutes,
+    required this.categories,
+    required this.namePrefix,
+    required this.givenName,
+    required this.middleName,
+    required this.familyName,
+    required this.nameSuffix,
+    required this.emails,
+    required this.phones,
+    required this.addresses,
+    this.organization,
+    this.jobTitle,
+    this.birthday,
+    this.url,
+    required this.favorite,
     required this.conflict,
   });
 
@@ -196,10 +393,29 @@ class MobilePimItem {
       resourceKind.hashCode ^
       title.hashCode ^
       completed.hashCode ^
-      email.hashCode ^
-      phone.hashCode ^
+      completedAt.hashCode ^
+      notes.hashCode ^
       startsAt.hashCode ^
       endsAt.hashCode ^
+      dueAt.hashCode ^
+      priority.hashCode ^
+      location.hashCode ^
+      recurrenceRule.hashCode ^
+      reminderMinutes.hashCode ^
+      categories.hashCode ^
+      namePrefix.hashCode ^
+      givenName.hashCode ^
+      middleName.hashCode ^
+      familyName.hashCode ^
+      nameSuffix.hashCode ^
+      emails.hashCode ^
+      phones.hashCode ^
+      addresses.hashCode ^
+      organization.hashCode ^
+      jobTitle.hashCode ^
+      birthday.hashCode ^
+      url.hashCode ^
+      favorite.hashCode ^
       conflict.hashCode;
 
   @override
@@ -214,11 +430,116 @@ class MobilePimItem {
           resourceKind == other.resourceKind &&
           title == other.title &&
           completed == other.completed &&
-          email == other.email &&
-          phone == other.phone &&
+          completedAt == other.completedAt &&
+          notes == other.notes &&
           startsAt == other.startsAt &&
           endsAt == other.endsAt &&
+          dueAt == other.dueAt &&
+          priority == other.priority &&
+          location == other.location &&
+          recurrenceRule == other.recurrenceRule &&
+          reminderMinutes == other.reminderMinutes &&
+          categories == other.categories &&
+          namePrefix == other.namePrefix &&
+          givenName == other.givenName &&
+          middleName == other.middleName &&
+          familyName == other.familyName &&
+          nameSuffix == other.nameSuffix &&
+          emails == other.emails &&
+          phones == other.phones &&
+          addresses == other.addresses &&
+          organization == other.organization &&
+          jobTitle == other.jobTitle &&
+          birthday == other.birthday &&
+          url == other.url &&
+          favorite == other.favorite &&
           conflict == other.conflict;
+}
+
+class MobilePimTemporal {
+  final String kind;
+  final String? date;
+  final String? utc;
+  final String? local;
+  final String? timezone;
+
+  const MobilePimTemporal({
+    required this.kind,
+    this.date,
+    this.utc,
+    this.local,
+    this.timezone,
+  });
+
+  @override
+  int get hashCode =>
+      kind.hashCode ^
+      date.hashCode ^
+      utc.hashCode ^
+      local.hashCode ^
+      timezone.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MobilePimTemporal &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          date == other.date &&
+          utc == other.utc &&
+          local == other.local &&
+          timezone == other.timezone;
+}
+
+class MobilePostalAddress {
+  final String label;
+  final String? rawHead;
+  final String poBox;
+  final String extended;
+  final String street;
+  final String locality;
+  final String region;
+  final String postalCode;
+  final String country;
+
+  const MobilePostalAddress({
+    required this.label,
+    this.rawHead,
+    required this.poBox,
+    required this.extended,
+    required this.street,
+    required this.locality,
+    required this.region,
+    required this.postalCode,
+    required this.country,
+  });
+
+  @override
+  int get hashCode =>
+      label.hashCode ^
+      rawHead.hashCode ^
+      poBox.hashCode ^
+      extended.hashCode ^
+      street.hashCode ^
+      locality.hashCode ^
+      region.hashCode ^
+      postalCode.hashCode ^
+      country.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MobilePostalAddress &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          rawHead == other.rawHead &&
+          poBox == other.poBox &&
+          extended == other.extended &&
+          street == other.street &&
+          locality == other.locality &&
+          region == other.region &&
+          postalCode == other.postalCode &&
+          country == other.country;
 }
 
 class MobileProvisionResult {

@@ -1,7 +1,7 @@
 # Kamori MVP specification
 
 Status: implementation-aligned contract
-Last updated: 2026-08-23
+Last updated: 2026-08-28
 
 This file describes the product implemented by this repository and the exact
 boundary of the first hosted beta. Architecture rationale lives in `docs/adr`;
@@ -140,8 +140,9 @@ reusing a `client_op_id` for different bytes is rejected.
 
 `space_seq` is a catch-up cursor, not CRDT causality or a client timestamp.
 The server cannot parse operation plaintext. Current clients emit versioned
-field-oriented PIM upsert/delete payloads. PIM operation v1 has zero or one
-semantic parent. Snapshot v2 is a signed, encrypted full per-stream checkpoint
+field-oriented PIM upsert/delete payloads. The stable operation envelope type
+has zero or one semantic parent; its current field schema is version 2, while
+schema-1 payloads remain readable. Snapshot v2 is a signed, encrypted full per-stream checkpoint
 that preserves every explicit conflict branch. Epoch rotation requires one for
 every materialized stream before old keys are superseded; an authenticated
 stream that could not be decoded must instead be listed as quarantined so it
@@ -177,20 +178,37 @@ without granting a newly invited member historical access.
 
 ## 7. Current PIM scope
 
-The first-party UI supports the practical core fields currently implemented:
+Web and mobile expose separate task, calendar, and contact workflows rather
+than a raw resource list:
 
-- calendar event title, start, and end;
-- task title and completion;
-- contact name, email, and phone;
-- creation, editing, deletion, offline queueing, sharing, and conflict-copy
-  visibility.
+- tasks have open/completed views, due date and time, completion time,
+  priority, notes, one relative DAV alarm, categories, search, and
+  completion/reopen actions;
+- events have month/week/agenda presentation, all-day or timezone-aware start
+  and end values, location, notes, one relative DAV/system alarm, recurrence, and
+  categories;
+- contacts have display and structured names, multiple labeled email addresses,
+  phone numbers, and postal addresses, organization, job title, birthday,
+  website, notes, categories, favorite state, search, and deterministic sorting;
+- all three support creation, editing, deletion, offline queueing, sharing, and
+  visible conflict copies.
 
-The common Rust projection preserves existing unedited iCalendar/vCard fields
-and unknown `X-*` properties during first-party partial edits. DAV imports keep
-the original full resource bytes. Rich recurrence editing, attendee workflows,
-alarms, contact photos/groups, semantic search, import/export UX, and a polished
-conflict resolver are post-MVP unless separately implemented and tested before
-release.
+The version-2 PIM field schema has typed date, UTC-instant, and zoned local-time
+records plus multi-value records. A shared Rust parser/materializer is the
+canonical iCalendar/vCard boundary used by native clients and the DAV bridge.
+First-party partial edits replace only fields they explicitly manage, preserve
+unknown properties and recurrence exceptions, and replace only Kamori-marked
+alarms. Imported custom RRULE values, labels, priorities, and reminder offsets
+remain selectable and are not normalized away merely by opening the editor.
+
+The current event UI authors common daily/weekly/monthly/yearly rules and one
+relative alarm for compatible DAV clients or an enabled mobile system
+projection. First-party background notification delivery is not implemented.
+Task repetition is preserved when imported but is not
+authored until occurrence/exception completion semantics are implemented.
+Attendees and scheduling, an advanced recurrence/exception editor, multiple
+alarms, contact photos/groups, semantic search, bulk import/export UX, and a
+polished conflict resolver remain post-MVP.
 
 ## 8. Desktop DAV bridge
 
@@ -210,9 +228,16 @@ matrix. See `docs/whitepapers/desktop-dav-bridge.md`.
 
 Android and iOS are first-party Flutter clients backed by the real Rust core in
 release builds. System calendar/contact projection is off by default, asks for
-platform permission, and is one-way from Kamori in this MVP. Tasks remain
+platform permission, and is one-way from Kamori in this MVP. Calendar projection
+includes time/all-day state, location, description, recurrence, and reminder.
+Contact projection includes structured names, labeled contact methods, postal
+addresses, organization/title, website, and birthday; notes are omitted on iOS
+because that field requires a separately approved entitlement. Tasks remain
 inside Kamori. Disabling projection lets the user keep or remove projected
 copies. Plaintext written to a system provider leaves Kamori's E2EE boundary.
+An integration choice is persisted before plaintext projection begins; after
+an interrupted projection the collection remains visibly enabled and is
+reconciled on the next sync instead of being reported as disabled.
 
 See `docs/whitepapers/mobile-system-integration.md` for the user-facing privacy
 and behavior contract.

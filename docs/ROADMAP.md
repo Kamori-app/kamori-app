@@ -16,6 +16,15 @@ Exit criteria:
 - reproducible platform artifacts and strict GitHub Actions verification;
 - honest EN/RU product, user, security, and privacy documentation.
 
+Implemented PIM baseline for this milestone:
+
+- versioned field schema with typed temporal and multi-value records;
+- shared lossless iCalendar/vCard parsing, materialization, and DAV projection;
+- rich web/mobile task, calendar, and contact editors, completed-task views,
+  calendar views, contact search/sort, event recurrence, reminders, and categories;
+- one-way opt-in projection of rich calendar/contact fields into Android/iOS
+  system stores.
+
 ## Post-MVP 1: hardened self-hosting
 
 Entry: hosted MVP protocol is stable.
@@ -70,6 +79,12 @@ and interoperable conformance suite.
 
 ## Explicitly deferred
 
+- advanced recurrence and exception authoring, including recurring-task
+  occurrence completion semantics, attendees/iMIP, and multiple alarms;
+- first-party mobile local notifications and a privacy-reviewed web push model;
+- contact photos/groups, semantic search, bulk import/export UX, and a
+  field-level conflict resolver;
+- bidirectional Android/iOS system-store import and its conflict UX;
 - outbound CalDAV scheduling/iMIP;
 - direct Google/iCloud OAuth migration;
 - full edit-history UI for shared collections;

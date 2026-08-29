@@ -38,7 +38,13 @@ Local DAV runtime and local SQLite are out of scope for web.
 The authenticated app shell stays mounted while its focused views change:
 
 - `/app` — Today overview;
-- `/app/tasks`, `/app/calendar`, `/app/contacts` — first-party PIM views;
+- `/app/tasks` — open/completed tasks with due time, priority, reminders,
+  categories, search, completion, and reopen actions;
+- `/app/calendar` — month/week/agenda calendar with all-day or timed events,
+  location, notes, reminders, recurrence, and categories;
+- `/app/contacts` — searchable/sortable contacts with structured names,
+  multiple labeled contact methods and addresses, organization, birthday,
+  website, notes, categories, and favorites;
 - `/app/spaces` — encrypted space creation, trash, and access entry points;
 - `/app/sharing?space=<id>` — invite and membership controls for one space;
 - `/app/settings/{general,security,devices,privacy,account,advanced}` — routed
@@ -147,6 +153,8 @@ Server-side token TTL policy (cloud-server env):
   The final passkey may be deleted because OPAQUE password sign-in remains an
   independent authentication path. Deleting a passkey does not revoke existing
   sessions.
+- The Devices view lists only unrevoked, unexpired refresh sessions; revoked
+  history is intentionally omitted from the end-user surface.
 
 ## Account Recovery UX
 
@@ -184,6 +192,8 @@ Layers:
 - Same-tab and Web Locks API serialization around PIM commits, sync, and key
   rotation; IndexedDB assigns a monotonic queue order that retries preserve.
 - PIM operation/materialization helpers in `src/lib/pim.ts`.
+  - decodes legacy schema 1 and current schema 2, extracts typed rich fields
+    from projections, and preserves imported custom values in editors.
 - OPAQUE wasm wrapper in `src/lib/opaqueClient.ts`.
   - includes local `generate_qr_svg(payload)` helper used by TOTP setup UI.
 - Generated Rust wasm-bindgen artifacts in `src/lib/wasm/crypto-core-lib/`.

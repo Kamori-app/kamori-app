@@ -247,32 +247,32 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   Future<List<PimItem>> listPimItems() async => const <PimItem>[];
 
   @override
-  Future<PimItem> upsertPimItem({
-    required String spaceId,
-    String? resourceId,
-    String? projectionId,
-    String? headOperationId,
-    required PimItemKind kind,
-    required String title,
-    bool completed = false,
-    String? email,
-    String? phone,
-    String? startsAt,
-    String? endsAt,
-  }) async {
-    final logicalId = resourceId ?? '00000000-0000-4000-8000-000000000020';
+  Future<PimItem> upsertPimItem({required PimDraft draft}) async {
+    final logicalId =
+        draft.resourceId ?? '00000000-0000-4000-8000-000000000020';
     return PimItem(
-      spaceId: spaceId,
+      spaceId: draft.spaceId,
       resourceId: logicalId,
-      projectionId: projectionId ?? '$logicalId.ics',
+      projectionId: draft.projectionId ?? '$logicalId.ics',
       headOperationId: '00000000-0000-4000-8000-000000000021',
-      kind: kind,
-      title: title,
-      completed: completed,
-      email: email,
-      phone: phone,
-      startsAt: startsAt,
-      endsAt: endsAt,
+      kind: draft.kind,
+      title: draft.title,
+      completed: draft.completed,
+      completedAt: draft.completedAt,
+      notes: draft.notes,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      dueAt: draft.dueAt,
+      priority: draft.priority,
+      location: draft.location,
+      recurrenceRule: draft.recurrenceRule,
+      reminderMinutes: draft.reminderMinutes,
+      categories: draft.categories,
+      emails: draft.emails,
+      phones: draft.phones,
+      organization: draft.organization,
+      jobTitle: draft.jobTitle,
+      favorite: draft.favorite,
     );
   }
 
@@ -401,7 +401,8 @@ class _FakeRefreshTokenStorage implements RefreshTokenStorage {
   }
 
   @override
-  Future<RefreshCredential?> readCredential({required String cloudBaseUrl}) async {
+  Future<RefreshCredential?> readCredential(
+      {required String cloudBaseUrl}) async {
     return _tokens[cloudBaseUrl];
   }
 
@@ -814,11 +815,11 @@ void main() {
       await controller.createCollection('Personal');
       final spaceId =
           container.read(bridgeControllerProvider).collections.first.id;
-      await controller.savePimItem(
+      await controller.savePimItem(PimDraft(
         spaceId: spaceId,
         kind: PimItemKind.task,
         title: 'Ship MVP',
-      );
+      ));
 
       var state = container.read(bridgeControllerProvider);
       expect(state.pimItems, hasLength(1));
@@ -920,11 +921,11 @@ void main() {
       await controller.loginWithPassword(username: 'alice', password: 'secret');
       await controller.redeemInviteCode('ABCD-EFGH-JKLM-NPQR');
       final state = container.read(bridgeControllerProvider);
-      await controller.savePimItem(
+      await controller.savePimItem(PimDraft(
         spaceId: state.collections.single.id,
         kind: PimItemKind.task,
         title: 'Should not save',
-      );
+      ));
 
       final updated = container.read(bridgeControllerProvider);
       expect(updated.pimItems, isEmpty);

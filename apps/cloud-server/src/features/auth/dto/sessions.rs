@@ -74,7 +74,6 @@ pub struct SessionSummary {
     pub created_at_unix_ms: i64,
     pub last_used_at_unix_ms: Option<i64>,
     pub expires_at_unix_ms: i64,
-    pub revoked_at_unix_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

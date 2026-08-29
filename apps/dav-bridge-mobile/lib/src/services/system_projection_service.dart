@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:device_calendar_plus/device_calendar_plus.dart';
+import 'package:device_calendar_plus/device_calendar_plus.dart' hide Event;
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -97,10 +98,19 @@ class NativeSystemProjectionService implements SystemProjectionService {
     if (status != CalendarPermissionStatus.granted) {
       throw StateError('Calendar permission was not granted.');
     }
+    for (final item in items.where(
+      (item) =>
+          item.spaceId == collectionId &&
+          item.kind == PimItemKind.calendarEvent &&
+          !item.conflict &&
+          item.recurrenceRule?.isNotEmpty == true,
+    )) {
+      _parseSystemRecurrence(item);
+    }
     final enabled = await _readSet(_calendarCollectionsKey);
     enabled.add(collectionId);
-    await _projectCalendar(items, enabled);
     await _writeSet(_calendarCollectionsKey, enabled);
+    await _projectCalendar(items, {collectionId});
   }
 
   @override
@@ -117,8 +127,8 @@ class NativeSystemProjectionService implements SystemProjectionService {
     }
     final enabled = await _readSet(_contactsCollectionsKey);
     enabled.add(collectionId);
-    await _projectContacts(items, enabled);
     await _writeSet(_contactsCollectionsKey, enabled);
+    await _projectContacts(items, {collectionId});
   }
 
   @override
@@ -194,6 +204,11 @@ class NativeSystemProjectionService implements SystemProjectionService {
               enabledCollectionIds.contains(item.spaceId),
         )
         .toList(growable: false);
+    for (final item in events) {
+      final rule = item.recurrenceRule;
+      if (rule == null || rule.isEmpty) continue;
+      _parseSystemRecurrence(item);
+    }
     final activeKeys = events.map(_itemKey).toSet();
 
     final managedKeys = mapping.keys
@@ -213,8 +228,28 @@ class NativeSystemProjectionService implements SystemProjectionService {
     }
 
     for (final item in events) {
-      final start = _parseCompactUtc(item.startsAt, field: 'start');
-      final end = _parseCompactUtc(item.endsAt, field: 'end');
+      final start = item.startsAt?.toDateTime();
+      final explicitEnd = item.endsAt?.toDateTime();
+      final isAllDay = item.startsAt?.isAllDay ?? false;
+      final end = explicitEnd ??
+          (isAllDay
+              ? start?.add(const Duration(days: 1))
+              : start?.add(const Duration(milliseconds: 1)));
+      if (start == null || end == null || end.isBefore(start)) {
+        continue;
+      }
+      final timezone = isAllDay ? null : item.startsAt?.timezone ?? 'UTC';
+      final description = [
+        _descriptionPrefix,
+        if (item.notes?.trim().isNotEmpty == true) item.notes!.trim(),
+      ].join('\n\n');
+      RecurrenceRule? recurrenceRule;
+      if (item.recurrenceRule?.isNotEmpty == true) {
+        recurrenceRule = _parseSystemRecurrence(item);
+      }
+      final reminders = item.reminderMinutes == null
+          ? null
+          : [Duration(minutes: item.reminderMinutes!)];
       final key = _itemKey(item);
       final existingId = mapping[key];
       if (existingId == null) {
@@ -223,29 +258,64 @@ class NativeSystemProjectionService implements SystemProjectionService {
           title: item.title,
           startDate: start,
           endDate: end,
-          description: _descriptionPrefix,
-          timeZone: 'UTC',
+          isAllDay: isAllDay,
+          description: description,
+          location: item.location,
+          timeZone: timezone,
+          recurrenceRule: recurrenceRule,
+          reminders: reminders,
         );
         await _writeMap(_eventMapKey, mapping);
       } else {
         final existing = await _calendar.getEvent(existingId);
         if (existing != null) {
-          await _calendar.updateEvent(
-            eventId: existingId,
-            title: item.title,
-            startDate: start,
-            endDate: end,
-            description: Patch.set(_descriptionPrefix),
-            timeZone: 'UTC',
-          );
+          final desiredRecurrence = item.recurrenceRule;
+          final storedRecurrence = existing.recurrenceRule?.rruleString;
+          if (_normalizeRrule(desiredRecurrence) !=
+              _normalizeRrule(storedRecurrence)) {
+            await _calendar.deleteEvent(eventId: existingId);
+            mapping[key] = await _calendar.createEvent(
+              calendarId: calendarId,
+              title: item.title,
+              startDate: start,
+              endDate: end,
+              isAllDay: isAllDay,
+              description: description,
+              location: item.location,
+              timeZone: timezone,
+              recurrenceRule: recurrenceRule,
+              reminders: reminders,
+            );
+            await _writeMap(_eventMapKey, mapping);
+          } else {
+            await _calendar.updateEvent(
+              eventId: existingId,
+              title: item.title,
+              startDate: start,
+              endDate: end,
+              isAllDay: isAllDay,
+              description: Patch.set(description),
+              location: item.location == null
+                  ? const Patch.clear()
+                  : Patch.set(item.location!),
+              timeZone: timezone,
+              reminders: reminders == null
+                  ? const Patch.clear()
+                  : Patch.set(reminders),
+            );
+          }
         } else {
           mapping[key] = await _calendar.createEvent(
             calendarId: calendarId,
             title: item.title,
             startDate: start,
             endDate: end,
-            description: _descriptionPrefix,
-            timeZone: 'UTC',
+            isAllDay: isAllDay,
+            description: description,
+            location: item.location,
+            timeZone: timezone,
+            recurrenceRule: recurrenceRule,
+            reminders: reminders,
           );
           await _writeMap(_eventMapKey, mapping);
         }
@@ -288,18 +358,73 @@ class NativeSystemProjectionService implements SystemProjectionService {
     for (final item in contacts) {
       final key = _itemKey(item);
       final existingId = mapping[key];
-      final phones = item.phone?.trim().isNotEmpty == true
-          ? <Phone>[Phone(number: item.phone!.trim())]
-          : const <Phone>[];
-      final emails = item.email?.trim().isNotEmpty == true
-          ? <Email>[Email(address: item.email!.trim())]
-          : const <Email>[];
+      final phones = item.phones
+          .where((value) => value.value.trim().isNotEmpty)
+          .map((value) => Phone(
+                number: value.value.trim(),
+                label: _phoneLabel(value.label),
+              ))
+          .toList(growable: false);
+      final emails = item.emails
+          .where((value) => value.value.trim().isNotEmpty)
+          .map((value) => Email(
+                address: value.value.trim(),
+                label: _emailLabel(value.label),
+              ))
+          .toList(growable: false);
+      final addresses = item.addresses
+          .map((value) => Address(
+                street: value.street,
+                city: value.locality,
+                state: value.region,
+                postalCode: value.postalCode,
+                country: value.country,
+                label: _addressLabel(value.label),
+              ))
+          .toList(growable: false);
+      final organizations = item.organization?.trim().isNotEmpty == true ||
+              item.jobTitle?.trim().isNotEmpty == true
+          ? <Organization>[
+              Organization(name: item.organization, jobTitle: item.jobTitle),
+            ]
+          : const <Organization>[];
+      final websites = item.url?.trim().isNotEmpty == true
+          ? <Website>[Website(url: item.url!.trim())]
+          : const <Website>[];
+      // iOS contact notes require a separately approved entitlement. Keep the
+      // encrypted note in Kamori and project it only where the OS permits it.
+      final notes = !Platform.isIOS && item.notes?.trim().isNotEmpty == true
+          ? <Note>[Note(note: item.notes!.trim())]
+          : const <Note>[];
+      final birthday = DateTime.tryParse(item.birthday ?? '');
+      final contactEvents = birthday == null
+          ? const <Event>[]
+          : <Event>[
+              Event(
+                year: birthday.year,
+                month: birthday.month,
+                day: birthday.day,
+                label: const Label(EventLabel.birthday),
+              ),
+            ];
+      final name = Name(
+        first: item.givenName.isEmpty ? item.title : item.givenName,
+        middle: item.middleName.isEmpty ? null : item.middleName,
+        last: item.familyName.isEmpty ? null : item.familyName,
+        prefix: item.namePrefix.isEmpty ? null : item.namePrefix,
+        suffix: item.nameSuffix.isEmpty ? null : item.nameSuffix,
+      );
       if (existingId == null) {
         mapping[key] = await FlutterContacts.create(
           Contact(
-            name: Name(first: item.title),
+            name: name,
             phones: phones,
             emails: emails,
+            addresses: addresses,
+            organizations: organizations,
+            websites: websites,
+            events: contactEvents,
+            notes: notes,
           ),
         );
         await _writeMap(_contactMapKey, mapping);
@@ -312,23 +437,38 @@ class NativeSystemProjectionService implements SystemProjectionService {
           ContactProperty.name,
           ContactProperty.phone,
           ContactProperty.email,
+          ContactProperty.address,
+          ContactProperty.organization,
+          ContactProperty.website,
+          ContactProperty.event,
+          ContactProperty.note,
         },
       );
       if (existing == null) {
         mapping[key] = await FlutterContacts.create(
           Contact(
-            name: Name(first: item.title),
+            name: name,
             phones: phones,
             emails: emails,
+            addresses: addresses,
+            organizations: organizations,
+            websites: websites,
+            events: contactEvents,
+            notes: notes,
           ),
         );
         await _writeMap(_contactMapKey, mapping);
       } else {
         await FlutterContacts.update(
           existing.copyWith(
-            name: Name(first: item.title),
+            name: name,
             phones: phones,
             emails: emails,
+            addresses: addresses,
+            organizations: organizations,
+            websites: websites,
+            events: contactEvents,
+            notes: notes,
           ),
         );
       }
@@ -364,34 +504,53 @@ class NativeSystemProjectionService implements SystemProjectionService {
     return 'Kamori ${scope.substring(0, 8).toUpperCase()}';
   }
 
-  DateTime _parseCompactUtc(String? value, {required String field}) {
-    final normalized = value?.trim() ?? '';
-    final match = RegExp(
-      r'^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$',
-    ).firstMatch(normalized);
-    if (match == null) {
-      throw FormatException('Invalid calendar $field timestamp.');
-    }
-    final parsed = DateTime.utc(
-      int.parse(match.group(1)!),
-      int.parse(match.group(2)!),
-      int.parse(match.group(3)!),
-      int.parse(match.group(4)!),
-      int.parse(match.group(5)!),
-      int.parse(match.group(6)!),
-    );
-    if (parsed.year != int.parse(match.group(1)!) ||
-        parsed.month != int.parse(match.group(2)!) ||
-        parsed.day != int.parse(match.group(3)!) ||
-        parsed.hour != int.parse(match.group(4)!) ||
-        parsed.minute != int.parse(match.group(5)!) ||
-        parsed.second != int.parse(match.group(6)!)) {
-      throw FormatException('Invalid calendar $field timestamp.');
+  String _itemKey(PimItem item) => '${item.spaceId}/${item.projectionId}';
+
+  RecurrenceRule? _parseSystemRecurrence(PimItem item) {
+    final value = item.recurrenceRule;
+    if (value == null || value.isEmpty) return null;
+    final parsed = RecurrenceRule.fromRruleString(value);
+    if (parsed == null) {
+      throw FormatException(
+        'Cannot project “${item.title}”: the recurrence rule is not supported by this device.',
+      );
     }
     return parsed;
   }
 
-  String _itemKey(PimItem item) => '${item.spaceId}/${item.projectionId}';
+  String? _normalizeRrule(String? value) {
+    if (value == null) return null;
+    final trimmed = value.trim();
+    return trimmed.toUpperCase().startsWith('RRULE:')
+        ? trimmed.substring(6)
+        : trimmed;
+  }
+
+  Label<EmailLabel> _emailLabel(String value) => switch (value.toLowerCase()) {
+        'home' => const Label(EmailLabel.home),
+        'work' => const Label(EmailLabel.work),
+        'mobile' => const Label(EmailLabel.mobile),
+        'school' => const Label(EmailLabel.school),
+        'other' || '' => const Label(EmailLabel.other),
+        _ => Label(EmailLabel.custom, value),
+      };
+
+  Label<PhoneLabel> _phoneLabel(String value) => switch (value.toLowerCase()) {
+        'home' => const Label(PhoneLabel.home),
+        'work' => const Label(PhoneLabel.work),
+        'mobile' || 'cell' => const Label(PhoneLabel.mobile),
+        'fax' => const Label(PhoneLabel.workFax),
+        'other' || '' => const Label(PhoneLabel.other),
+        _ => Label(PhoneLabel.custom, value),
+      };
+
+  Label<AddressLabel> _addressLabel(String value) =>
+      switch (value.toLowerCase()) {
+        'home' => const Label(AddressLabel.home),
+        'work' => const Label(AddressLabel.work),
+        'other' || '' => const Label(AddressLabel.other),
+        _ => Label(AddressLabel.custom, value),
+      };
 
   Future<Set<String>> _readSet(String key) async {
     final encoded = await _read(key);

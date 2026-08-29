@@ -132,6 +132,7 @@
     let accountDeleteConfirmation = "";
     let formNotice = "";
     let previousSection = section;
+    let securityPanel: "passkeys" | "totp" | "recovery" | "password" = "passkeys";
 
     const setNotice = (notice: string) => {
         formNotice = notice;
@@ -1645,7 +1646,7 @@
                                     >{t("Approve encrypted access")}</Button>
                                     {#if entry.device.device_id !== getActiveWebDevice().deviceId}
                                         <Button
-                                            variant="ghost"
+                                            variant="danger"
                                             on:click={() => revokeDevice(entry)}
                                             disabled={totpBusyAction === `revoke-device-${entry.device.device_id}`}
                                         >{t("Revoke device")}</Button>
@@ -1654,7 +1655,7 @@
                             {:else if entry.device.device_id !== getActiveWebDevice().deviceId}
                                 <div class="mt-2">
                                     <Button
-                                        variant="ghost"
+                                        variant="danger"
                                         on:click={() => revokeDevice(entry)}
                                         disabled={totpBusyAction === `revoke-device-${entry.device.device_id}`}
                                     >{t("Revoke device")}</Button>
@@ -1701,23 +1702,17 @@
                                 {t("Last used")}
                                 {formatSessionTime(session.last_used_at_unix_ms)}
                             </p>
-                            {#if session.revoked_at_unix_ms}
-                                <p class="mt-1 text-xs text-coral">
-                                    {localized("Revoked", "Отозвана")} {formatSessionTime(session.revoked_at_unix_ms)}
-                                </p>
-                            {:else}
-                                <div class="mt-2">
-                                    <Button
-                                        variant="danger"
-                                        on:click={() =>
-                                            revokeSession(
-                                                session.refresh_token_id,
-                                            )}
-                                        disabled={totpBusyAction ===
-                                            `session-${session.refresh_token_id}`}
-                                    >{t("Revoke")}</Button>
-                                </div>
-                            {/if}
+                            <div class="mt-2">
+                                <Button
+                                    variant="danger"
+                                    on:click={() =>
+                                        revokeSession(
+                                            session.refresh_token_id,
+                                        )}
+                                    disabled={totpBusyAction ===
+                                        `session-${session.refresh_token_id}`}
+                                >{t("Revoke")}</Button>
+                            </div>
                         </div>
                     {/each}
                 </div>
@@ -1726,6 +1721,25 @@
         {/if}
 
         {#if section === "security"}
+        <div class="grid gap-2 sm:grid-cols-2">
+            {#each [
+                ["passkeys", localized("Passkeys", "Passkey"), localized(`${passkeys.length} registered`, `Добавлено: ${passkeys.length}`)],
+                ["totp", "TOTP", totpEnabled ? localized("Enabled", "Включено") : localized("Disabled", "Отключено")],
+                ["recovery", localized("Data recovery", "Восстановление данных"), localized("24-word recovery kit", "Набор из 24 слов")],
+                ["password", localized("Password", "Пароль"), localized("Change account password", "Изменить пароль аккаунта")],
+            ] as panel}
+                <button
+                    type="button"
+                    class={`border p-3 text-left transition hover:border-moss/40 hover:bg-white ${securityPanel === panel[0] ? "border-moss bg-mint/10 ring-1 ring-moss/20" : "border-slate/15 bg-white/70"}`}
+                    on:click={() => (securityPanel = panel[0] as typeof securityPanel)}
+                >
+                    <span class="block text-sm font-semibold text-slate">{panel[1]}</span>
+                    <span class="mt-1 block text-xs text-slate/60">{panel[2]}</span>
+                </button>
+            {/each}
+        </div>
+
+        {#if securityPanel === "passkeys" || securityPanel === "totp"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -1769,7 +1783,9 @@
                 </p>
             {/if}
         </div>
+        {/if}
 
+        {#if securityPanel === "recovery"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -1804,7 +1820,9 @@
                 <p class="mt-2 text-xs text-slate/70">{t("Sign in to reveal it.")}</p>
             {/if}
         </div>
+        {/if}
 
+        {#if securityPanel === "passkeys"}
         <div class="border-t border-slate/15 pt-3">
             <div class="flex items-center justify-between gap-2">
                 <p
@@ -1892,7 +1910,7 @@
                                 </p>
                                 <div class="flex flex-wrap gap-2">
                                     <Button
-                                        variant="ghost"
+                                        variant="secondary"
                                         on:click={() => renamePasskey(entry)}
                                         disabled={Boolean(totpBusyAction)}
                                     >
@@ -1922,7 +1940,9 @@
                 </p>
             {/if}
         </div>
+        {/if}
 
+        {#if securityPanel === "totp"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -2127,7 +2147,9 @@
                 {/if}
             {/if}
         </div>
+        {/if}
 
+        {#if securityPanel === "password"}
         <div class="border-t border-slate/15 pt-3">
             <p
                 class="text-xs font-semibold uppercase tracking-wide text-slate/70"
@@ -2182,6 +2204,7 @@
                 </div>
             {/if}
         </div>
+        {/if}
         {/if}
 
         {#if section === "account"}

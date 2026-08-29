@@ -523,6 +523,70 @@ export const queueOperationEnvelope = async (
   }
 };
 
+/** Atomically persists one local operation and the materialized state it produced. */
+export const commitLocalPimOperation = async (
+  envelope: OperationEnvelopeV1,
+  items: MaterializedPimItem[],
+  operations: MaterializedOperationState[],
+  cursors: Record<string, number>,
+): Promise<void> => {
+  const masterKey = requireMasterKey();
+  const state: MaterializedPimState = { version: 5, items, operations, cursors };
+  const encryptedState = await encryptVaultBytes(masterKey, encode(state));
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [OUTBOX_STORE, META_STORE, PIM_STATE_STORE],
+        "readwrite",
+      );
+      const outbox = transaction.objectStore(OUTBOX_STORE);
+      const meta = transaction.objectStore(META_STORE);
+      const counterKey = `outbox-order:${activeAccountScope}`;
+      const outboxKey = `${activeAccountScope}:${envelope.space_id}:${envelope.client_op_id}`;
+      const counterRequest = meta.get(counterKey);
+      counterRequest.onsuccess = () => {
+        const current = counterRequest.result;
+        const existingRequest = outbox.get(outboxKey);
+        existingRequest.onsuccess = () => {
+          const existing = existingRequest.result as QueuedEnvelopeRecord | undefined;
+          const existingOrder = existing?.queueOrder;
+          const queueOrder =
+            typeof existingOrder === "number" &&
+            Number.isSafeInteger(existingOrder) &&
+            existingOrder > 0
+              ? existingOrder
+              : typeof current === "number" &&
+                  Number.isSafeInteger(current) &&
+                  current >= 0
+                ? current + 1
+                : 1;
+          if (!Number.isSafeInteger(queueOrder)) {
+            transaction.abort();
+            return;
+          }
+          if (queueOrder !== existingOrder) meta.put(queueOrder, counterKey);
+          outbox.put(
+            { envelope, queueOrder } satisfies QueuedEnvelopeRecord,
+            outboxKey,
+          );
+          outbox.delete(`${activeAccountScope}:${envelope.client_op_id}`);
+          transaction.objectStore(PIM_STATE_STORE).put(encryptedState, activeAccountScope);
+        };
+        existingRequest.onerror = () => transaction.abort();
+      };
+      counterRequest.onerror = () => transaction.abort();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Local PIM commit failed."));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Local PIM commit aborted."));
+    });
+  } finally {
+    database.close();
+  }
+};
+
 export const listQueuedOperationEnvelopes = async (): Promise<OperationEnvelopeV1[]> => {
   requireMasterKey();
   const database = await openDatabase();

@@ -4,10 +4,10 @@ Status: accepted
 
 ## Decision
 
-Android integrates through platform accounts, Calendar/Contacts providers, sync
-adapters, and scheduled work. iOS integrates through EventKit/Contacts and a
-documented container/profile flow where necessary. Both integrations are
-explicitly enabled per collection.
+Android integrates through Calendar/Contacts provider APIs and scheduled
+background work. iOS integrates through EventKit/Contacts. The application
+maintains stable per-account mappings for objects it created; both integrations
+are one-way from Kamori and explicitly enabled per security space.
 
 Mobile applications do not run a localhost CalDAV/CardDAV server.
 

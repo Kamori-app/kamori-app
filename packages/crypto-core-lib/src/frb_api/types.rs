@@ -113,6 +113,69 @@ pub struct MobileCollection {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MobilePimTemporal {
+    pub kind: String,
+    pub date: Option<String>,
+    pub utc: Option<String>,
+    pub local: Option<String>,
+    pub timezone: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MobileLabeledValue {
+    pub label: String,
+    pub value: String,
+    pub raw_head: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MobilePostalAddress {
+    pub label: String,
+    pub raw_head: Option<String>,
+    pub po_box: String,
+    pub extended: String,
+    pub street: String,
+    pub locality: String,
+    pub region: String,
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MobilePimDraft {
+    pub space_id: String,
+    pub resource_id: Option<String>,
+    pub projection_id: Option<String>,
+    pub head_operation_id: Option<String>,
+    pub resource_kind: String,
+    pub title: String,
+    pub completed: bool,
+    pub completed_at: Option<String>,
+    pub notes: Option<String>,
+    pub starts_at: Option<MobilePimTemporal>,
+    pub ends_at: Option<MobilePimTemporal>,
+    pub due_at: Option<MobilePimTemporal>,
+    pub priority: i64,
+    pub location: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub reminder_minutes: Option<i64>,
+    pub categories: Vec<String>,
+    pub name_prefix: String,
+    pub given_name: String,
+    pub middle_name: String,
+    pub family_name: String,
+    pub name_suffix: String,
+    pub emails: Vec<MobileLabeledValue>,
+    pub phones: Vec<MobileLabeledValue>,
+    pub addresses: Vec<MobilePostalAddress>,
+    pub organization: Option<String>,
+    pub job_title: Option<String>,
+    pub birthday: Option<String>,
+    pub url: Option<String>,
+    pub favorite: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MobilePimItem {
     pub space_id: String,
     pub resource_id: String,
@@ -121,10 +184,29 @@ pub struct MobilePimItem {
     pub resource_kind: String,
     pub title: String,
     pub completed: bool,
-    pub email: Option<String>,
-    pub phone: Option<String>,
-    pub starts_at: Option<String>,
-    pub ends_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub notes: Option<String>,
+    pub starts_at: Option<MobilePimTemporal>,
+    pub ends_at: Option<MobilePimTemporal>,
+    pub due_at: Option<MobilePimTemporal>,
+    pub priority: i64,
+    pub location: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub reminder_minutes: Option<i64>,
+    pub categories: Vec<String>,
+    pub name_prefix: String,
+    pub given_name: String,
+    pub middle_name: String,
+    pub family_name: String,
+    pub name_suffix: String,
+    pub emails: Vec<MobileLabeledValue>,
+    pub phones: Vec<MobileLabeledValue>,
+    pub addresses: Vec<MobilePostalAddress>,
+    pub organization: Option<String>,
+    pub job_title: Option<String>,
+    pub birthday: Option<String>,
+    pub url: Option<String>,
+    pub favorite: bool,
     pub conflict: bool,
 }
 

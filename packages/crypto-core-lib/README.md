@@ -40,8 +40,9 @@ Main areas:
   - SHA-256 code hashing
   - collection-key wrap/unwrap with invite-derived key
 - `operation_envelope.rs` and `pim.rs`
-  - canonical signatures, authenticated encryption, single-parent PIM v1
-    operations, and multi-branch PIM snapshot v2 checkpoints
+  - canonical signatures, authenticated encryption, single-parent versioned
+    PIM operations, rich schema-v2 fields, lossless iCalendar/vCard
+    materialization, and multi-branch PIM snapshot-v2 checkpoints
 - `local_bridge_runner/`
   - local SQLite cache and DAV handlers
   - durable causally ordered outbox, monotonic recovery cursors,

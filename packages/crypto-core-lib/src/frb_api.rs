@@ -32,7 +32,7 @@ pub mod types {
 }
 
 pub use types::{
-    MobileDeviceSecrets, MobileIssuedInviteCode, MobileLoginResult, MobilePimItem,
+    MobileDeviceSecrets, MobileIssuedInviteCode, MobileLoginResult, MobilePimDraft, MobilePimItem,
     MobileProvisionResult, MobileRedeemedInvite,
 };
 
@@ -213,34 +213,8 @@ pub async fn mobile_list_pim_items() -> Result<Vec<MobilePimItem>, String> {
 }
 
 #[flutter_rust_bridge::frb]
-#[allow(clippy::too_many_arguments)]
-pub async fn mobile_upsert_pim_item(
-    space_id: String,
-    resource_id: Option<String>,
-    projection_id: Option<String>,
-    head_operation_id: Option<String>,
-    resource_kind: String,
-    title: String,
-    completed: bool,
-    email: Option<String>,
-    phone: Option<String>,
-    starts_at: Option<String>,
-    ends_at: Option<String>,
-) -> Result<MobilePimItem, String> {
-    bridge::mobile_upsert_pim_item_impl(
-        space_id,
-        resource_id,
-        projection_id,
-        head_operation_id,
-        resource_kind,
-        title,
-        completed,
-        email,
-        phone,
-        starts_at,
-        ends_at,
-    )
-    .await
+pub async fn mobile_upsert_pim_item(draft: MobilePimDraft) -> Result<MobilePimItem, String> {
+    bridge::mobile_upsert_pim_item_impl(draft).await
 }
 
 #[flutter_rust_bridge::frb]

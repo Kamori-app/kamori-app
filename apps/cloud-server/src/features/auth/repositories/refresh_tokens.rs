@@ -427,11 +427,11 @@ pub(crate) async fn list_refresh_sessions(
         SELECT id, device_id, id = $2 AS is_current, user_agent, ip_address,
                (extract(epoch FROM created_at) * 1000)::bigint AS created_at_ms,
                (extract(epoch FROM last_used_at) * 1000)::bigint AS last_used_at_ms,
-               (extract(epoch FROM expires_at) * 1000)::bigint AS expires_at_ms,
-               (extract(epoch FROM revoked_at) * 1000)::bigint AS revoked_at_ms
+               (extract(epoch FROM expires_at) * 1000)::bigint AS expires_at_ms
         FROM refresh_tokens
         WHERE user_id = $1
-          AND (revoked_at IS NULL OR revoked_at > now() - interval '30 days')
+          AND revoked_at IS NULL
+          AND expires_at > now()
         ORDER BY created_at DESC
         LIMIT 100
         "#,
@@ -452,7 +452,6 @@ pub(crate) async fn list_refresh_sessions(
                 created_at_unix_ms: row.try_get("created_at_ms").map_err(internal_error)?,
                 last_used_at_unix_ms: row.try_get("last_used_at_ms").map_err(internal_error)?,
                 expires_at_unix_ms: row.try_get("expires_at_ms").map_err(internal_error)?,
-                revoked_at_unix_ms: row.try_get("revoked_at_ms").map_err(internal_error)?,
             })
         })
         .collect()
