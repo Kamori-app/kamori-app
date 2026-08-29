@@ -270,9 +270,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Build production images
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/cloud-server/Dockerfile
@@ -282,7 +282,7 @@ jobs:
           cache-from: type=gha,scope=cloud-server
           cache-to: type=gha,mode=max,scope=cloud-server
       - name: Build web image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/web-frontend/Dockerfile
@@ -291,7 +291,7 @@ jobs:
           cache-from: type=gha,scope=web-frontend
           cache-to: type=gha,mode=max,scope=web-frontend
       - name: Build acceptance web image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/web-frontend/Dockerfile
@@ -302,7 +302,7 @@ jobs:
             VITE_KAMORI_API_BASE_URL=http://127.0.0.1:18080
           cache-from: type=gha,scope=web-frontend
       - name: Build operator console image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/admin-frontend/Dockerfile
@@ -311,7 +311,7 @@ jobs:
           cache-from: type=gha,scope=admin-frontend
           cache-to: type=gha,mode=max,scope=admin-frontend
       - name: Build acceptance operator console image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/admin-frontend/Dockerfile
@@ -322,7 +322,7 @@ jobs:
             VITE_KAMORI_API_BASE_URL=http://127.0.0.1:18080
           cache-from: type=gha,scope=admin-frontend
       - name: Build edge image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: deploy/edge/Dockerfile
