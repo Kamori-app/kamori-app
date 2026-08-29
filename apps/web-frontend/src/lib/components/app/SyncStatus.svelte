@@ -36,7 +36,7 @@
         class:bg-coral={$syncState.phase === "error"}
         class="h-2 w-2 rounded-full"
     ></span>
-    <span>{label}</span>
+    <span class="hidden sm:inline">{label}</span>
     {#if $syncState.pendingOperations > 0}
         <span class="rounded-full bg-sand px-1.5 py-0.5 font-semibold">
             {$syncState.pendingOperations}

@@ -94,10 +94,6 @@
             ? new Date(anchor.getFullYear(), anchor.getMonth() + offset, 1)
             : addDays(anchor, offset * 7);
     };
-    const heading = () => mode === "week"
-        ? `${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric" }).format(weekDays(anchor)[0])} – ${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric", year: "numeric" }).format(weekDays(anchor)[6])}`
-        : new Intl.DateTimeFormat($locale, { month: "long", year: "numeric" }).format(anchor);
-
     const reset = () => {
         editing = undefined;
         title = "";
@@ -204,6 +200,9 @@
         .sort((left, right) => (eventStart(left)?.getTime() ?? 0) - (eventStart(right)?.getTime() ?? 0));
     $: monthDays = calendarDays(anchor);
     $: visibleWeekDays = weekDays(anchor);
+    $: calendarHeading = mode === "week"
+        ? `${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric" }).format(visibleWeekDays[0])} – ${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric", year: "numeric" }).format(visibleWeekDays[6])}`
+        : new Intl.DateTimeFormat($locale, { month: "long", year: "numeric" }).format(anchor);
     $: recurrenceOptions = ["", "FREQ=DAILY", "FREQ=WEEKLY", "FREQ=MONTHLY", "FREQ=YEARLY"].includes(recurrence)
         ? ["", "FREQ=DAILY", "FREQ=WEEKLY", "FREQ=MONTHLY", "FREQ=YEARLY"]
         : ["", "FREQ=DAILY", "FREQ=WEEKLY", "FREQ=MONTHLY", "FREQ=YEARLY", recurrence];
@@ -230,7 +229,7 @@
 
     {#if mode === "month"}
         <div class="border border-slate/15 bg-white/60">
-            <h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold capitalize text-slate">{heading()}</h2>
+            <h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold capitalize text-slate">{calendarHeading}</h2>
             <div class="calendar-grid border-b border-slate/15 text-center text-xs font-semibold uppercase tracking-wide text-slate/55">{#each [tr("Mon", "Пн"), tr("Tue", "Вт"), tr("Wed", "Ср"), tr("Thu", "Чт"), tr("Fri", "Пт"), tr("Sat", "Сб"), tr("Sun", "Вс")] as day}<div class="p-2">{day}</div>{/each}</div>
             <div class="calendar-grid">
                 {#each monthDays as day}
@@ -247,7 +246,7 @@
             </div>
         </div>
     {:else if mode === "week"}
-        <div class="border border-slate/15 bg-white/60"><h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold text-slate">{heading()}</h2><div class="calendar-grid">{#each visibleWeekDays as day}<div class:today={sameDay(day, new Date())} class="min-h-64 border-r border-slate/10 p-2"><button class="mb-2 text-sm font-semibold text-slate" on:click={() => canWrite && openCreate(day)}>{new Intl.DateTimeFormat($locale, { weekday: "short", day: "numeric" }).format(day)}</button>{#each visible.filter((item) => occursOn(item, day)) as item}<button class="mb-1 block w-full bg-mint/15 p-2 text-left text-xs text-moss" on:click={() => openEdit(item)}><strong class="block">{item.title}</strong>{eventTime(item)}</button>{/each}</div>{/each}</div></div>
+        <div class="border border-slate/15 bg-white/60"><h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold text-slate">{calendarHeading}</h2><div class="calendar-grid">{#each visibleWeekDays as day}<div class:today={sameDay(day, new Date())} class="min-h-64 border-r border-slate/10 p-2"><button class="mb-2 text-sm font-semibold text-slate" on:click={() => canWrite && openCreate(day)}>{new Intl.DateTimeFormat($locale, { weekday: "short", day: "numeric" }).format(day)}</button>{#each visible.filter((item) => occursOn(item, day)) as item}<button class="mb-1 block w-full bg-mint/15 p-2 text-left text-xs text-moss" on:click={() => openEdit(item)}><strong class="block">{item.title}</strong>{eventTime(item)}</button>{/each}</div>{/each}</div></div>
     {:else}
         <div class="space-y-2">{#each visible as item}<article class="flex flex-wrap items-center gap-3 border border-slate/15 bg-white/70 p-4"><div class="min-w-0 flex-1"><h2 class="font-semibold text-slate">{item.title}</h2><p class="text-sm text-slate/65">{eventTime(item)}{textField(item, "location") ? ` · ${textField(item, "location")}` : ""}</p>{#if textField(item, "notes")}<p class="mt-1 line-clamp-2 text-sm text-slate/60">{textField(item, "notes")}</p>{/if}</div><Button variant="ghost" on:click={() => openEdit(item)} disabled={!canWrite}>{tr("Edit", "Изменить")}</Button><Button variant="danger" on:click={() => onDelete(item)} disabled={!canWrite}>{tr("Delete", "Удалить")}</Button></article>{:else}<div class="border border-dashed border-slate/25 p-8 text-center text-sm text-slate/65">{tr("No events yet.", "Событий пока нет.")}</div>{/each}</div>
     {/if}

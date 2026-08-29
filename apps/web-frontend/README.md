@@ -20,7 +20,7 @@ Main responsibilities:
   - one-time TOTP backup-code regeneration in settings,
   - 24-word data recovery-kit display, browser-local plaintext download, and
     account recovery.
-- Passkey login flow against `cloud-server` (discoverable flow - no username input required).
+- Passkey login flow against `cloud-server` (new credentials are required to be discoverable, so no username input is required).
 - Passkey management in routed Security settings: browser-selected enrollment,
   listing, client-encrypted names, rename, and deletion (including the final
   passkey while OPAQUE password sign-in remains available).

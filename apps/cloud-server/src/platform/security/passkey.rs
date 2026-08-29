@@ -96,6 +96,17 @@ impl PasskeyService {
             .start_passkey_registration(user_id, username, display_name, None)
             .map_err(|e| anyhow!("passkey registration start failed: {e:?}"))?;
 
+        // `webauthn-rs` intentionally treats its generic `Passkey` flow as
+        // passwordless, but not necessarily usernameless: it emits
+        // `residentKey: "discouraged"`. Kamori's login flow has no username
+        // input and therefore can only work with a discoverable credential.
+        // Keep the library's audited registration state and verification, but
+        // make that product requirement explicit in the browser options. A
+        // conforming client must fail creation when it cannot store one.
+        let mut creation_options_value = serde_json::to_value(&creation_options.public_key)
+            .map_err(|e| anyhow!("serialize passkey creation options: {e}"))?;
+        require_discoverable_credential(&mut creation_options_value)?;
+
         let state_bytes = serde_json::to_vec(&UserPasskeyRegistrationState {
             user_id,
             registration: state,
@@ -111,7 +122,7 @@ impl PasskeyService {
         // payload. `webauthn-rs` wraps it in CredentialCreationOptions as
         // `{ "publicKey": ... }` for direct browser use, so serialize the
         // inner value here and keep the transport contract unambiguous.
-        let creation_options_bytes = serde_json::to_vec(&creation_options.public_key)
+        let creation_options_bytes = serde_json::to_vec(&creation_options_value)
             .map_err(|e| anyhow!("serialize passkey creation options: {e}"))?;
         let challenge = extract_challenge_from_json(&creation_options_bytes)?;
 
@@ -376,6 +387,22 @@ fn extract_challenge_from_json(bytes: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
+/// Makes the browser create a client-side discoverable credential.
+///
+/// The safe `webauthn-rs` passkey API does not expose a non-attested resident
+/// registration variant. Changing these two standard creation-option fields is
+/// intentionally limited to Kamori's user passkeys; operator credentials keep
+/// the library defaults because their login flow supplies `allowCredentials`.
+fn require_discoverable_credential(options: &mut Value) -> Result<()> {
+    let selection = options
+        .get_mut("authenticatorSelection")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("passkey creation options omit authenticatorSelection"))?;
+    selection.insert("residentKey".into(), Value::String("required".into()));
+    selection.insert("requireResidentKey".into(), Value::Bool(true));
+    Ok(())
+}
+
 /// Key used for discoverable authentication state storage.
 fn discoverable_authentication_key(flow_id: Uuid) -> String {
     format!("passkey:auth:flow:{flow_id}")
@@ -404,7 +431,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn passkey_registration_leaves_authenticator_choice_to_user() {
+    fn passkey_registration_requires_verification_without_choosing_authenticator() {
         let webauthn = build_webauthn(
             "admin.example.test",
             "https://admin.example.test",
@@ -429,6 +456,32 @@ mod tests {
                 .pointer("/authenticatorSelection/authenticatorAttachment")
                 .is_none(),
             "the relying party must not choose a platform or cross-platform authenticator"
+        );
+    }
+
+    #[test]
+    fn user_passkey_registration_requires_a_discoverable_credential() {
+        let webauthn = build_webauthn(
+            "app.example.test",
+            "https://app.example.test",
+            "Example application",
+        )
+        .expect("build WebAuthn verifier");
+        let (options, _) = webauthn
+            .start_passkey_registration(Uuid::new_v4(), "alice", "Alice", None)
+            .expect("start passkey registration");
+        let mut options =
+            serde_json::to_value(options.public_key).expect("serialize creation options");
+
+        require_discoverable_credential(&mut options).expect("require discoverable credential");
+
+        assert_eq!(
+            options.pointer("/authenticatorSelection/residentKey"),
+            Some(&Value::String("required".into()))
+        );
+        assert_eq!(
+            options.pointer("/authenticatorSelection/requireResidentKey"),
+            Some(&Value::Bool(true))
         );
     }
 

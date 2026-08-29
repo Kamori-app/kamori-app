@@ -286,15 +286,15 @@
         </aside>
 
         <div class="min-w-0 pb-20 md:pb-0">
-            <header class="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-slate/15 bg-paper/95 px-4 backdrop-blur md:px-7">
-                <a href="/app" class="inline-flex items-center gap-2 md:hidden" aria-label="Kamori">
+            <header class="sticky top-0 z-30 flex min-h-16 min-w-0 items-center gap-3 border-b border-slate/15 bg-paper/95 px-4 backdrop-blur md:px-7">
+                <a href="/app" class="inline-flex shrink-0 items-center gap-2 md:hidden" aria-label="Kamori">
                     <BrandMark size={28} />
-                    <span class="font-heading text-sm font-semibold tracking-[0.12em] text-slate">KAMORI</span>
+                    <span class="hidden font-heading text-sm font-semibold tracking-[0.12em] text-slate min-[360px]:inline">KAMORI</span>
                 </a>
                 <div class="hidden md:block">
                     <Badge active>{$appState.currentUsername}</Badge>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="ml-auto flex min-w-0 shrink-0 items-center gap-2">
                     <SyncStatus onSync={requestManualSync} />
                     <LocaleSwitch />
                     <a class="px-2 py-2 text-sm text-slate md:hidden" href="/app/settings" aria-label={text.settings}>⚙</a>

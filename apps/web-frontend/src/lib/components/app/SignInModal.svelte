@@ -46,6 +46,7 @@
             signInFailed: "Sign-in failed",
             passkeyUnsupported: "Passkey login is not supported in this browser.",
             passkeyFailed: "Passkey sign-in failed",
+            passkeyNotFound: "No discoverable Kamori passkey was found, or the request was cancelled. If this passkey was added earlier, sign in with your password, remove it in Security, and add it again.",
             passkeyUnlocked: "Signed in with passkey and unlocked this approved browser.",
             passkeyApprove: "Passkey authentication succeeded. Enter your password once to approve and unlock this new browser.",
             passkeyCancelled: "Passkey request was cancelled.",
@@ -70,6 +71,7 @@
             signInFailed: "Не удалось войти",
             passkeyUnsupported: "Этот браузер не поддерживает вход с passkey.",
             passkeyFailed: "Не удалось войти с passkey",
+            passkeyNotFound: "Discoverable passkey Kamori не найден или запрос был отменён. Если passkey был добавлен раньше, войдите по паролю, удалите его в разделе «Безопасность» и добавьте заново.",
             passkeyUnlocked: "Вход с passkey выполнен, одобренный браузер разблокирован.",
             passkeyApprove: "Passkey подтверждён. Один раз введите пароль, чтобы одобрить и разблокировать новый браузер.",
             passkeyCancelled: "Запрос passkey отменён.",
@@ -398,8 +400,13 @@
             onClose();
         } catch (error) {
             lockWebVault();
-            const message =
-                error instanceof Error ? error.message : String(error);
+            const message = typeof DOMException !== "undefined" &&
+                error instanceof DOMException &&
+                error.name === "NotAllowedError"
+                ? copy.passkeyNotFound
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
             setNotice(`${copy.passkeyFailed}: ${message}`);
         } finally {
             clearLoading();
