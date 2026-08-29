@@ -165,7 +165,7 @@ Key-rotation contract:
   ciphertext is capped at 25 MiB in aggregate and at 10,000 snapshots.
 
 Passkey login contract:
-- `POST /auth/passkey/login/start` starts discoverable passkey auth and returns `flow_id`.
+- User passkey enrollment requires a discoverable credential; `POST /auth/passkey/login/start` starts username-less discoverable authentication and returns `flow_id`.
 - `POST /auth/passkey/login/finish` accepts `flow_id` + `credential`.
 
 Passkey management contract:
