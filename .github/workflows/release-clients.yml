@@ -10,6 +10,11 @@ on:
         description: Existing version tag to package
         required: true
         type: string
+      include_ios:
+        description: Build the signed iOS IPA (requires configured Apple credentials)
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: client-release-${{ inputs.tag || github.ref }}
@@ -30,20 +35,30 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ env.RELEASE_TAG }}
-      - name: Create immutable draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
-          gh release create "$RELEASE_TAG" --verify-tag --draft
-          --title "Kamori $RELEASE_TAG" --generate-notes
       - name: Verify artifact versions match the tag
         run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Release tag must be a semantic version beginning with v (for example, v0.1.0)."
+            exit 1
+          fi
           version="${RELEASE_TAG#v}"
           test "$(jq -r .version package.json)" = "$version"
           test "$(jq -r .version apps/dav-bridge-desktop/src-tauri/tauri.conf.json)" = "$version"
           test "$(sed -n 's/^version = "\([^"]*\)"/\1/p' apps/dav-bridge-desktop/src-tauri/Cargo.toml | head -1)" = "$version"
           test "$(sed -n 's/^version: \([^+]*\).*/\1/p' apps/dav-bridge-mobile/pubspec.yaml | head -1)" = "$version"
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Release $RELEASE_TAG is already published and cannot receive rebuilt artifacts."
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "Kamori $RELEASE_TAG" --generate-notes
+          fi
 
   desktop:
     name: Desktop ${{ matrix.platform }}
@@ -258,6 +273,9 @@ jobs:
   ios:
     name: iOS signed IPA
     needs: release
+    if: >-
+      (github.event_name == 'push' && vars.KAMORI_RELEASE_IOS_ENABLED == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.include_ios)
     runs-on: macos-26
     environment: release
     defaults:

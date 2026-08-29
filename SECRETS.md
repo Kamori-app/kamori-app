@@ -958,6 +958,17 @@ version tags (`v*`), and require manual approval. These values are unnecessary
 for infrastructure provisioning and should not be added until the corresponding
 developer accounts, package identities, and offline recovery process exist.
 
+### `KAMORI_RELEASE_IOS_ENABLED` — signed iOS channel switch
+
+- **GitHub location:** repository Actions variable, not a secret and not an
+  Environment value.
+- **Value:** leave absent or set to `false` while iOS is Coming Soon; set to
+  `true` only after TestFlight and the iOS signing inputs below are ready.
+- **Purpose:** enables the signed iOS job for tag-push releases. It does not
+  upload an IPA to TestFlight or publish the App Store application.
+- **Manual runs:** the release workflow's `include_ios` input controls iOS for
+  a manually selected existing tag independently of this variable.
+
 ### `ANDROID_KEYSTORE_BASE64` — Android signing keystore
 
 - **GitHub location:** `release` Environment secret.
