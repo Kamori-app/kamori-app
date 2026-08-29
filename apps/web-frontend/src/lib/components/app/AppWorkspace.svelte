@@ -17,11 +17,11 @@
     import { appState, type SpaceEntry } from "$lib/stores/app";
     import {
         getActiveWebDevice,
+        commitLocalPimOperation,
         listQueuedOperationEnvelopes,
         loadMaterializedPimState,
         listQuarantinedOperationRecords,
         loadSpaceKey,
-        queueOperationEnvelope,
         quarantineOperationEnvelope,
         removeQuarantinedOperationEnvelope,
         removeQueuedOperationEnvelope,
@@ -46,10 +46,10 @@
     import {
         decodePimOperation,
         decodePimSnapshot,
+        CURRENT_PIM_SCHEMA_VERSION,
         dateToIcalendarUtc,
         encodePimOperation,
         encodePimSnapshot,
-        localDateTimeToIcalendarUtc,
         projectionFields,
         type MaterializedPimItem,
         type MaterializedOperationState,
@@ -63,6 +63,9 @@
     import Card from "$lib/components/ui/Card.svelte";
     import Input from "$lib/components/ui/Input.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
+    import TaskWorkspace from "$lib/components/app/TaskWorkspace.svelte";
+    import CalendarWorkspace from "$lib/components/app/CalendarWorkspace.svelte";
+    import ContactsWorkspace from "$lib/components/app/ContactsWorkspace.svelte";
     import { locale } from "$lib/i18n";
     import { notify } from "$lib/stores/notifications";
     import {
@@ -113,16 +116,6 @@
     let selectedCollection: SpaceEntry | undefined;
     let canWriteSelectedCollection = false;
     let requestedSpaceId = "";
-    let taskTitle = "";
-    let taskFormError = "";
-    let eventTitle = "";
-    let eventStart = "";
-    let eventEnd = "";
-    let eventFormError = "";
-    let contactName = "";
-    let contactEmail = "";
-    let contactPhone = "";
-    let contactFormError = "";
     let pimItems: MaterializedPimItem[] = [];
     let operationStates: MaterializedOperationState[] = [];
     let spaceMembers: Record<string, SpaceMemberSummary[]> = {};
@@ -851,11 +844,6 @@
         return synced;
     };
 
-    const textField = (item: MaterializedPimItem, name: string): string => {
-        const value = item.fields[name];
-        return value?.type === "text" ? value.value : "";
-    };
-
     const flushOutbox = async (): Promise<number> => {
         const queued = await listQueuedOperationEnvelopes();
         let flushed = 0;
@@ -919,6 +907,24 @@
             );
         }
         const device = getActiveWebDevice();
+        if (operation.operation === "upsert") {
+            const parent = operation.dependencies.length === 0
+                ? undefined
+                : operationStates.find(
+                      (state) =>
+                          state.spaceId === collection.id &&
+                          state.clientOpId === operation.dependencies[0] &&
+                          state.logicalResourceId === operation.resource_id &&
+                          state.kind === operation.resource_kind,
+                  );
+            if (operation.dependencies.length > 0 && !parent) {
+                throw new Error("PIM operation dependency is missing.");
+            }
+            await materializePimOperation(
+                operation,
+                parent?.materializedProjection || undefined,
+            );
+        }
         const clientOpId = crypto.randomUUID();
         const envelope = await sealOperationEnvelope({
             spaceId: collection.id,
@@ -931,14 +937,26 @@
             spaceKey,
             signingPrivateKey: device.identity.signing_private_key,
         });
-        await queueOperationEnvelope(envelope);
-        await applyPimOperation(
-            collection.id,
-            operation.resource_id,
-            clientOpId,
-            operation,
-        );
-        await storeMaterializedPimState(pimItems, operationStates, syncCursors);
+        const previousItems = pimItems;
+        const previousOperations = operationStates;
+        try {
+            await applyPimOperation(
+                collection.id,
+                operation.resource_id,
+                clientOpId,
+                operation,
+            );
+            await commitLocalPimOperation(
+                envelope,
+                pimItems,
+                operationStates,
+                syncCursors,
+            );
+        } catch (error) {
+            pimItems = previousItems;
+            operationStates = previousOperations;
+            throw error;
+        }
         const flushed = (await flushOutbox()) > 0;
         const pending = (await listQueuedOperationEnvelopes()).length;
         setPendingOperations(pending);
@@ -953,6 +971,7 @@
         dependencies: string[] = [],
     ): PimOperationV1 => ({
         operation: "upsert",
+        schema_version: CURRENT_PIM_SCHEMA_VERSION,
         resource_kind: kind,
         resource_id: resourceId,
         dependencies,
@@ -960,32 +979,64 @@
         raw_projection: new Uint8Array(),
     });
 
-    const createTask = async () => {
-        const title = taskTitle.trim();
-        if (!title) {
-            taskFormError = localized("Enter a task title.", "Введите название задачи.");
-            return;
+    const pimValuesEqual = (
+        left: PimValue | undefined,
+        right: PimValue,
+    ): boolean => {
+        if (right.type === "null") return left === undefined || left.type === "null";
+        if (!left || left.type !== right.type) return false;
+        if (left.type === "bytes" && right.type === "bytes") {
+            return left.value.length === right.value.length &&
+                left.value.every((value, index) => value === right.value[index]);
         }
-        taskFormError = "";
-        setLoading("task-create");
+        if (left.type === "record" && right.type === "record") {
+            const leftEntries = Object.entries(left.value).sort();
+            const rightEntries = Object.entries(right.value).sort();
+            return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+        }
+        if (left.type === "records" && right.type === "records") {
+            return JSON.stringify(left.value.map((entry) => Object.entries(entry).sort())) ===
+                JSON.stringify(right.value.map((entry) => Object.entries(entry).sort()));
+        }
+        return JSON.stringify(left.value) === JSON.stringify(right.value);
+    };
+
+    const savePimItem = async (
+        kind: PimResourceKind,
+        item: MaterializedPimItem | undefined,
+        requestedFields: Record<string, PimValue>,
+    ) => {
+        if (item) selectedCollectionId = item.spaceId;
+        setLoading("pim-save");
         try {
+            const fields = item
+                ? Object.fromEntries(
+                      Object.entries(requestedFields).filter(
+                          ([name, value]) => !pimValuesEqual(item.fields[name], value),
+                      ),
+                  )
+                : { ...requestedFields };
+            if (kind !== "contact") {
+                fields.dtstamp = {
+                    type: "text",
+                    value: dateToIcalendarUtc(new Date()),
+                };
+            }
             const flushed = await commitPimOperation(
-                makeUpsert("task", crypto.randomUUID(), {
-                    title: { type: "text", value: title },
-                    completed: { type: "boolean", value: false },
-                    dtstamp: { type: "text", value: dateToIcalendarUtc(new Date()) },
-                }),
+                makeUpsert(
+                    kind,
+                    item?.resourceId ?? crypto.randomUUID(),
+                    fields,
+                    item ? [item.headOperationId] : [],
+                ),
             );
-            taskTitle = "";
-            setNotice(
-                flushed
-                    ? localized("Task encrypted and synced.", "Задача зашифрована и синхронизирована.")
-                    : localized("Task saved to the encrypted offline outbox.", "Задача сохранена в зашифрованной офлайн-очереди."),
-            );
+            setNotice(flushed
+                ? localized("Changes encrypted and synced.", "Изменения зашифрованы и синхронизированы.")
+                : localized("Changes saved to the encrypted offline outbox.", "Изменения сохранены в зашифрованной офлайн-очереди."));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            taskFormError = `${localized("Task creation failed", "Не удалось создать задачу")}: ${message}`;
-            notify(taskFormError, { kind: "error", source: t("Tasks") });
+            notify(message, { kind: "error", source: localized("Editor", "Редактор") });
+            throw error;
         } finally {
             clearLoading();
         }
@@ -1002,7 +1053,13 @@
                 makeUpsert(
                     "task",
                     item.resourceId,
-                    { completed: { type: "boolean", value: completed } },
+                    {
+                        completed: { type: "boolean", value: completed },
+                        completed_at: completed
+                            ? { type: "text", value: dateToIcalendarUtc(new Date()) }
+                            : { type: "null" },
+                        dtstamp: { type: "text", value: dateToIcalendarUtc(new Date()) },
+                    },
                     [item.headOperationId],
                 ),
             );
@@ -1023,6 +1080,7 @@
         try {
             await commitPimOperation({
                 operation: "delete",
+                schema_version: CURRENT_PIM_SCHEMA_VERSION,
                 resource_kind: item.kind,
                 resource_id: item.resourceId,
                 dependencies: [item.headOperationId],
@@ -1040,105 +1098,6 @@
         }
     };
 
-    const createCalendarEvent = async () => {
-        const title = eventTitle.trim();
-        if (!title || !eventStart) {
-            eventFormError = localized(
-                "Event title and start time are required.",
-                "Введите название и время начала события.",
-            );
-            return;
-        }
-        if (eventEnd && eventEnd < eventStart) {
-            eventFormError = localized(
-                "Event end must not be earlier than its start.",
-                "Время окончания события не может быть раньше начала.",
-            );
-            return;
-        }
-        eventFormError = "";
-        setLoading("event-create");
-        try {
-            const startsAt = localDateTimeToIcalendarUtc(eventStart);
-            const endsAt = eventEnd
-                ? localDateTimeToIcalendarUtc(eventEnd)
-                : undefined;
-            if (endsAt && endsAt < startsAt) {
-                throw new Error(localized(
-                    "Event end must not be earlier than its start.",
-                    "Время окончания события не может быть раньше начала.",
-                ));
-            }
-            const fields: Record<string, PimValue> = {
-                title: { type: "text", value: title },
-                dtstamp: { type: "text", value: dateToIcalendarUtc(new Date()) },
-                starts_at: { type: "text", value: startsAt },
-            };
-            if (endsAt) {
-                fields.ends_at = { type: "text", value: endsAt };
-            }
-            const flushed = await commitPimOperation(
-                makeUpsert("calendar_event", crypto.randomUUID(), fields),
-            );
-            eventTitle = "";
-            eventStart = "";
-            eventEnd = "";
-            setNotice(
-                flushed
-                    ? localized("Event encrypted and synced.", "Событие зашифровано и синхронизировано.")
-                    : localized("Event saved to the encrypted offline outbox.", "Событие сохранено в зашифрованной офлайн-очереди."),
-            );
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            eventFormError = `${localized("Event creation failed", "Не удалось создать событие")}: ${message}`;
-            notify(eventFormError, { kind: "error", source: t("Calendar") });
-        } finally {
-            clearLoading();
-        }
-    };
-
-    const createContact = async () => {
-        const name = contactName.trim();
-        const email = contactEmail.trim();
-        const phone = contactPhone.trim();
-        if (!name || (!email && !phone)) {
-            contactFormError = localized(
-                "Contact name and an email or phone number are required.",
-                "Введите имя контакта и email или номер телефона.",
-            );
-            return;
-        }
-        contactFormError = "";
-        setLoading("contact-create");
-        try {
-            const fields: Record<string, PimValue> = {
-                title: { type: "text", value: name },
-            };
-            if (email) {
-                fields.email = { type: "text", value: email };
-            }
-            if (phone) {
-                fields.phone = { type: "text", value: phone };
-            }
-            const flushed = await commitPimOperation(
-                makeUpsert("contact", crypto.randomUUID(), fields),
-            );
-            contactName = "";
-            contactEmail = "";
-            contactPhone = "";
-            setNotice(
-                flushed
-                    ? localized("Contact encrypted and synced.", "Контакт зашифрован и синхронизирован.")
-                    : localized("Contact saved to the encrypted offline outbox.", "Контакт сохранён в зашифрованной офлайн-очереди."),
-            );
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            contactFormError = `${localized("Contact creation failed", "Не удалось создать контакт")}: ${message}`;
-            notify(contactFormError, { kind: "error", source: t("Contacts") });
-        } finally {
-            clearLoading();
-        }
-    };
 
     const requestCollectionDelete = (collectionId: string) => {
         pendingDeleteCollectionId = collectionId;
@@ -2278,174 +2237,44 @@
 
     {#if view === "tasks"}
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">{t("Tasks")}</h2>
-        <p class="mt-2 text-xs text-slate/70">
-            {$locale === "ru" ? "Изменения шифруются и подписываются локально. Офлайн-записи остаются в зашифрованной очереди до успешной синхронизации." : "Edits are encrypted and signed locally. Offline writes stay in the encrypted outbox until the next successful sync."}
-        </p>
-        <div class="mt-3 space-y-2">
-            <select
-                class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
-                bind:value={selectedCollectionId}
-            >
-                {#each $appState.collections as collection}
-                    <option value={collection.id}>{collection.name}</option>
-                {/each}
-            </select>
-
-            {#if !canWriteSelectedCollection}
-                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
-                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
-                </p>
-            {/if}
-            <Input bind:value={taskTitle} placeholder={t("New task")} disabled={!canWriteSelectedCollection} />
-            <Button
-                on:click={createTask}
-                disabled={loadingAction === "task-create" || !canWriteSelectedCollection}
-            >
-                {loadingAction === "task-create" ? t("Saving...") : t("Add Task")}
-            </Button>
-            {#if taskFormError}
-                <p class="text-sm text-coral" role="alert">{taskFormError}</p>
-            {/if}
-        </div>
-        <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "task" && item.spaceId === selectedCollectionId) as item}
-                <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
-                    <p class="font-semibold text-slate">{item.title}</p>
-                    <p class="text-xs text-slate/65">
-                        {item.completed ? t("Completed") : t("Open")}
-                        {item.conflict ? ($locale === "ru" ? " · проверьте параллельное изменение" : " · concurrent edit needs review") : ""}
-                    </p>
-                    <div class="mt-2 flex flex-wrap gap-2">
-                        <Button
-                            variant="ghost"
-                            on:click={() =>
-                                setTaskCompleted(item, !item.completed)}
-                            disabled={loadingAction === `task-${item.resourceId}` || !canWriteSelectedCollection}
-                        >
-                            {item.completed ? t("Reopen") : t("Complete")}
-                        </Button>
-                        <Button
-                            variant="danger"
-                            on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
-                        >{t("Delete")}</Button>
-                    </div>
-                </div>
-            {:else}
-                <p class="text-sm text-slate/70">{t("No tasks on this device yet.")}</p>
-            {/each}
-        </div>
+        <TaskWorkspace
+            spaces={$appState.collections}
+            bind:selectedSpaceId={selectedCollectionId}
+            canWrite={canWriteSelectedCollection}
+            items={pimItems}
+            busy={loadingAction}
+            onSave={(item, fields) => savePimItem("task", item, fields)}
+            onToggle={setTaskCompleted}
+            onDelete={deletePimItem}
+        />
     </Card>
     {/if}
 
     {#if view === "calendar"}
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">{t("Calendar")}</h2>
-        <div class="mt-3 space-y-2">
-            <select
-                class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
-                bind:value={selectedCollectionId}
-            >
-                {#each $appState.collections as collection}
-                    <option value={collection.id}>{collection.name}</option>
-                {/each}
-            </select>
-            {#if !canWriteSelectedCollection}
-                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
-                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
-                </p>
-            {/if}
-            <Input bind:value={eventTitle} placeholder={t("Event title")} disabled={!canWriteSelectedCollection} />
-            <Input bind:value={eventStart} type="datetime-local" disabled={!canWriteSelectedCollection} />
-            <Input bind:value={eventEnd} type="datetime-local" disabled={!canWriteSelectedCollection} />
-            <Button
-                on:click={createCalendarEvent}
-                disabled={loadingAction === "event-create" || !canWriteSelectedCollection}
-            >
-                {loadingAction === "event-create" ? t("Saving...") : t("Add Event")}
-            </Button>
-            {#if eventFormError}
-                <p class="text-sm text-coral" role="alert">{eventFormError}</p>
-            {/if}
-        </div>
-        <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "calendar_event" && item.spaceId === selectedCollectionId) as item}
-                <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
-                    <p class="font-semibold text-slate">{item.title}</p>
-                    <p class="text-xs text-slate/65">
-                        {textField(item, "starts_at")}
-                        {textField(item, "ends_at")
-                            ? ` – ${textField(item, "ends_at")}`
-                            : ""}
-                    </p>
-                    <div class="mt-2">
-                        <Button
-                            variant="danger"
-                            on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
-                        >{t("Delete")}</Button>
-                    </div>
-                </div>
-            {:else}
-                <p class="text-sm text-slate/70">{t("No events on this device yet.")}</p>
-            {/each}
-        </div>
+        <CalendarWorkspace
+            spaces={$appState.collections}
+            bind:selectedSpaceId={selectedCollectionId}
+            canWrite={canWriteSelectedCollection}
+            items={pimItems}
+            busy={loadingAction}
+            onSave={(item, fields) => savePimItem("calendar_event", item, fields)}
+            onDelete={deletePimItem}
+        />
     </Card>
     {/if}
 
     {#if view === "contacts"}
     <Card>
-        <h2 class="font-heading text-xl font-semibold text-slate">{t("Contacts")}</h2>
-        <div class="mt-3 space-y-2">
-            <select
-                class="w-full rounded-xl border border-slate/20 bg-white px-3 py-2 text-sm text-slate outline-none"
-                bind:value={selectedCollectionId}
-            >
-                {#each $appState.collections as collection}
-                    <option value={collection.id}>{collection.name}</option>
-                {/each}
-            </select>
-            {#if !canWriteSelectedCollection}
-                <p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">
-                    {$locale === "ru" ? "Выбранное пространство доступно только для чтения или ожидает ключ устройства." : "The selected space is read-only or awaits this device key."}
-                </p>
-            {/if}
-            <Input bind:value={contactName} placeholder={t("Full name")} disabled={!canWriteSelectedCollection} />
-            <Input bind:value={contactEmail} type="email" placeholder={t("Email")} disabled={!canWriteSelectedCollection} />
-            <Input bind:value={contactPhone} type="tel" placeholder={t("Phone")} disabled={!canWriteSelectedCollection} />
-            <Button
-                on:click={createContact}
-                disabled={loadingAction === "contact-create" || !canWriteSelectedCollection}
-            >
-                {loadingAction === "contact-create" ? t("Saving...") : t("Add Contact")}
-            </Button>
-            {#if contactFormError}
-                <p class="text-sm text-coral" role="alert">{contactFormError}</p>
-            {/if}
-        </div>
-        <div class="mt-4 space-y-2">
-            {#each pimItems.filter((item) => item.kind === "contact" && item.spaceId === selectedCollectionId) as item}
-                <div class="rounded-xl border border-slate/15 bg-white/70 p-3">
-                    <p class="font-semibold text-slate">{item.title}</p>
-                    {#if textField(item, "email")}
-                        <p class="text-xs text-slate/65">{textField(item, "email")}</p>
-                    {/if}
-                    {#if textField(item, "phone")}
-                        <p class="text-xs text-slate/65">{textField(item, "phone")}</p>
-                    {/if}
-                    <div class="mt-2">
-                        <Button
-                            variant="danger"
-                            on:click={() => deletePimItem(item)}
-                            disabled={loadingAction === `delete-${item.resourceId}` || !canWriteSelectedCollection}
-                        >{t("Delete")}</Button>
-                    </div>
-                </div>
-            {:else}
-                <p class="text-sm text-slate/70">{t("No contacts on this device yet.")}</p>
-            {/each}
-        </div>
+        <ContactsWorkspace
+            spaces={$appState.collections}
+            bind:selectedSpaceId={selectedCollectionId}
+            canWrite={canWriteSelectedCollection}
+            items={pimItems}
+            busy={loadingAction}
+            onSave={(item, fields) => savePimItem("contact", item, fields)}
+            onDelete={deletePimItem}
+        />
     </Card>
     {/if}
 

@@ -38,8 +38,8 @@ use uuid::Uuid;
 use crate::{
     operation_envelope::{EnvelopeKind, OperationEnvelopeV1, OperationSealContext},
     pim::{
-        PimDeleteV1, PimOperationV1, PimResourceKind, PimSnapshotBranchV2, PimSnapshotV2,
-        PimUpsertV1, PimValue, materialize_projection,
+        CURRENT_PIM_SCHEMA_VERSION, PimDeleteV1, PimOperationV1, PimResourceKind,
+        PimSnapshotBranchV2, PimSnapshotV2, PimUpsertV1, PimValue, materialize_projection,
     },
 };
 
@@ -1281,6 +1281,7 @@ impl LocalBridgeState {
             fields.insert("dtstamp".to_string(), PimValue::Text(current_ical_utc()?));
         }
         let upsert = PimUpsertV1 {
+            schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
             resource_id,
             dependencies,
@@ -1369,6 +1370,7 @@ impl LocalBridgeState {
         }
         let dependencies = current_head.into_iter().collect();
         let operation = PimOperationV1::Delete(PimDeleteV1 {
+            schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
             resource_id,
             dependencies,
@@ -1462,6 +1464,7 @@ impl LocalBridgeState {
         let parent_operation_id = dependencies.first().copied();
         let resource_kind = pim_kind(kind, &payload)?;
         let operation = PimOperationV1::Upsert(PimUpsertV1 {
+            schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
             resource_id: stream_id,
             dependencies,
@@ -1565,6 +1568,7 @@ impl LocalBridgeState {
             .collect();
         let parent_operation_id = dependencies.first().copied();
         let operation = PimOperationV1::Delete(PimDeleteV1 {
+            schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind: match kind {
                 DavResourceKind::Contact => PimResourceKind::Contact,
                 DavResourceKind::Calendar => PimResourceKind::CalendarEvent,
@@ -1706,7 +1710,7 @@ fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn current_ical_utc() -> Result<String> {
+pub(crate) fn current_ical_utc() -> Result<String> {
     let format = time::macros::format_description!("[year][month][day]T[hour][minute][second]Z");
     time::OffsetDateTime::now_utc()
         .format(format)
@@ -1775,6 +1779,7 @@ mod first_party_pim_tests {
     #[test]
     fn partial_task_edit_preserves_existing_and_extension_properties() {
         let upsert = PimUpsertV1 {
+            schema_version: 1,
             resource_kind: PimResourceKind::Task,
             resource_id: Uuid::from_u128(1),
             dependencies: Vec::new(),

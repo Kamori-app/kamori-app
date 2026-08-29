@@ -217,7 +217,6 @@ export interface SessionSummary {
   created_at_unix_ms: number;
   last_used_at_unix_ms?: number | null;
   expires_at_unix_ms: number;
-  revoked_at_unix_ms?: number | null;
 }
 
 export interface TotpStatusResponse {

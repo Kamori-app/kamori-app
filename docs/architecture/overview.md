@@ -26,10 +26,14 @@ Clients materialize state locally. The shared Rust core owns cryptography,
 envelope encoding, key lifecycle, synchronization, the current PIM codec,
 conflict-copy detection, and DAV projection. Platform applications supply
 secure storage, networking, lifecycle integration, system PIM adapters, and UI.
-Rich recurrence and a CRDT document codec are roadmap work, not implicit core
-capabilities.
+The current PIM schema uses typed temporal and multi-value fields. Its shared
+lossless parser/materializer updates explicitly managed iCalendar/vCard
+properties while preserving unknown properties and recurrence exceptions.
+Advanced recurrence authoring and a CRDT document codec are roadmap work, not
+implicit core capabilities.
 
-PIM operation v1 is intentionally single-parent. Snapshot v2 checkpoints all
+The stable PIM operation type is intentionally single-parent. Its current field
+schema is v2 and legacy schema-1 operations remain readable. Snapshot v2 checkpoints all
 materialized branches in a stream. A key epoch exposes both a membership
 history boundary and a current-state recovery cursor, so a new device can load
 verified current snapshots without receiving superseded epoch keys. Rotation

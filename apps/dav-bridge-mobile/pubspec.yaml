@@ -18,6 +18,8 @@ dependencies:
   flutter_secure_storage: ^11.0.0
   flutter_contacts: ^2.3.1
   device_calendar_plus: ^0.8.0
+  rrule: ^0.2.18
+  timezone: ^0.11.1
 
   collection: any
   crypto: ^3.0.6

@@ -179,17 +179,7 @@ abstract class RustLibApi extends BaseApi {
       {required String collectionId});
 
   Future<MobilePimItem> crateFrbApiMobileUpsertPimItem(
-      {required String spaceId,
-      String? resourceId,
-      String? projectionId,
-      String? headOperationId,
-      required String resourceKind,
-      required String title,
-      required bool completed,
-      String? email,
-      String? phone,
-      String? startsAt,
-      String? endsAt});
+      {required MobilePimDraft draft});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -925,31 +915,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<MobilePimItem> crateFrbApiMobileUpsertPimItem(
-      {required String spaceId,
-      String? resourceId,
-      String? projectionId,
-      String? headOperationId,
-      required String resourceKind,
-      required String title,
-      required bool completed,
-      String? email,
-      String? phone,
-      String? startsAt,
-      String? endsAt}) {
+      {required MobilePimDraft draft}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(spaceId, serializer);
-        sse_encode_opt_String(resourceId, serializer);
-        sse_encode_opt_String(projectionId, serializer);
-        sse_encode_opt_String(headOperationId, serializer);
-        sse_encode_String(resourceKind, serializer);
-        sse_encode_String(title, serializer);
-        sse_encode_bool(completed, serializer);
-        sse_encode_opt_String(email, serializer);
-        sse_encode_opt_String(phone, serializer);
-        sse_encode_opt_String(startsAt, serializer);
-        sse_encode_opt_String(endsAt, serializer);
+        sse_encode_box_autoadd_mobile_pim_draft(draft, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 26, port: port_);
       },
@@ -958,19 +928,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileUpsertPimItemConstMeta,
-      argValues: [
-        spaceId,
-        resourceId,
-        projectionId,
-        headOperationId,
-        resourceKind,
-        title,
-        completed,
-        email,
-        phone,
-        startsAt,
-        endsAt
-      ],
+      argValues: [draft],
       apiImpl: this,
     ));
   }
@@ -978,19 +936,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileUpsertPimItemConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_upsert_pim_item",
-        argNames: [
-          "spaceId",
-          "resourceId",
-          "projectionId",
-          "headOperationId",
-          "resourceKind",
-          "title",
-          "completed",
-          "email",
-          "phone",
-          "startsAt",
-          "endsAt"
-        ],
+        argNames: ["draft"],
       );
 
   @protected
@@ -1018,10 +964,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_i_64(raw);
+  }
+
+  @protected
   MobileDeviceSecrets dco_decode_box_autoadd_mobile_device_secrets(
       dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_mobile_device_secrets(raw);
+  }
+
+  @protected
+  MobilePimDraft dco_decode_box_autoadd_mobile_pim_draft(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_mobile_pim_draft(raw);
+  }
+
+  @protected
+  MobilePimTemporal dco_decode_box_autoadd_mobile_pim_temporal(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_mobile_pim_temporal(raw);
   }
 
   @protected
@@ -1069,6 +1033,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeI64(raw);
+  }
+
+  @protected
   Keypair dco_decode_keypair(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1081,15 +1051,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
   List<MobileCollection> dco_decode_list_mobile_collection(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_mobile_collection).toList();
   }
 
   @protected
+  List<MobileLabeledValue> dco_decode_list_mobile_labeled_value(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_mobile_labeled_value).toList();
+  }
+
+  @protected
   List<MobilePimItem> dco_decode_list_mobile_pim_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_mobile_pim_item).toList();
+  }
+
+  @protected
+  List<MobilePostalAddress> dco_decode_list_mobile_postal_address(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_mobile_postal_address)
+        .toList();
   }
 
   @protected
@@ -1151,6 +1141,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobileLabeledValue dco_decode_mobile_labeled_value(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return MobileLabeledValue(
+      label: dco_decode_String(arr[0]),
+      value: dco_decode_String(arr[1]),
+      rawHead: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
   MobileLoginResult dco_decode_mobile_login_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1167,11 +1170,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobilePimDraft dco_decode_mobile_pim_draft(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 30)
+      throw Exception('unexpected arr length: expect 30 but see ${arr.length}');
+    return MobilePimDraft(
+      spaceId: dco_decode_String(arr[0]),
+      resourceId: dco_decode_opt_String(arr[1]),
+      projectionId: dco_decode_opt_String(arr[2]),
+      headOperationId: dco_decode_opt_String(arr[3]),
+      resourceKind: dco_decode_String(arr[4]),
+      title: dco_decode_String(arr[5]),
+      completed: dco_decode_bool(arr[6]),
+      completedAt: dco_decode_opt_String(arr[7]),
+      notes: dco_decode_opt_String(arr[8]),
+      startsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[9]),
+      endsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[10]),
+      dueAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[11]),
+      priority: dco_decode_i_64(arr[12]),
+      location: dco_decode_opt_String(arr[13]),
+      recurrenceRule: dco_decode_opt_String(arr[14]),
+      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[15]),
+      categories: dco_decode_list_String(arr[16]),
+      namePrefix: dco_decode_String(arr[17]),
+      givenName: dco_decode_String(arr[18]),
+      middleName: dco_decode_String(arr[19]),
+      familyName: dco_decode_String(arr[20]),
+      nameSuffix: dco_decode_String(arr[21]),
+      emails: dco_decode_list_mobile_labeled_value(arr[22]),
+      phones: dco_decode_list_mobile_labeled_value(arr[23]),
+      addresses: dco_decode_list_mobile_postal_address(arr[24]),
+      organization: dco_decode_opt_String(arr[25]),
+      jobTitle: dco_decode_opt_String(arr[26]),
+      birthday: dco_decode_opt_String(arr[27]),
+      url: dco_decode_opt_String(arr[28]),
+      favorite: dco_decode_bool(arr[29]),
+    );
+  }
+
+  @protected
   MobilePimItem dco_decode_mobile_pim_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 31)
+      throw Exception('unexpected arr length: expect 31 but see ${arr.length}');
     return MobilePimItem(
       spaceId: dco_decode_String(arr[0]),
       resourceId: dco_decode_String(arr[1]),
@@ -1180,11 +1223,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       resourceKind: dco_decode_String(arr[4]),
       title: dco_decode_String(arr[5]),
       completed: dco_decode_bool(arr[6]),
-      email: dco_decode_opt_String(arr[7]),
-      phone: dco_decode_opt_String(arr[8]),
-      startsAt: dco_decode_opt_String(arr[9]),
-      endsAt: dco_decode_opt_String(arr[10]),
-      conflict: dco_decode_bool(arr[11]),
+      completedAt: dco_decode_opt_String(arr[7]),
+      notes: dco_decode_opt_String(arr[8]),
+      startsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[9]),
+      endsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[10]),
+      dueAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[11]),
+      priority: dco_decode_i_64(arr[12]),
+      location: dco_decode_opt_String(arr[13]),
+      recurrenceRule: dco_decode_opt_String(arr[14]),
+      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[15]),
+      categories: dco_decode_list_String(arr[16]),
+      namePrefix: dco_decode_String(arr[17]),
+      givenName: dco_decode_String(arr[18]),
+      middleName: dco_decode_String(arr[19]),
+      familyName: dco_decode_String(arr[20]),
+      nameSuffix: dco_decode_String(arr[21]),
+      emails: dco_decode_list_mobile_labeled_value(arr[22]),
+      phones: dco_decode_list_mobile_labeled_value(arr[23]),
+      addresses: dco_decode_list_mobile_postal_address(arr[24]),
+      organization: dco_decode_opt_String(arr[25]),
+      jobTitle: dco_decode_opt_String(arr[26]),
+      birthday: dco_decode_opt_String(arr[27]),
+      url: dco_decode_opt_String(arr[28]),
+      favorite: dco_decode_bool(arr[29]),
+      conflict: dco_decode_bool(arr[30]),
+    );
+  }
+
+  @protected
+  MobilePimTemporal dco_decode_mobile_pim_temporal(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return MobilePimTemporal(
+      kind: dco_decode_String(arr[0]),
+      date: dco_decode_opt_String(arr[1]),
+      utc: dco_decode_opt_String(arr[2]),
+      local: dco_decode_opt_String(arr[3]),
+      timezone: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  MobilePostalAddress dco_decode_mobile_postal_address(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return MobilePostalAddress(
+      label: dco_decode_String(arr[0]),
+      rawHead: dco_decode_opt_String(arr[1]),
+      poBox: dco_decode_String(arr[2]),
+      extended: dco_decode_String(arr[3]),
+      street: dco_decode_String(arr[4]),
+      locality: dco_decode_String(arr[5]),
+      region: dco_decode_String(arr[6]),
+      postalCode: dco_decode_String(arr[7]),
+      country: dco_decode_String(arr[8]),
     );
   }
 
@@ -1249,12 +1345,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
   MobileDeviceSecrets? dco_decode_opt_box_autoadd_mobile_device_secrets(
       dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null
         ? null
         : dco_decode_box_autoadd_mobile_device_secrets(raw);
+  }
+
+  @protected
+  MobilePimTemporal? dco_decode_opt_box_autoadd_mobile_pim_temporal(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_mobile_pim_temporal(raw);
   }
 
   @protected
@@ -1327,10 +1436,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
   MobileDeviceSecrets sse_decode_box_autoadd_mobile_device_secrets(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_mobile_device_secrets(deserializer));
+  }
+
+  @protected
+  MobilePimDraft sse_decode_box_autoadd_mobile_pim_draft(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_mobile_pim_draft(deserializer));
+  }
+
+  @protected
+  MobilePimTemporal sse_decode_box_autoadd_mobile_pim_temporal(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_mobile_pim_temporal(deserializer));
   }
 
   @protected
@@ -1377,11 +1506,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getPlatformInt64();
+  }
+
+  @protected
   Keypair sse_decode_keypair(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_privateKey = sse_decode_u_8_array_32(deserializer);
     var var_publicKey = sse_decode_u_8_array_32(deserializer);
     return Keypair(privateKey: var_privateKey, publicKey: var_publicKey);
+  }
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -1398,6 +1545,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MobileLabeledValue> sse_decode_list_mobile_labeled_value(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobileLabeledValue>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_labeled_value(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<MobilePimItem> sse_decode_list_mobile_pim_item(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1406,6 +1566,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <MobilePimItem>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_mobile_pim_item(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<MobilePostalAddress> sse_decode_list_mobile_postal_address(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobilePostalAddress>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_postal_address(deserializer));
     }
     return ans_;
   }
@@ -1477,6 +1650,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobileLabeledValue sse_decode_mobile_labeled_value(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_label = sse_decode_String(deserializer);
+    var var_value = sse_decode_String(deserializer);
+    var var_rawHead = sse_decode_opt_String(deserializer);
+    return MobileLabeledValue(
+        label: var_label, value: var_value, rawHead: var_rawHead);
+  }
+
+  @protected
   MobileLoginResult sse_decode_mobile_login_result(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1496,6 +1680,75 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobilePimDraft sse_decode_mobile_pim_draft(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_spaceId = sse_decode_String(deserializer);
+    var var_resourceId = sse_decode_opt_String(deserializer);
+    var var_projectionId = sse_decode_opt_String(deserializer);
+    var var_headOperationId = sse_decode_opt_String(deserializer);
+    var var_resourceKind = sse_decode_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_completed = sse_decode_bool(deserializer);
+    var var_completedAt = sse_decode_opt_String(deserializer);
+    var var_notes = sse_decode_opt_String(deserializer);
+    var var_startsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_endsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_dueAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_priority = sse_decode_i_64(deserializer);
+    var var_location = sse_decode_opt_String(deserializer);
+    var var_recurrenceRule = sse_decode_opt_String(deserializer);
+    var var_reminderMinutes = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_categories = sse_decode_list_String(deserializer);
+    var var_namePrefix = sse_decode_String(deserializer);
+    var var_givenName = sse_decode_String(deserializer);
+    var var_middleName = sse_decode_String(deserializer);
+    var var_familyName = sse_decode_String(deserializer);
+    var var_nameSuffix = sse_decode_String(deserializer);
+    var var_emails = sse_decode_list_mobile_labeled_value(deserializer);
+    var var_phones = sse_decode_list_mobile_labeled_value(deserializer);
+    var var_addresses = sse_decode_list_mobile_postal_address(deserializer);
+    var var_organization = sse_decode_opt_String(deserializer);
+    var var_jobTitle = sse_decode_opt_String(deserializer);
+    var var_birthday = sse_decode_opt_String(deserializer);
+    var var_url = sse_decode_opt_String(deserializer);
+    var var_favorite = sse_decode_bool(deserializer);
+    return MobilePimDraft(
+        spaceId: var_spaceId,
+        resourceId: var_resourceId,
+        projectionId: var_projectionId,
+        headOperationId: var_headOperationId,
+        resourceKind: var_resourceKind,
+        title: var_title,
+        completed: var_completed,
+        completedAt: var_completedAt,
+        notes: var_notes,
+        startsAt: var_startsAt,
+        endsAt: var_endsAt,
+        dueAt: var_dueAt,
+        priority: var_priority,
+        location: var_location,
+        recurrenceRule: var_recurrenceRule,
+        reminderMinutes: var_reminderMinutes,
+        categories: var_categories,
+        namePrefix: var_namePrefix,
+        givenName: var_givenName,
+        middleName: var_middleName,
+        familyName: var_familyName,
+        nameSuffix: var_nameSuffix,
+        emails: var_emails,
+        phones: var_phones,
+        addresses: var_addresses,
+        organization: var_organization,
+        jobTitle: var_jobTitle,
+        birthday: var_birthday,
+        url: var_url,
+        favorite: var_favorite);
+  }
+
+  @protected
   MobilePimItem sse_decode_mobile_pim_item(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_spaceId = sse_decode_String(deserializer);
@@ -1505,10 +1758,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_resourceKind = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
     var var_completed = sse_decode_bool(deserializer);
-    var var_email = sse_decode_opt_String(deserializer);
-    var var_phone = sse_decode_opt_String(deserializer);
-    var var_startsAt = sse_decode_opt_String(deserializer);
-    var var_endsAt = sse_decode_opt_String(deserializer);
+    var var_completedAt = sse_decode_opt_String(deserializer);
+    var var_notes = sse_decode_opt_String(deserializer);
+    var var_startsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_endsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_dueAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_priority = sse_decode_i_64(deserializer);
+    var var_location = sse_decode_opt_String(deserializer);
+    var var_recurrenceRule = sse_decode_opt_String(deserializer);
+    var var_reminderMinutes = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_categories = sse_decode_list_String(deserializer);
+    var var_namePrefix = sse_decode_String(deserializer);
+    var var_givenName = sse_decode_String(deserializer);
+    var var_middleName = sse_decode_String(deserializer);
+    var var_familyName = sse_decode_String(deserializer);
+    var var_nameSuffix = sse_decode_String(deserializer);
+    var var_emails = sse_decode_list_mobile_labeled_value(deserializer);
+    var var_phones = sse_decode_list_mobile_labeled_value(deserializer);
+    var var_addresses = sse_decode_list_mobile_postal_address(deserializer);
+    var var_organization = sse_decode_opt_String(deserializer);
+    var var_jobTitle = sse_decode_opt_String(deserializer);
+    var var_birthday = sse_decode_opt_String(deserializer);
+    var var_url = sse_decode_opt_String(deserializer);
+    var var_favorite = sse_decode_bool(deserializer);
     var var_conflict = sse_decode_bool(deserializer);
     return MobilePimItem(
         spaceId: var_spaceId,
@@ -1518,11 +1793,72 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         resourceKind: var_resourceKind,
         title: var_title,
         completed: var_completed,
-        email: var_email,
-        phone: var_phone,
+        completedAt: var_completedAt,
+        notes: var_notes,
         startsAt: var_startsAt,
         endsAt: var_endsAt,
+        dueAt: var_dueAt,
+        priority: var_priority,
+        location: var_location,
+        recurrenceRule: var_recurrenceRule,
+        reminderMinutes: var_reminderMinutes,
+        categories: var_categories,
+        namePrefix: var_namePrefix,
+        givenName: var_givenName,
+        middleName: var_middleName,
+        familyName: var_familyName,
+        nameSuffix: var_nameSuffix,
+        emails: var_emails,
+        phones: var_phones,
+        addresses: var_addresses,
+        organization: var_organization,
+        jobTitle: var_jobTitle,
+        birthday: var_birthday,
+        url: var_url,
+        favorite: var_favorite,
         conflict: var_conflict);
+  }
+
+  @protected
+  MobilePimTemporal sse_decode_mobile_pim_temporal(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_kind = sse_decode_String(deserializer);
+    var var_date = sse_decode_opt_String(deserializer);
+    var var_utc = sse_decode_opt_String(deserializer);
+    var var_local = sse_decode_opt_String(deserializer);
+    var var_timezone = sse_decode_opt_String(deserializer);
+    return MobilePimTemporal(
+        kind: var_kind,
+        date: var_date,
+        utc: var_utc,
+        local: var_local,
+        timezone: var_timezone);
+  }
+
+  @protected
+  MobilePostalAddress sse_decode_mobile_postal_address(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_label = sse_decode_String(deserializer);
+    var var_rawHead = sse_decode_opt_String(deserializer);
+    var var_poBox = sse_decode_String(deserializer);
+    var var_extended = sse_decode_String(deserializer);
+    var var_street = sse_decode_String(deserializer);
+    var var_locality = sse_decode_String(deserializer);
+    var var_region = sse_decode_String(deserializer);
+    var var_postalCode = sse_decode_String(deserializer);
+    var var_country = sse_decode_String(deserializer);
+    return MobilePostalAddress(
+        label: var_label,
+        rawHead: var_rawHead,
+        poBox: var_poBox,
+        extended: var_extended,
+        street: var_street,
+        locality: var_locality,
+        region: var_region,
+        postalCode: var_postalCode,
+        country: var_country);
   }
 
   @protected
@@ -1592,12 +1928,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   MobileDeviceSecrets? sse_decode_opt_box_autoadd_mobile_device_secrets(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_mobile_device_secrets(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  MobilePimTemporal? sse_decode_opt_box_autoadd_mobile_pim_temporal(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_mobile_pim_temporal(deserializer));
     } else {
       return null;
     }
@@ -1683,10 +2042,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+      PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_mobile_device_secrets(
       MobileDeviceSecrets self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_mobile_device_secrets(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_mobile_pim_draft(
+      MobilePimDraft self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_mobile_pim_draft(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_mobile_pim_temporal(
+      MobilePimTemporal self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_mobile_pim_temporal(self, serializer);
   }
 
   @protected
@@ -1728,10 +2108,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putPlatformInt64(self);
+  }
+
+  @protected
   void sse_encode_keypair(Keypair self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_8_array_32(self.privateKey, serializer);
     sse_encode_u_8_array_32(self.publicKey, serializer);
+  }
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_String(item, serializer);
+    }
   }
 
   @protected
@@ -1745,12 +2140,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_mobile_labeled_value(
+      List<MobileLabeledValue> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_labeled_value(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_mobile_pim_item(
       List<MobilePimItem> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_mobile_pim_item(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_mobile_postal_address(
+      List<MobilePostalAddress> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_postal_address(item, serializer);
     }
   }
 
@@ -1806,6 +2221,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_mobile_labeled_value(
+      MobileLabeledValue self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.label, serializer);
+    sse_encode_String(self.value, serializer);
+    sse_encode_opt_String(self.rawHead, serializer);
+  }
+
+  @protected
   void sse_encode_mobile_login_result(
       MobileLoginResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1815,6 +2239,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.deviceEnrollmentToken, serializer);
     sse_encode_bool(self.totpVerified, serializer);
     sse_encode_opt_u_8_array_32(self.accountMasterKey, serializer);
+  }
+
+  @protected
+  void sse_encode_mobile_pim_draft(
+      MobilePimDraft self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.spaceId, serializer);
+    sse_encode_opt_String(self.resourceId, serializer);
+    sse_encode_opt_String(self.projectionId, serializer);
+    sse_encode_opt_String(self.headOperationId, serializer);
+    sse_encode_String(self.resourceKind, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_bool(self.completed, serializer);
+    sse_encode_opt_String(self.completedAt, serializer);
+    sse_encode_opt_String(self.notes, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.startsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.endsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.dueAt, serializer);
+    sse_encode_i_64(self.priority, serializer);
+    sse_encode_opt_String(self.location, serializer);
+    sse_encode_opt_String(self.recurrenceRule, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.reminderMinutes, serializer);
+    sse_encode_list_String(self.categories, serializer);
+    sse_encode_String(self.namePrefix, serializer);
+    sse_encode_String(self.givenName, serializer);
+    sse_encode_String(self.middleName, serializer);
+    sse_encode_String(self.familyName, serializer);
+    sse_encode_String(self.nameSuffix, serializer);
+    sse_encode_list_mobile_labeled_value(self.emails, serializer);
+    sse_encode_list_mobile_labeled_value(self.phones, serializer);
+    sse_encode_list_mobile_postal_address(self.addresses, serializer);
+    sse_encode_opt_String(self.organization, serializer);
+    sse_encode_opt_String(self.jobTitle, serializer);
+    sse_encode_opt_String(self.birthday, serializer);
+    sse_encode_opt_String(self.url, serializer);
+    sse_encode_bool(self.favorite, serializer);
   }
 
   @protected
@@ -1828,11 +2288,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.resourceKind, serializer);
     sse_encode_String(self.title, serializer);
     sse_encode_bool(self.completed, serializer);
-    sse_encode_opt_String(self.email, serializer);
-    sse_encode_opt_String(self.phone, serializer);
-    sse_encode_opt_String(self.startsAt, serializer);
-    sse_encode_opt_String(self.endsAt, serializer);
+    sse_encode_opt_String(self.completedAt, serializer);
+    sse_encode_opt_String(self.notes, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.startsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.endsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.dueAt, serializer);
+    sse_encode_i_64(self.priority, serializer);
+    sse_encode_opt_String(self.location, serializer);
+    sse_encode_opt_String(self.recurrenceRule, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.reminderMinutes, serializer);
+    sse_encode_list_String(self.categories, serializer);
+    sse_encode_String(self.namePrefix, serializer);
+    sse_encode_String(self.givenName, serializer);
+    sse_encode_String(self.middleName, serializer);
+    sse_encode_String(self.familyName, serializer);
+    sse_encode_String(self.nameSuffix, serializer);
+    sse_encode_list_mobile_labeled_value(self.emails, serializer);
+    sse_encode_list_mobile_labeled_value(self.phones, serializer);
+    sse_encode_list_mobile_postal_address(self.addresses, serializer);
+    sse_encode_opt_String(self.organization, serializer);
+    sse_encode_opt_String(self.jobTitle, serializer);
+    sse_encode_opt_String(self.birthday, serializer);
+    sse_encode_opt_String(self.url, serializer);
+    sse_encode_bool(self.favorite, serializer);
     sse_encode_bool(self.conflict, serializer);
+  }
+
+  @protected
+  void sse_encode_mobile_pim_temporal(
+      MobilePimTemporal self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.kind, serializer);
+    sse_encode_opt_String(self.date, serializer);
+    sse_encode_opt_String(self.utc, serializer);
+    sse_encode_opt_String(self.local, serializer);
+    sse_encode_opt_String(self.timezone, serializer);
+  }
+
+  @protected
+  void sse_encode_mobile_postal_address(
+      MobilePostalAddress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.label, serializer);
+    sse_encode_opt_String(self.rawHead, serializer);
+    sse_encode_String(self.poBox, serializer);
+    sse_encode_String(self.extended, serializer);
+    sse_encode_String(self.street, serializer);
+    sse_encode_String(self.locality, serializer);
+    sse_encode_String(self.region, serializer);
+    sse_encode_String(self.postalCode, serializer);
+    sse_encode_String(self.country, serializer);
   }
 
   @protected
@@ -1884,6 +2389,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+      PlatformInt64? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_mobile_device_secrets(
       MobileDeviceSecrets? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1891,6 +2407,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_mobile_device_secrets(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_mobile_pim_temporal(
+      MobilePimTemporal? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_mobile_pim_temporal(self, serializer);
     }
   }
 

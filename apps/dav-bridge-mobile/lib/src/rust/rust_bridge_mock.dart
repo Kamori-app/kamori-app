@@ -202,36 +202,44 @@ class MockRustBridgeApi implements RustBridgeApi {
       List<PimItem>.unmodifiable(_pimItems);
 
   @override
-  Future<PimItem> upsertPimItem({
-    required String spaceId,
-    String? resourceId,
-    String? projectionId,
-    String? headOperationId,
-    required PimItemKind kind,
-    required String title,
-    bool completed = false,
-    String? email,
-    String? phone,
-    String? startsAt,
-    String? endsAt,
-  }) async {
-    if (!_collectionKeys.containsKey(spaceId) || title.trim().isEmpty) {
+  Future<PimItem> upsertPimItem({required PimDraft draft}) async {
+    if (!_collectionKeys.containsKey(draft.spaceId) ||
+        draft.title.trim().isEmpty) {
       throw ArgumentError('Invalid PIM item');
     }
-    final logicalId = resourceId ?? const Uuid().v4();
+    final logicalId = draft.resourceId ?? const Uuid().v4();
     final item = PimItem(
-      spaceId: spaceId,
+      spaceId: draft.spaceId,
       resourceId: logicalId,
-      projectionId: projectionId ??
-          '$logicalId.${kind == PimItemKind.contact ? 'vcf' : 'ics'}',
+      projectionId: draft.projectionId ??
+          '$logicalId.${draft.kind == PimItemKind.contact ? 'vcf' : 'ics'}',
       headOperationId: const Uuid().v4(),
-      kind: kind,
-      title: title.trim(),
-      completed: completed,
-      email: email,
-      phone: phone,
-      startsAt: startsAt,
-      endsAt: endsAt,
+      kind: draft.kind,
+      title: draft.title.trim(),
+      completed: draft.completed,
+      completedAt: draft.completedAt,
+      notes: draft.notes,
+      startsAt: draft.startsAt,
+      endsAt: draft.endsAt,
+      dueAt: draft.dueAt,
+      priority: draft.priority,
+      location: draft.location,
+      recurrenceRule: draft.recurrenceRule,
+      reminderMinutes: draft.reminderMinutes,
+      categories: draft.categories,
+      namePrefix: draft.namePrefix,
+      givenName: draft.givenName,
+      middleName: draft.middleName,
+      familyName: draft.familyName,
+      nameSuffix: draft.nameSuffix,
+      emails: draft.emails,
+      phones: draft.phones,
+      addresses: draft.addresses,
+      organization: draft.organization,
+      jobTitle: draft.jobTitle,
+      birthday: draft.birthday,
+      url: draft.url,
+      favorite: draft.favorite,
     );
     _pimItems.removeWhere(
       (existing) =>

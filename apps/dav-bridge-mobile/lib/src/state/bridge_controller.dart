@@ -300,41 +300,21 @@ class BridgeController extends Notifier<BridgeState> {
     }
   }
 
-  Future<void> savePimItem({
-    required String spaceId,
-    String? resourceId,
-    String? projectionId,
-    String? headOperationId,
-    required PimItemKind kind,
-    required String title,
-    bool completed = false,
-    String? email,
-    String? phone,
-    String? startsAt,
-    String? endsAt,
-  }) async {
-    if (!_canWriteSpace(spaceId)) {
+  void clearError() {
+    state = state.copyWith(clearError: true);
+  }
+
+  Future<bool> savePimItem(PimDraft draft) async {
+    if (!_canWriteSpace(draft.spaceId)) {
       state = state.copyWith(
         error: 'This space is read-only. Ask an owner for editor access.',
       );
-      return;
+      return false;
     }
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       await _hydrateRefreshTokenIntoRuntime();
-      final item = await _rustBridge.upsertPimItem(
-        spaceId: spaceId,
-        resourceId: resourceId,
-        projectionId: projectionId,
-        headOperationId: headOperationId,
-        kind: kind,
-        title: title,
-        completed: completed,
-        email: email,
-        phone: phone,
-        startsAt: startsAt,
-        endsAt: endsAt,
-      );
+      final item = await _rustBridge.upsertPimItem(draft: draft);
       await _persistRuntimeRefreshToken();
       final items = [...state.pimItems]
         ..removeWhere(
@@ -346,9 +326,11 @@ class BridgeController extends Notifier<BridgeState> {
       items.sort((left, right) => left.title.compareTo(right.title));
       state = state.copyWith(isBusy: false, pimItems: items);
       await _projectSystemCopies(items);
+      return true;
     } catch (error) {
       state =
           state.copyWith(isBusy: false, error: 'Failed to save item: $error');
+      return false;
     }
   }
 
@@ -649,8 +631,10 @@ class BridgeController extends Notifier<BridgeState> {
         calendarProjectionCollectionIds: enabledCollections,
       );
     } catch (error) {
+      final settings = await _systemProjectionService.readSettings();
       state = state.copyWith(
         isBusy: false,
+        calendarProjectionCollectionIds: settings.calendarCollectionIds,
         error: 'Failed to update Calendar integration: $error',
       );
     }
@@ -691,8 +675,10 @@ class BridgeController extends Notifier<BridgeState> {
         contactsProjectionCollectionIds: enabledCollections,
       );
     } catch (error) {
+      final settings = await _systemProjectionService.readSettings();
       state = state.copyWith(
         isBusy: false,
+        contactsProjectionCollectionIds: settings.contactsCollectionIds,
         error: 'Failed to update Contacts integration: $error',
       );
     }
@@ -953,7 +939,8 @@ class BridgeController extends Notifier<BridgeState> {
     final rotationRequestId =
         await _rustBridge.exportRefreshRotationRequestId();
     if (rotationRequestId == null || rotationRequestId.isEmpty) {
-      throw StateError('Rust runtime did not expose a refresh rotation identity');
+      throw StateError(
+          'Rust runtime did not expose a refresh rotation identity');
     }
     await _refreshTokenStorage.write(
       cloudBaseUrl: state.cloudBaseUrl,

@@ -1041,35 +1041,12 @@ fn wire__crate__frb_api__mobile_upsert_pim_item_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_space_id = <String>::sse_decode(&mut deserializer);
-            let api_resource_id = <Option<String>>::sse_decode(&mut deserializer);
-            let api_projection_id = <Option<String>>::sse_decode(&mut deserializer);
-            let api_head_operation_id = <Option<String>>::sse_decode(&mut deserializer);
-            let api_resource_kind = <String>::sse_decode(&mut deserializer);
-            let api_title = <String>::sse_decode(&mut deserializer);
-            let api_completed = <bool>::sse_decode(&mut deserializer);
-            let api_email = <Option<String>>::sse_decode(&mut deserializer);
-            let api_phone = <Option<String>>::sse_decode(&mut deserializer);
-            let api_starts_at = <Option<String>>::sse_decode(&mut deserializer);
-            let api_ends_at = <Option<String>>::sse_decode(&mut deserializer);
+            let api_draft = <crate::frb_api::types::MobilePimDraft>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = crate::frb_api::mobile_upsert_pim_item(
-                            api_space_id,
-                            api_resource_id,
-                            api_projection_id,
-                            api_head_operation_id,
-                            api_resource_kind,
-                            api_title,
-                            api_completed,
-                            api_email,
-                            api_phone,
-                            api_starts_at,
-                            api_ends_at,
-                        )
-                        .await?;
+                        let output_ok = crate::frb_api::mobile_upsert_pim_item(api_draft).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -1143,6 +1120,13 @@ impl SseDecode for i32 {
     }
 }
 
+impl SseDecode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_i64::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for crate::crypto::Keypair {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1152,6 +1136,18 @@ impl SseDecode for crate::crypto::Keypair {
             private_key: var_privateKey,
             public_key: var_publicKey,
         };
+    }
+}
+
+impl SseDecode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
     }
 }
 
@@ -1169,6 +1165,20 @@ impl SseDecode for Vec<crate::frb_api::types::MobileCollection> {
     }
 }
 
+impl SseDecode for Vec<crate::frb_api::types::MobileLabeledValue> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::frb_api::types::MobileLabeledValue>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::frb_api::types::MobilePimItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1176,6 +1186,20 @@ impl SseDecode for Vec<crate::frb_api::types::MobilePimItem> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::frb_api::types::MobilePimItem>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::frb_api::types::MobilePostalAddress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::frb_api::types::MobilePostalAddress>::sse_decode(
                 deserializer,
             ));
         }
@@ -1251,6 +1275,20 @@ impl SseDecode for crate::frb_api::types::MobileIssuedInviteCode {
     }
 }
 
+impl SseDecode for crate::frb_api::types::MobileLabeledValue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_value = <String>::sse_decode(deserializer);
+        let mut var_rawHead = <Option<String>>::sse_decode(deserializer);
+        return crate::frb_api::types::MobileLabeledValue {
+            label: var_label,
+            value: var_value,
+            raw_head: var_rawHead,
+        };
+    }
+}
+
 impl SseDecode for crate::frb_api::types::MobileLoginResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1271,6 +1309,80 @@ impl SseDecode for crate::frb_api::types::MobileLoginResult {
     }
 }
 
+impl SseDecode for crate::frb_api::types::MobilePimDraft {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_spaceId = <String>::sse_decode(deserializer);
+        let mut var_resourceId = <Option<String>>::sse_decode(deserializer);
+        let mut var_projectionId = <Option<String>>::sse_decode(deserializer);
+        let mut var_headOperationId = <Option<String>>::sse_decode(deserializer);
+        let mut var_resourceKind = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_completed = <bool>::sse_decode(deserializer);
+        let mut var_completedAt = <Option<String>>::sse_decode(deserializer);
+        let mut var_notes = <Option<String>>::sse_decode(deserializer);
+        let mut var_startsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_endsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_dueAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_priority = <i64>::sse_decode(deserializer);
+        let mut var_location = <Option<String>>::sse_decode(deserializer);
+        let mut var_recurrenceRule = <Option<String>>::sse_decode(deserializer);
+        let mut var_reminderMinutes = <Option<i64>>::sse_decode(deserializer);
+        let mut var_categories = <Vec<String>>::sse_decode(deserializer);
+        let mut var_namePrefix = <String>::sse_decode(deserializer);
+        let mut var_givenName = <String>::sse_decode(deserializer);
+        let mut var_middleName = <String>::sse_decode(deserializer);
+        let mut var_familyName = <String>::sse_decode(deserializer);
+        let mut var_nameSuffix = <String>::sse_decode(deserializer);
+        let mut var_emails =
+            <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_decode(deserializer);
+        let mut var_phones =
+            <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_decode(deserializer);
+        let mut var_addresses =
+            <Vec<crate::frb_api::types::MobilePostalAddress>>::sse_decode(deserializer);
+        let mut var_organization = <Option<String>>::sse_decode(deserializer);
+        let mut var_jobTitle = <Option<String>>::sse_decode(deserializer);
+        let mut var_birthday = <Option<String>>::sse_decode(deserializer);
+        let mut var_url = <Option<String>>::sse_decode(deserializer);
+        let mut var_favorite = <bool>::sse_decode(deserializer);
+        return crate::frb_api::types::MobilePimDraft {
+            space_id: var_spaceId,
+            resource_id: var_resourceId,
+            projection_id: var_projectionId,
+            head_operation_id: var_headOperationId,
+            resource_kind: var_resourceKind,
+            title: var_title,
+            completed: var_completed,
+            completed_at: var_completedAt,
+            notes: var_notes,
+            starts_at: var_startsAt,
+            ends_at: var_endsAt,
+            due_at: var_dueAt,
+            priority: var_priority,
+            location: var_location,
+            recurrence_rule: var_recurrenceRule,
+            reminder_minutes: var_reminderMinutes,
+            categories: var_categories,
+            name_prefix: var_namePrefix,
+            given_name: var_givenName,
+            middle_name: var_middleName,
+            family_name: var_familyName,
+            name_suffix: var_nameSuffix,
+            emails: var_emails,
+            phones: var_phones,
+            addresses: var_addresses,
+            organization: var_organization,
+            job_title: var_jobTitle,
+            birthday: var_birthday,
+            url: var_url,
+            favorite: var_favorite,
+        };
+    }
+}
+
 impl SseDecode for crate::frb_api::types::MobilePimItem {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1281,10 +1393,35 @@ impl SseDecode for crate::frb_api::types::MobilePimItem {
         let mut var_resourceKind = <String>::sse_decode(deserializer);
         let mut var_title = <String>::sse_decode(deserializer);
         let mut var_completed = <bool>::sse_decode(deserializer);
-        let mut var_email = <Option<String>>::sse_decode(deserializer);
-        let mut var_phone = <Option<String>>::sse_decode(deserializer);
-        let mut var_startsAt = <Option<String>>::sse_decode(deserializer);
-        let mut var_endsAt = <Option<String>>::sse_decode(deserializer);
+        let mut var_completedAt = <Option<String>>::sse_decode(deserializer);
+        let mut var_notes = <Option<String>>::sse_decode(deserializer);
+        let mut var_startsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_endsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_dueAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_priority = <i64>::sse_decode(deserializer);
+        let mut var_location = <Option<String>>::sse_decode(deserializer);
+        let mut var_recurrenceRule = <Option<String>>::sse_decode(deserializer);
+        let mut var_reminderMinutes = <Option<i64>>::sse_decode(deserializer);
+        let mut var_categories = <Vec<String>>::sse_decode(deserializer);
+        let mut var_namePrefix = <String>::sse_decode(deserializer);
+        let mut var_givenName = <String>::sse_decode(deserializer);
+        let mut var_middleName = <String>::sse_decode(deserializer);
+        let mut var_familyName = <String>::sse_decode(deserializer);
+        let mut var_nameSuffix = <String>::sse_decode(deserializer);
+        let mut var_emails =
+            <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_decode(deserializer);
+        let mut var_phones =
+            <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_decode(deserializer);
+        let mut var_addresses =
+            <Vec<crate::frb_api::types::MobilePostalAddress>>::sse_decode(deserializer);
+        let mut var_organization = <Option<String>>::sse_decode(deserializer);
+        let mut var_jobTitle = <Option<String>>::sse_decode(deserializer);
+        let mut var_birthday = <Option<String>>::sse_decode(deserializer);
+        let mut var_url = <Option<String>>::sse_decode(deserializer);
+        let mut var_favorite = <bool>::sse_decode(deserializer);
         let mut var_conflict = <bool>::sse_decode(deserializer);
         return crate::frb_api::types::MobilePimItem {
             space_id: var_spaceId,
@@ -1294,11 +1431,74 @@ impl SseDecode for crate::frb_api::types::MobilePimItem {
             resource_kind: var_resourceKind,
             title: var_title,
             completed: var_completed,
-            email: var_email,
-            phone: var_phone,
+            completed_at: var_completedAt,
+            notes: var_notes,
             starts_at: var_startsAt,
             ends_at: var_endsAt,
+            due_at: var_dueAt,
+            priority: var_priority,
+            location: var_location,
+            recurrence_rule: var_recurrenceRule,
+            reminder_minutes: var_reminderMinutes,
+            categories: var_categories,
+            name_prefix: var_namePrefix,
+            given_name: var_givenName,
+            middle_name: var_middleName,
+            family_name: var_familyName,
+            name_suffix: var_nameSuffix,
+            emails: var_emails,
+            phones: var_phones,
+            addresses: var_addresses,
+            organization: var_organization,
+            job_title: var_jobTitle,
+            birthday: var_birthday,
+            url: var_url,
+            favorite: var_favorite,
             conflict: var_conflict,
+        };
+    }
+}
+
+impl SseDecode for crate::frb_api::types::MobilePimTemporal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind = <String>::sse_decode(deserializer);
+        let mut var_date = <Option<String>>::sse_decode(deserializer);
+        let mut var_utc = <Option<String>>::sse_decode(deserializer);
+        let mut var_local = <Option<String>>::sse_decode(deserializer);
+        let mut var_timezone = <Option<String>>::sse_decode(deserializer);
+        return crate::frb_api::types::MobilePimTemporal {
+            kind: var_kind,
+            date: var_date,
+            utc: var_utc,
+            local: var_local,
+            timezone: var_timezone,
+        };
+    }
+}
+
+impl SseDecode for crate::frb_api::types::MobilePostalAddress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_rawHead = <Option<String>>::sse_decode(deserializer);
+        let mut var_poBox = <String>::sse_decode(deserializer);
+        let mut var_extended = <String>::sse_decode(deserializer);
+        let mut var_street = <String>::sse_decode(deserializer);
+        let mut var_locality = <String>::sse_decode(deserializer);
+        let mut var_region = <String>::sse_decode(deserializer);
+        let mut var_postalCode = <String>::sse_decode(deserializer);
+        let mut var_country = <String>::sse_decode(deserializer);
+        return crate::frb_api::types::MobilePostalAddress {
+            label: var_label,
+            raw_head: var_rawHead,
+            po_box: var_poBox,
+            extended: var_extended,
+            street: var_street,
+            locality: var_locality,
+            region: var_region,
+            postal_code: var_postalCode,
+            country: var_country,
         };
     }
 }
@@ -1376,11 +1576,35 @@ impl SseDecode for Option<String> {
     }
 }
 
+impl SseDecode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<i64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::frb_api::types::MobileDeviceSecrets> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::frb_api::types::MobileDeviceSecrets>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::frb_api::types::MobilePimTemporal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::frb_api::types::MobilePimTemporal>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -1723,6 +1947,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileIssuedInvite
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobileLabeledValue {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.label.into_into_dart().into_dart(),
+            self.value.into_into_dart().into_dart(),
+            self.raw_head.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::types::MobileLabeledValue
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileLabeledValue>
+    for crate::frb_api::types::MobileLabeledValue
+{
+    fn into_into_dart(self) -> crate::frb_api::types::MobileLabeledValue {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobileLoginResult {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1748,6 +1994,55 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileLoginResult>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePimDraft {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.space_id.into_into_dart().into_dart(),
+            self.resource_id.into_into_dart().into_dart(),
+            self.projection_id.into_into_dart().into_dart(),
+            self.head_operation_id.into_into_dart().into_dart(),
+            self.resource_kind.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.completed.into_into_dart().into_dart(),
+            self.completed_at.into_into_dart().into_dart(),
+            self.notes.into_into_dart().into_dart(),
+            self.starts_at.into_into_dart().into_dart(),
+            self.ends_at.into_into_dart().into_dart(),
+            self.due_at.into_into_dart().into_dart(),
+            self.priority.into_into_dart().into_dart(),
+            self.location.into_into_dart().into_dart(),
+            self.recurrence_rule.into_into_dart().into_dart(),
+            self.reminder_minutes.into_into_dart().into_dart(),
+            self.categories.into_into_dart().into_dart(),
+            self.name_prefix.into_into_dart().into_dart(),
+            self.given_name.into_into_dart().into_dart(),
+            self.middle_name.into_into_dart().into_dart(),
+            self.family_name.into_into_dart().into_dart(),
+            self.name_suffix.into_into_dart().into_dart(),
+            self.emails.into_into_dart().into_dart(),
+            self.phones.into_into_dart().into_dart(),
+            self.addresses.into_into_dart().into_dart(),
+            self.organization.into_into_dart().into_dart(),
+            self.job_title.into_into_dart().into_dart(),
+            self.birthday.into_into_dart().into_dart(),
+            self.url.into_into_dart().into_dart(),
+            self.favorite.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::types::MobilePimDraft
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobilePimDraft>
+    for crate::frb_api::types::MobilePimDraft
+{
+    fn into_into_dart(self) -> crate::frb_api::types::MobilePimDraft {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePimItem {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1758,10 +2053,29 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePimItem {
             self.resource_kind.into_into_dart().into_dart(),
             self.title.into_into_dart().into_dart(),
             self.completed.into_into_dart().into_dart(),
-            self.email.into_into_dart().into_dart(),
-            self.phone.into_into_dart().into_dart(),
+            self.completed_at.into_into_dart().into_dart(),
+            self.notes.into_into_dart().into_dart(),
             self.starts_at.into_into_dart().into_dart(),
             self.ends_at.into_into_dart().into_dart(),
+            self.due_at.into_into_dart().into_dart(),
+            self.priority.into_into_dart().into_dart(),
+            self.location.into_into_dart().into_dart(),
+            self.recurrence_rule.into_into_dart().into_dart(),
+            self.reminder_minutes.into_into_dart().into_dart(),
+            self.categories.into_into_dart().into_dart(),
+            self.name_prefix.into_into_dart().into_dart(),
+            self.given_name.into_into_dart().into_dart(),
+            self.middle_name.into_into_dart().into_dart(),
+            self.family_name.into_into_dart().into_dart(),
+            self.name_suffix.into_into_dart().into_dart(),
+            self.emails.into_into_dart().into_dart(),
+            self.phones.into_into_dart().into_dart(),
+            self.addresses.into_into_dart().into_dart(),
+            self.organization.into_into_dart().into_dart(),
+            self.job_title.into_into_dart().into_dart(),
+            self.birthday.into_into_dart().into_dart(),
+            self.url.into_into_dart().into_dart(),
+            self.favorite.into_into_dart().into_dart(),
             self.conflict.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -1775,6 +2089,58 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobilePimItem>
     for crate::frb_api::types::MobilePimItem
 {
     fn into_into_dart(self) -> crate::frb_api::types::MobilePimItem {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePimTemporal {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.date.into_into_dart().into_dart(),
+            self.utc.into_into_dart().into_dart(),
+            self.local.into_into_dart().into_dart(),
+            self.timezone.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::types::MobilePimTemporal
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobilePimTemporal>
+    for crate::frb_api::types::MobilePimTemporal
+{
+    fn into_into_dart(self) -> crate::frb_api::types::MobilePimTemporal {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePostalAddress {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.label.into_into_dart().into_dart(),
+            self.raw_head.into_into_dart().into_dart(),
+            self.po_box.into_into_dart().into_dart(),
+            self.extended.into_into_dart().into_dart(),
+            self.street.into_into_dart().into_dart(),
+            self.locality.into_into_dart().into_dart(),
+            self.region.into_into_dart().into_dart(),
+            self.postal_code.into_into_dart().into_dart(),
+            self.country.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::types::MobilePostalAddress
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobilePostalAddress>
+    for crate::frb_api::types::MobilePostalAddress
+{
+    fn into_into_dart(self) -> crate::frb_api::types::MobilePostalAddress {
         self
     }
 }
@@ -1921,11 +2287,28 @@ impl SseEncode for i32 {
     }
 }
 
+impl SseEncode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
+    }
+}
+
 impl SseEncode for crate::crypto::Keypair {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <[u8; 32]>::sse_encode(self.private_key, serializer);
         <[u8; 32]>::sse_encode(self.public_key, serializer);
+    }
+}
+
+impl SseEncode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <String>::sse_encode(item, serializer);
+        }
     }
 }
 
@@ -1939,12 +2322,32 @@ impl SseEncode for Vec<crate::frb_api::types::MobileCollection> {
     }
 }
 
+impl SseEncode for Vec<crate::frb_api::types::MobileLabeledValue> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::frb_api::types::MobileLabeledValue>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::frb_api::types::MobilePimItem> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::frb_api::types::MobilePimItem>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::frb_api::types::MobilePostalAddress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::frb_api::types::MobilePostalAddress>::sse_encode(item, serializer);
         }
     }
 }
@@ -1993,6 +2396,15 @@ impl SseEncode for crate::frb_api::types::MobileIssuedInviteCode {
     }
 }
 
+impl SseEncode for crate::frb_api::types::MobileLabeledValue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.label, serializer);
+        <String>::sse_encode(self.value, serializer);
+        <Option<String>>::sse_encode(self.raw_head, serializer);
+    }
+}
+
 impl SseEncode for crate::frb_api::types::MobileLoginResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2002,6 +2414,42 @@ impl SseEncode for crate::frb_api::types::MobileLoginResult {
         <Option<String>>::sse_encode(self.device_enrollment_token, serializer);
         <bool>::sse_encode(self.totp_verified, serializer);
         <Option<[u8; 32]>>::sse_encode(self.account_master_key, serializer);
+    }
+}
+
+impl SseEncode for crate::frb_api::types::MobilePimDraft {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.space_id, serializer);
+        <Option<String>>::sse_encode(self.resource_id, serializer);
+        <Option<String>>::sse_encode(self.projection_id, serializer);
+        <Option<String>>::sse_encode(self.head_operation_id, serializer);
+        <String>::sse_encode(self.resource_kind, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <bool>::sse_encode(self.completed, serializer);
+        <Option<String>>::sse_encode(self.completed_at, serializer);
+        <Option<String>>::sse_encode(self.notes, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.starts_at, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.ends_at, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.due_at, serializer);
+        <i64>::sse_encode(self.priority, serializer);
+        <Option<String>>::sse_encode(self.location, serializer);
+        <Option<String>>::sse_encode(self.recurrence_rule, serializer);
+        <Option<i64>>::sse_encode(self.reminder_minutes, serializer);
+        <Vec<String>>::sse_encode(self.categories, serializer);
+        <String>::sse_encode(self.name_prefix, serializer);
+        <String>::sse_encode(self.given_name, serializer);
+        <String>::sse_encode(self.middle_name, serializer);
+        <String>::sse_encode(self.family_name, serializer);
+        <String>::sse_encode(self.name_suffix, serializer);
+        <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_encode(self.emails, serializer);
+        <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_encode(self.phones, serializer);
+        <Vec<crate::frb_api::types::MobilePostalAddress>>::sse_encode(self.addresses, serializer);
+        <Option<String>>::sse_encode(self.organization, serializer);
+        <Option<String>>::sse_encode(self.job_title, serializer);
+        <Option<String>>::sse_encode(self.birthday, serializer);
+        <Option<String>>::sse_encode(self.url, serializer);
+        <bool>::sse_encode(self.favorite, serializer);
     }
 }
 
@@ -2015,11 +2463,56 @@ impl SseEncode for crate::frb_api::types::MobilePimItem {
         <String>::sse_encode(self.resource_kind, serializer);
         <String>::sse_encode(self.title, serializer);
         <bool>::sse_encode(self.completed, serializer);
-        <Option<String>>::sse_encode(self.email, serializer);
-        <Option<String>>::sse_encode(self.phone, serializer);
-        <Option<String>>::sse_encode(self.starts_at, serializer);
-        <Option<String>>::sse_encode(self.ends_at, serializer);
+        <Option<String>>::sse_encode(self.completed_at, serializer);
+        <Option<String>>::sse_encode(self.notes, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.starts_at, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.ends_at, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.due_at, serializer);
+        <i64>::sse_encode(self.priority, serializer);
+        <Option<String>>::sse_encode(self.location, serializer);
+        <Option<String>>::sse_encode(self.recurrence_rule, serializer);
+        <Option<i64>>::sse_encode(self.reminder_minutes, serializer);
+        <Vec<String>>::sse_encode(self.categories, serializer);
+        <String>::sse_encode(self.name_prefix, serializer);
+        <String>::sse_encode(self.given_name, serializer);
+        <String>::sse_encode(self.middle_name, serializer);
+        <String>::sse_encode(self.family_name, serializer);
+        <String>::sse_encode(self.name_suffix, serializer);
+        <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_encode(self.emails, serializer);
+        <Vec<crate::frb_api::types::MobileLabeledValue>>::sse_encode(self.phones, serializer);
+        <Vec<crate::frb_api::types::MobilePostalAddress>>::sse_encode(self.addresses, serializer);
+        <Option<String>>::sse_encode(self.organization, serializer);
+        <Option<String>>::sse_encode(self.job_title, serializer);
+        <Option<String>>::sse_encode(self.birthday, serializer);
+        <Option<String>>::sse_encode(self.url, serializer);
+        <bool>::sse_encode(self.favorite, serializer);
         <bool>::sse_encode(self.conflict, serializer);
+    }
+}
+
+impl SseEncode for crate::frb_api::types::MobilePimTemporal {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.kind, serializer);
+        <Option<String>>::sse_encode(self.date, serializer);
+        <Option<String>>::sse_encode(self.utc, serializer);
+        <Option<String>>::sse_encode(self.local, serializer);
+        <Option<String>>::sse_encode(self.timezone, serializer);
+    }
+}
+
+impl SseEncode for crate::frb_api::types::MobilePostalAddress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.label, serializer);
+        <Option<String>>::sse_encode(self.raw_head, serializer);
+        <String>::sse_encode(self.po_box, serializer);
+        <String>::sse_encode(self.extended, serializer);
+        <String>::sse_encode(self.street, serializer);
+        <String>::sse_encode(self.locality, serializer);
+        <String>::sse_encode(self.region, serializer);
+        <String>::sse_encode(self.postal_code, serializer);
+        <String>::sse_encode(self.country, serializer);
     }
 }
 
@@ -2071,12 +2564,32 @@ impl SseEncode for Option<String> {
     }
 }
 
+impl SseEncode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <i64>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::frb_api::types::MobileDeviceSecrets> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::frb_api::types::MobileDeviceSecrets>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::frb_api::types::MobilePimTemporal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::frb_api::types::MobilePimTemporal>::sse_encode(value, serializer);
         }
     }
 }

@@ -195,7 +195,29 @@ class FrbRustBridgeApi implements RustBridgeApi {
     return synced.toInt();
   }
 
-      PimItem _fromFrbPimItem(frb_types.MobilePimItem item) => PimItem(
+  static PimTemporal? _fromFrbTemporal(frb_types.MobilePimTemporal? value) =>
+      value == null
+          ? null
+          : PimTemporal(
+              kind: value.kind,
+              date: value.date,
+              utc: value.utc,
+              local: value.local,
+              timezone: value.timezone,
+            );
+
+  static frb_types.MobilePimTemporal? _toFrbTemporal(PimTemporal? value) =>
+      value == null
+          ? null
+          : frb_types.MobilePimTemporal(
+              kind: value.kind,
+              date: value.date,
+              utc: value.utc,
+              local: value.local,
+              timezone: value.timezone,
+            );
+
+  PimItem _fromFrbPimItem(frb_types.MobilePimItem item) => PimItem(
         spaceId: item.spaceId,
         resourceId: item.resourceId,
         projectionId: item.projectionId,
@@ -203,10 +225,53 @@ class FrbRustBridgeApi implements RustBridgeApi {
         kind: PimItemKind.fromWireName(item.resourceKind),
         title: item.title,
         completed: item.completed,
-        email: item.email,
-        phone: item.phone,
-        startsAt: item.startsAt,
-        endsAt: item.endsAt,
+        completedAt: item.completedAt,
+        notes: item.notes,
+        startsAt: _fromFrbTemporal(item.startsAt),
+        endsAt: _fromFrbTemporal(item.endsAt),
+        dueAt: _fromFrbTemporal(item.dueAt),
+        priority: item.priority.toInt(),
+        location: item.location,
+        recurrenceRule: item.recurrenceRule,
+        reminderMinutes: item.reminderMinutes?.toInt(),
+        categories: item.categories,
+        namePrefix: item.namePrefix,
+        givenName: item.givenName,
+        middleName: item.middleName,
+        familyName: item.familyName,
+        nameSuffix: item.nameSuffix,
+        emails: item.emails
+            .map((value) => PimLabeledValue(
+                  label: value.label,
+                  value: value.value,
+                  rawHead: value.rawHead,
+                ))
+            .toList(growable: false),
+        phones: item.phones
+            .map((value) => PimLabeledValue(
+                  label: value.label,
+                  value: value.value,
+                  rawHead: value.rawHead,
+                ))
+            .toList(growable: false),
+        addresses: item.addresses
+            .map((value) => PimPostalAddress(
+                  label: value.label,
+                  rawHead: value.rawHead,
+                  poBox: value.poBox,
+                  extended: value.extended,
+                  street: value.street,
+                  locality: value.locality,
+                  region: value.region,
+                  postalCode: value.postalCode,
+                  country: value.country,
+                ))
+            .toList(growable: false),
+        organization: item.organization,
+        jobTitle: item.jobTitle,
+        birthday: item.birthday,
+        url: item.url,
+        favorite: item.favorite,
         conflict: item.conflict,
       );
 
@@ -218,32 +283,65 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }
 
   @override
-  Future<PimItem> upsertPimItem({
-    required String spaceId,
-    String? resourceId,
-    String? projectionId,
-    String? headOperationId,
-    required PimItemKind kind,
-    required String title,
-    bool completed = false,
-    String? email,
-    String? phone,
-    String? startsAt,
-    String? endsAt,
-  }) async {
+  Future<PimItem> upsertPimItem({required PimDraft draft}) async {
     await _ensureInitialized();
     final item = await frb_api.mobileUpsertPimItem(
-      spaceId: spaceId,
-      resourceId: resourceId,
-      projectionId: projectionId,
-      headOperationId: headOperationId,
-      resourceKind: kind.wireName,
-      title: title,
-      completed: completed,
-      email: email,
-      phone: phone,
-      startsAt: startsAt,
-      endsAt: endsAt,
+      draft: frb_types.MobilePimDraft(
+        spaceId: draft.spaceId,
+        resourceId: draft.resourceId,
+        projectionId: draft.projectionId,
+        headOperationId: draft.headOperationId,
+        resourceKind: draft.kind.wireName,
+        title: draft.title,
+        completed: draft.completed,
+        completedAt: draft.completedAt,
+        notes: draft.notes,
+        startsAt: _toFrbTemporal(draft.startsAt),
+        endsAt: _toFrbTemporal(draft.endsAt),
+        dueAt: _toFrbTemporal(draft.dueAt),
+        priority: draft.priority,
+        location: draft.location,
+        recurrenceRule: draft.recurrenceRule,
+        reminderMinutes: draft.reminderMinutes,
+        categories: draft.categories,
+        namePrefix: draft.namePrefix,
+        givenName: draft.givenName,
+        middleName: draft.middleName,
+        familyName: draft.familyName,
+        nameSuffix: draft.nameSuffix,
+        emails: draft.emails
+            .map((value) => frb_types.MobileLabeledValue(
+                  label: value.label,
+                  value: value.value,
+                  rawHead: value.rawHead,
+                ))
+            .toList(growable: false),
+        phones: draft.phones
+            .map((value) => frb_types.MobileLabeledValue(
+                  label: value.label,
+                  value: value.value,
+                  rawHead: value.rawHead,
+                ))
+            .toList(growable: false),
+        addresses: draft.addresses
+            .map((value) => frb_types.MobilePostalAddress(
+                  label: value.label,
+                  rawHead: value.rawHead,
+                  poBox: value.poBox,
+                  extended: value.extended,
+                  street: value.street,
+                  locality: value.locality,
+                  region: value.region,
+                  postalCode: value.postalCode,
+                  country: value.country,
+                ))
+            .toList(growable: false),
+        organization: draft.organization,
+        jobTitle: draft.jobTitle,
+        birthday: draft.birthday,
+        url: draft.url,
+        favorite: draft.favorite,
+      ),
     );
     return _fromFrbPimItem(item);
   }

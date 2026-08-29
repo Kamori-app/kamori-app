@@ -60,8 +60,7 @@ void backgroundSyncCallbackDispatcher() {
       await bridge.syncNow();
       final rotatedRefreshToken = await bridge.exportRefreshToken();
       if (rotatedRefreshToken != null && rotatedRefreshToken.isNotEmpty) {
-        final rotatedRequestId =
-            await bridge.exportRefreshRotationRequestId();
+        final rotatedRequestId = await bridge.exportRefreshRotationRequestId();
         if (rotatedRequestId == null || rotatedRequestId.isEmpty) {
           return false;
         }

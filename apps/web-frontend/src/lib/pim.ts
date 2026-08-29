@@ -1,4 +1,5 @@
 import { decode, encode } from "@msgpack/msgpack";
+import { RRule } from "rrule";
 
 export type PimResourceKind = "calendar_event" | "task" | "contact";
 
@@ -7,11 +8,21 @@ export type PimValue =
   | { type: "integer"; value: number }
   | { type: "boolean"; value: boolean }
   | { type: "text_list"; value: string[] }
+  | { type: "record"; value: Record<string, string> }
+  | { type: "records"; value: Record<string, string>[] }
   | { type: "bytes"; value: Uint8Array }
   | { type: "null" };
 
+export const CURRENT_PIM_SCHEMA_VERSION = 2;
+
+export type PimTemporal =
+  | { kind: "date"; date: string }
+  | { kind: "utc"; utc: string }
+  | { kind: "zoned_datetime"; local: string; timezone: string; utc: string };
+
 export interface PimUpsertV1 {
   operation: "upsert";
+  schema_version: number;
   resource_kind: PimResourceKind;
   resource_id: string;
   dependencies: string[];
@@ -21,6 +32,7 @@ export interface PimUpsertV1 {
 
 export interface PimDeleteV1 {
   operation: "delete";
+  schema_version: number;
   resource_kind: PimResourceKind;
   resource_id: string;
   dependencies: string[];
@@ -137,7 +149,11 @@ export const localDateTimeToIcalendarUtc = (value: string): string => {
   return dateToIcalendarUtc(instant);
 };
 
-export const encodePimOperation = (operation: PimOperationV1): Uint8Array => encode(operation);
+export const encodePimOperation = (operation: PimOperationV1): Uint8Array => {
+  const bytes = encode(operation);
+  decodePimOperation(bytes);
+  return bytes;
+};
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -164,6 +180,20 @@ const isPimValue = (value: unknown): value is PimValue => {
       return (
         Array.isArray(value.value) &&
         value.value.every((entry) => typeof entry === "string")
+      );
+    case "record":
+      return (
+        isRecord(value.value) &&
+        Object.values(value.value).every((entry) => typeof entry === "string")
+      );
+    case "records":
+      return (
+        Array.isArray(value.value) &&
+        value.value.every(
+          (entry) =>
+            isRecord(entry) &&
+            Object.values(entry).every((part) => typeof part === "string"),
+        )
       );
     case "bytes":
       return value.value instanceof Uint8Array;
@@ -192,6 +222,16 @@ export const decodePimOperation = (bytes: Uint8Array): PimOperationV1 => {
   ) {
     throw new Error("Encrypted PIM operation has an invalid envelope.");
   }
+  const schemaVersion = value.schema_version ?? 1;
+  if (
+    typeof schemaVersion !== "number" ||
+    !Number.isSafeInteger(schemaVersion) ||
+    schemaVersion < 1 ||
+    schemaVersion > CURRENT_PIM_SCHEMA_VERSION
+  ) {
+    throw new Error("Encrypted PIM operation has an unsupported schema version.");
+  }
+  value.schema_version = schemaVersion;
   if (value.operation === "upsert") {
     if (
       !isRecord(value.fields) ||
@@ -216,7 +256,11 @@ export const decodePimOperation = (bytes: Uint8Array): PimOperationV1 => {
   throw new Error("Encrypted PIM operation kind is unsupported.");
 };
 
-export const encodePimSnapshot = (snapshot: PimSnapshotV2): Uint8Array => encode(snapshot);
+export const encodePimSnapshot = (snapshot: PimSnapshotV2): Uint8Array => {
+  const bytes = encode(snapshot);
+  decodePimSnapshot(bytes);
+  return bytes;
+};
 
 export const decodePimSnapshot = (bytes: Uint8Array): PimSnapshotV2 => {
   const value: unknown = decode(bytes);
@@ -262,6 +306,7 @@ export const decodePimSnapshot = (bytes: Uint8Array): PimSnapshotV2 => {
 };
 
 interface ProjectionLine {
+  head: string;
   property: string;
   value: string;
   componentId: number | null;
@@ -290,7 +335,7 @@ const projectionPropertyName = (head: string): string =>
 
 const parseProjectionLines = (
   projection: string,
-): { lines: ProjectionLine[]; components: string[] } => {
+): { lines: ProjectionLine[]; components: string[]; parents: (number | null)[] } => {
   const unfolded: string[] = [];
   for (const line of projection.replaceAll("\r\n", "\n").split("\n")) {
     if ((line.startsWith(" ") || line.startsWith("\t")) && unfolded.length > 0) {
@@ -300,6 +345,7 @@ const parseProjectionLines = (
     }
   }
   const components: string[] = [];
+  const parents: (number | null)[] = [];
   const stack: number[] = [];
   const lines: ProjectionLine[] = [];
   for (const logical of unfolded) {
@@ -310,13 +356,14 @@ const parseProjectionLines = (
     const componentId = stack.at(-1) ?? null;
     if (property === "BEGIN") {
       components.push(value.trim().toUpperCase());
+      parents.push(componentId);
       stack.push(components.length - 1);
     } else if (property === "END") {
       stack.pop();
     }
-    lines.push({ property, value, componentId });
+    lines.push({ head, property, value, componentId });
   }
-  return { lines, components };
+  return { lines, components, parents };
 };
 
 export const unescapeProjectionText = (value: string): string => {
@@ -358,6 +405,157 @@ export const projectionProperty = (
   )?.value;
 };
 
+const projectionProperties = (
+  projection: string,
+  kind: PimResourceKind,
+  name: string,
+): ProjectionLine[] => {
+  const parsed = parseProjectionLines(projection);
+  const componentName =
+    kind === "contact" ? "VCARD" : kind === "task" ? "VTODO" : "VEVENT";
+  const ids = parsed.components
+    .map((component, id) => (component === componentName ? id : -1))
+    .filter((id) => id >= 0);
+  const primary =
+    ids.find(
+      (id) =>
+        !parsed.lines.some(
+          (line) => line.componentId === id && line.property === "RECURRENCE-ID",
+        ),
+    ) ?? ids[0];
+  if (primary === undefined) return [];
+  return parsed.lines.filter(
+    (line) =>
+      line.componentId === primary && line.property === name.toUpperCase(),
+  );
+};
+
+const projectionParameter = (head: string, name: string): string | undefined => {
+  const parameters: string[] = [];
+  let start = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < head.length; index += 1) {
+    const character = head[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\" && quoted) {
+      escaped = true;
+    } else if (character === '"') {
+      quoted = !quoted;
+    } else if (character === ";" && !quoted) {
+      parameters.push(head.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parameters.push(head.slice(start));
+  for (const parameter of parameters.slice(1)) {
+    const separator = parameter.indexOf("=");
+    if (separator < 0) continue;
+    if (parameter.slice(0, separator).toUpperCase() !== name.toUpperCase()) continue;
+    return parameter
+      .slice(separator + 1)
+      .replace(/^"|"$/g, "")
+      .replaceAll('\\"', '"')
+      .replaceAll("\\\\", "\\");
+  }
+  return undefined;
+};
+
+const splitEscaped = (value: string, separator: string): string[] => {
+  const parts: string[] = [];
+  let current = "";
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      current += `\\${character}`;
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === separator) {
+      parts.push(unescapeProjectionText(current));
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) current += "\\";
+  parts.push(unescapeProjectionText(current));
+  return parts;
+};
+
+const compactDateToIso = (value: string): string =>
+  /^\d{8}$/.test(value)
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+    : value;
+
+const temporalFromProjection = (line: ProjectionLine): PimValue => {
+  if (projectionParameter(line.head, "VALUE")?.toUpperCase() === "DATE") {
+    return {
+      type: "record",
+      value: { kind: "date", date: compactDateToIso(line.value) },
+    };
+  }
+  const timezone = projectionParameter(line.head, "TZID");
+  if (timezone) {
+    return {
+      type: "record",
+      value: { kind: "zoned_datetime", local: line.value, timezone },
+    };
+  }
+  return { type: "record", value: { kind: "utc", utc: line.value } };
+};
+
+const labeledProjectionRecords = (lines: ProjectionLine[]): Record<string, string>[] =>
+  lines.map((line) => ({
+    label:
+      projectionParameter(line.head, "X-KAMORI-LABEL") ??
+      projectionParameter(line.head, "TYPE")?.split(",")[0]?.toLowerCase() ??
+      "",
+    value: unescapeProjectionText(line.value),
+    raw_head: line.head,
+  }));
+
+const managedAlarmMinutes = (
+  projection: string,
+  kind: PimResourceKind,
+): number | undefined => {
+  if (kind === "contact") return undefined;
+  const parsed = parseProjectionLines(projection);
+  const componentName = kind === "task" ? "VTODO" : "VEVENT";
+  const componentIds = parsed.components
+    .map((component, id) => (component === componentName ? id : -1))
+    .filter((id) => id >= 0);
+  const primary =
+    componentIds.find(
+      (id) =>
+        !parsed.lines.some(
+          (line) => line.componentId === id && line.property === "RECURRENCE-ID",
+        ),
+    ) ?? componentIds[0];
+  if (primary === undefined) return undefined;
+  const alarms = parsed.components
+    .map((component, id) =>
+      component === "VALARM" && parsed.parents[id] === primary ? id : -1,
+    )
+    .filter((id) => id >= 0);
+  for (const alarm of alarms) {
+    const managed = parsed.lines.some(
+      (line) =>
+        line.componentId === alarm &&
+        line.property === "X-KAMORI-MANAGED" &&
+        line.value.toUpperCase() === "TRUE",
+    );
+    if (!managed) continue;
+    const trigger = parsed.lines.find(
+      (line) => line.componentId === alarm && line.property === "TRIGGER",
+    )?.value;
+    const match = trigger && /^-PT(\d+)M$/i.exec(trigger);
+    if (match) return Number(match[1]);
+  }
+  return undefined;
+};
+
 export const projectionFields = (
   projection: string,
   kind: PimResourceKind,
@@ -372,21 +570,12 @@ export const projectionFields = (
     fields.title = { type: "text", value: unescapeProjectionText(title) };
   }
   for (const [field, property] of [
-    ["email", "EMAIL"],
-    ["phone", "TEL"],
     ["starts_at", "DTSTART"],
     ["ends_at", "DTEND"],
+    ["due_at", "DUE"],
   ] as const) {
-    const value = projectionProperty(projection, kind, property);
-    if (value !== undefined) {
-      fields[field] = {
-        type: "text",
-        value:
-          field === "email" || field === "phone"
-            ? unescapeProjectionText(value)
-            : value,
-      };
-    }
+    const line = projectionProperties(projection, kind, property)[0];
+    if (line) fields[field] = temporalFromProjection(line);
   }
   if (kind === "task") {
     fields.completed = {
@@ -395,6 +584,289 @@ export const projectionFields = (
         projectionProperty(projection, kind, "STATUS")?.toUpperCase() ===
         "COMPLETED",
     };
+    const completedAt = projectionProperty(projection, kind, "COMPLETED");
+    if (completedAt) fields.completed_at = { type: "text", value: completedAt };
+    const priority = Number(projectionProperty(projection, kind, "PRIORITY"));
+    if (Number.isSafeInteger(priority) && priority >= 0 && priority <= 9) {
+      fields.priority = { type: "integer", value: priority };
+    }
+  }
+  const textProperties =
+    kind === "contact"
+      ? ([
+          ["organization", "ORG"],
+          ["job_title", "TITLE"],
+          ["birthday", "BDAY"],
+          ["url", "URL"],
+          ["notes", "NOTE"],
+        ] as const)
+      : ([
+          ["location", "LOCATION"],
+          ["notes", "DESCRIPTION"],
+          ["recurrence_rule", "RRULE"],
+        ] as const);
+  for (const [field, property] of textProperties) {
+    const value = projectionProperty(projection, kind, property);
+    if (value !== undefined) {
+      fields[field] = {
+        type: "text",
+        value: property === "RRULE" ? value : unescapeProjectionText(value),
+      };
+    }
+  }
+  const categories = projectionProperty(projection, kind, "CATEGORIES");
+  if (categories !== undefined) {
+    fields.categories = { type: "text_list", value: splitEscaped(categories, ",") };
+  }
+  const reminder = managedAlarmMinutes(projection, kind);
+  if (reminder !== undefined) {
+    fields.reminder_minutes = { type: "integer", value: reminder };
+  }
+  if (kind === "contact") {
+    const emails = labeledProjectionRecords(projectionProperties(projection, kind, "EMAIL"));
+    const phones = labeledProjectionRecords(projectionProperties(projection, kind, "TEL"));
+    const addresses = projectionProperties(projection, kind, "ADR").map((line) => {
+      const parts = splitEscaped(line.value, ";");
+      return {
+        label:
+          projectionParameter(line.head, "X-KAMORI-LABEL") ??
+          projectionParameter(line.head, "TYPE")?.split(",")[0]?.toLowerCase() ??
+          "",
+        raw_head: line.head,
+        po_box: parts[0] ?? "",
+        extended: parts[1] ?? "",
+        street: parts[2] ?? "",
+        locality: parts[3] ?? "",
+        region: parts[4] ?? "",
+        postal_code: parts[5] ?? "",
+        country: parts[6] ?? "",
+      };
+    });
+    if (emails.length > 0) {
+      fields.emails = { type: "records", value: emails };
+      fields.email = { type: "text", value: emails[0].value };
+    }
+    if (phones.length > 0) {
+      fields.phones = { type: "records", value: phones };
+      fields.phone = { type: "text", value: phones[0].value };
+    }
+    if (addresses.length > 0) fields.addresses = { type: "records", value: addresses };
+    const structuredName = projectionProperty(projection, kind, "N");
+    if (structuredName !== undefined) {
+      const parts = splitEscaped(structuredName, ";");
+      fields.name = {
+        type: "record",
+        value: {
+          family: parts[0] ?? "",
+          given: parts[1] ?? "",
+          middle: parts[2] ?? "",
+          prefix: parts[3] ?? "",
+          suffix: parts[4] ?? "",
+        },
+      };
+    }
+    fields.favorite = {
+      type: "boolean",
+      value:
+        projectionProperty(projection, kind, "X-KAMORI-FAVORITE")?.toUpperCase() ===
+        "TRUE",
+    };
   }
   return fields;
+};
+
+export const localDateTimeToTemporal = (
+  value: string,
+  timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+): PimTemporal => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) throw new Error("Date-time must use the browser's local date-time format.");
+  const local = `${match[1]}${match[2]}${match[3]}T${match[4]}${match[5]}${match[6] ?? "00"}`;
+  const instant = zonedCompactLocalToDate(local, timezone);
+  if (!instant) {
+    throw new Error("This local date-time does not exist in the selected timezone.");
+  }
+  return {
+    kind: "zoned_datetime",
+    local,
+    timezone,
+    utc: dateToIcalendarUtc(instant),
+  };
+};
+
+export const temporalToDate = (value: PimValue | undefined): Date | undefined => {
+  if (value?.type === "text") {
+    const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value.value);
+    return match
+      ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]))
+      : undefined;
+  }
+  if (value?.type !== "record") return undefined;
+  if (value.value.kind === "date") return new Date(`${value.value.date}T00:00:00`);
+  if (
+    value.value.kind === "zoned_datetime" &&
+    value.value.local &&
+    value.value.timezone &&
+    !value.value.utc
+  ) {
+    return zonedCompactLocalToDate(value.value.local, value.value.timezone);
+  }
+  const utc = value.value.utc;
+  if (!utc) return undefined;
+  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(utc);
+  return match
+    ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]))
+    : undefined;
+};
+
+const zonedCompactLocalToDate = (local: string, timezone: string): Date | undefined => {
+  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(local);
+  if (!match) return undefined;
+  const wanted = match.slice(1).map(Number);
+  const desiredTimestamp = Date.UTC(
+    wanted[0],
+    wanted[1] - 1,
+    wanted[2],
+    wanted[3],
+    wanted[4],
+    wanted[5],
+  );
+  let timestamp = desiredTimestamp;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    for (let iteration = 0; iteration < 2; iteration += 1) {
+      const parts = Object.fromEntries(
+        formatter
+          .formatToParts(new Date(timestamp))
+          .filter((part) => part.type !== "literal")
+          .map((part) => [part.type, Number(part.value)]),
+      );
+      const rendered = Date.UTC(
+        parts.year,
+        parts.month - 1,
+        parts.day,
+        parts.hour,
+        parts.minute,
+        parts.second,
+      );
+      timestamp += desiredTimestamp - rendered;
+    }
+    const result = new Date(timestamp);
+    const roundTrip = Object.fromEntries(
+      formatter
+        .formatToParts(result)
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)]),
+    );
+    return roundTrip.year === wanted[0] &&
+      roundTrip.month === wanted[1] &&
+      roundTrip.day === wanted[2] &&
+      roundTrip.hour === wanted[3] &&
+      roundTrip.minute === wanted[4] &&
+      roundTrip.second === wanted[5]
+      ? result
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export const temporalToInputValue = (value: PimValue | undefined): string => {
+  if (value?.type === "record" && value.value.kind === "zoned_datetime") {
+    const local = value.value.local;
+    return /^\d{8}T\d{6}$/.test(local)
+      ? `${local.slice(0, 4)}-${local.slice(4, 6)}-${local.slice(6, 8)}T${local.slice(9, 11)}:${local.slice(11, 13)}`
+      : "";
+  }
+  const date = temporalToDate(value);
+  if (!date) return "";
+  return [
+    padDatePart(date.getFullYear(), 4),
+    "-",
+    padDatePart(date.getMonth() + 1),
+    "-",
+    padDatePart(date.getDate()),
+    "T",
+    padDatePart(date.getHours()),
+    ":",
+    padDatePart(date.getMinutes()),
+  ].join("");
+};
+
+/** Applies iCalendar's exclusive DTEND semantics to a local calendar day. */
+export const intervalOccursOnDay = (
+  startsAt: Date | undefined,
+  endsAt: Date | undefined,
+  day: Date,
+): boolean => {
+  if (!startsAt) return false;
+  const effectiveEnd = endsAt ?? startsAt;
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  return startsAt < dayEnd && effectiveEnd > dayStart;
+};
+
+/** Expands an RFC 5545 RRULE and tests occurrence intervals against one local day. */
+export const recurringIntervalOccursOnDay = (
+  startsValue: PimValue | undefined,
+  endsValue: PimValue | undefined,
+  recurrenceRule: string,
+  day: Date,
+): boolean => {
+  const startsAt = temporalToDate(startsValue);
+  if (!startsAt) return false;
+  const explicitEnd = temporalToDate(endsValue);
+  if (!recurrenceRule) {
+    const effectiveEnd = explicitEnd ?? (
+      startsValue?.type === "record" && startsValue.value.kind === "date"
+        ? new Date(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate() + 1)
+        : new Date(startsAt.getTime() + 1)
+    );
+    return intervalOccursOnDay(startsAt, effectiveEnd, day);
+  }
+
+  const dateOnly = startsValue?.type === "record" && startsValue.value.kind === "date";
+  const dayStart = dateOnly
+    ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()))
+    : new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  const dayEnd = dateOnly
+    ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate() + 1))
+    : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  const ruleStart = dateOnly
+    ? new Date(Date.UTC(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate()))
+    : startsAt;
+  const ruleEnd = dateOnly && explicitEnd
+    ? new Date(Date.UTC(explicitEnd.getFullYear(), explicitEnd.getMonth(), explicitEnd.getDate()))
+    : explicitEnd;
+  const duration = Math.max(1, (ruleEnd?.getTime() ?? (
+    dateOnly ? ruleStart.getTime() + 86_400_000 : ruleStart.getTime() + 1
+  )) - ruleStart.getTime());
+  try {
+    const timezone = startsValue?.type === "record" &&
+        startsValue.value.kind === "zoned_datetime"
+      ? startsValue.value.timezone
+      : null;
+    const options = RRule.parseString(recurrenceRule);
+    options.dtstart = ruleStart;
+    if (timezone) options.tzid = timezone;
+    const recurrence = new RRule(options);
+    return recurrence
+      .between(new Date(dayStart.getTime() - duration), dayEnd, true)
+      .some((occurrence) =>
+        occurrence < dayEnd &&
+        new Date(occurrence.getTime() + duration) > dayStart
+      );
+  } catch {
+    const fallbackEnd = ruleEnd ?? new Date(ruleStart.getTime() + duration);
+    return intervalOccursOnDay(ruleStart, fallbackEnd, dayStart);
+  }
 };

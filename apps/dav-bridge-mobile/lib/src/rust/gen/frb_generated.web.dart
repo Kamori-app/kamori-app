@@ -36,7 +36,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   EncryptedPayload dco_decode_box_autoadd_encrypted_payload(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
   MobileDeviceSecrets dco_decode_box_autoadd_mobile_device_secrets(dynamic raw);
+
+  @protected
+  MobilePimDraft dco_decode_box_autoadd_mobile_pim_draft(dynamic raw);
+
+  @protected
+  MobilePimTemporal dco_decode_box_autoadd_mobile_pim_temporal(dynamic raw);
 
   @protected
   MobileSyncConfig dco_decode_box_autoadd_mobile_sync_config(dynamic raw);
@@ -54,13 +63,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
   Keypair dco_decode_keypair(dynamic raw);
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw);
 
   @protected
   List<MobileCollection> dco_decode_list_mobile_collection(dynamic raw);
 
   @protected
+  List<MobileLabeledValue> dco_decode_list_mobile_labeled_value(dynamic raw);
+
+  @protected
   List<MobilePimItem> dco_decode_list_mobile_pim_item(dynamic raw);
+
+  @protected
+  List<MobilePostalAddress> dco_decode_list_mobile_postal_address(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -78,10 +99,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MobileIssuedInviteCode dco_decode_mobile_issued_invite_code(dynamic raw);
 
   @protected
+  MobileLabeledValue dco_decode_mobile_labeled_value(dynamic raw);
+
+  @protected
   MobileLoginResult dco_decode_mobile_login_result(dynamic raw);
 
   @protected
+  MobilePimDraft dco_decode_mobile_pim_draft(dynamic raw);
+
+  @protected
   MobilePimItem dco_decode_mobile_pim_item(dynamic raw);
+
+  @protected
+  MobilePimTemporal dco_decode_mobile_pim_temporal(dynamic raw);
+
+  @protected
+  MobilePostalAddress dco_decode_mobile_postal_address(dynamic raw);
 
   @protected
   MobileProvisionResult dco_decode_mobile_provision_result(dynamic raw);
@@ -99,7 +132,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
   MobileDeviceSecrets? dco_decode_opt_box_autoadd_mobile_device_secrets(
+      dynamic raw);
+
+  @protected
+  MobilePimTemporal? dco_decode_opt_box_autoadd_mobile_pim_temporal(
       dynamic raw);
 
   @protected
@@ -138,7 +178,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   MobileDeviceSecrets sse_decode_box_autoadd_mobile_device_secrets(
+      SseDeserializer deserializer);
+
+  @protected
+  MobilePimDraft sse_decode_box_autoadd_mobile_pim_draft(
+      SseDeserializer deserializer);
+
+  @protected
+  MobilePimTemporal sse_decode_box_autoadd_mobile_pim_temporal(
       SseDeserializer deserializer);
 
   @protected
@@ -159,14 +210,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
   Keypair sse_decode_keypair(SseDeserializer deserializer);
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
   List<MobileCollection> sse_decode_list_mobile_collection(
       SseDeserializer deserializer);
 
   @protected
+  List<MobileLabeledValue> sse_decode_list_mobile_labeled_value(
+      SseDeserializer deserializer);
+
+  @protected
   List<MobilePimItem> sse_decode_list_mobile_pim_item(
+      SseDeserializer deserializer);
+
+  @protected
+  List<MobilePostalAddress> sse_decode_list_mobile_postal_address(
       SseDeserializer deserializer);
 
   @protected
@@ -187,11 +252,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  MobileLabeledValue sse_decode_mobile_labeled_value(
+      SseDeserializer deserializer);
+
+  @protected
   MobileLoginResult sse_decode_mobile_login_result(
       SseDeserializer deserializer);
 
   @protected
+  MobilePimDraft sse_decode_mobile_pim_draft(SseDeserializer deserializer);
+
+  @protected
   MobilePimItem sse_decode_mobile_pim_item(SseDeserializer deserializer);
+
+  @protected
+  MobilePimTemporal sse_decode_mobile_pim_temporal(
+      SseDeserializer deserializer);
+
+  @protected
+  MobilePostalAddress sse_decode_mobile_postal_address(
+      SseDeserializer deserializer);
 
   @protected
   MobileProvisionResult sse_decode_mobile_provision_result(
@@ -212,7 +292,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   MobileDeviceSecrets? sse_decode_opt_box_autoadd_mobile_device_secrets(
+      SseDeserializer deserializer);
+
+  @protected
+  MobilePimTemporal? sse_decode_opt_box_autoadd_mobile_pim_temporal(
       SseDeserializer deserializer);
 
   @protected
@@ -252,8 +339,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       EncryptedPayload self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+      PlatformInt64 self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_mobile_device_secrets(
       MobileDeviceSecrets self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_mobile_pim_draft(
+      MobilePimDraft self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_mobile_pim_temporal(
+      MobilePimTemporal self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_mobile_sync_config(
@@ -275,15 +374,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
+
+  @protected
   void sse_encode_keypair(Keypair self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_mobile_collection(
       List<MobileCollection> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_mobile_labeled_value(
+      List<MobileLabeledValue> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_mobile_pim_item(
       List<MobilePimItem> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_mobile_postal_address(
+      List<MobilePostalAddress> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
@@ -305,11 +418,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       MobileIssuedInviteCode self, SseSerializer serializer);
 
   @protected
+  void sse_encode_mobile_labeled_value(
+      MobileLabeledValue self, SseSerializer serializer);
+
+  @protected
   void sse_encode_mobile_login_result(
       MobileLoginResult self, SseSerializer serializer);
 
   @protected
+  void sse_encode_mobile_pim_draft(
+      MobilePimDraft self, SseSerializer serializer);
+
+  @protected
   void sse_encode_mobile_pim_item(MobilePimItem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_mobile_pim_temporal(
+      MobilePimTemporal self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_mobile_postal_address(
+      MobilePostalAddress self, SseSerializer serializer);
 
   @protected
   void sse_encode_mobile_provision_result(
@@ -331,8 +460,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+      PlatformInt64? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_mobile_device_secrets(
       MobileDeviceSecrets? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_mobile_pim_temporal(
+      MobilePimTemporal? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_mobile_sync_config(

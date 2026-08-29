@@ -10,7 +10,11 @@ one space never exposes another space to the operating-system data stores.
 The mobile client signs into an existing account, provisions an independent
 device identity, hydrates current space keys from recovery packages, stores its
 SQLCipher runtime snapshot for background work, and edits calendars, tasks,
-and contacts through the signed encrypted operation log. Owner-created invite
+and contacts through the signed encrypted operation log. Its organizer provides
+open/completed tasks with due time, priority, and reminders, a recurring
+date-based calendar, and
+searchable/sortable rich contacts with multiple labeled methods and addresses.
+Owner-created invite
 codes first perform a full sync and atomic current-state key rotation; the
 rotated key and recovery cursor are persisted before the code is shown.
 Device identities and account master keys are stored in platform secure storage
@@ -25,6 +29,12 @@ into token-reuse revocation.
 
 Native mobile passkeys are intentionally post-MVP. Current mobile sign-in is
 OPAQUE password plus optional TOTP; registration remains web-only.
+
+Opt-in system projection is one-way from Kamori. It projects event time or
+all-day state, location, notes, recurrence, and reminders, plus contact names,
+labeled email/phone/address values, organization/title, website, and birthday.
+Contact notes remain encrypted-only on iOS because writing them requires a
+separately approved Apple entitlement. Tasks are not projected.
 
 ## Development
 

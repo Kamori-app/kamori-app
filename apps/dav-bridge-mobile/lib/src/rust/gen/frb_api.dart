@@ -139,30 +139,8 @@ Future<BigInt> mobileSyncNow() =>
 Future<List<MobilePimItem>> mobileListPimItems() =>
     RustLib.instance.api.crateFrbApiMobileListPimItems();
 
-Future<MobilePimItem> mobileUpsertPimItem(
-        {required String spaceId,
-        String? resourceId,
-        String? projectionId,
-        String? headOperationId,
-        required String resourceKind,
-        required String title,
-        required bool completed,
-        String? email,
-        String? phone,
-        String? startsAt,
-        String? endsAt}) =>
-    RustLib.instance.api.crateFrbApiMobileUpsertPimItem(
-        spaceId: spaceId,
-        resourceId: resourceId,
-        projectionId: projectionId,
-        headOperationId: headOperationId,
-        resourceKind: resourceKind,
-        title: title,
-        completed: completed,
-        email: email,
-        phone: phone,
-        startsAt: startsAt,
-        endsAt: endsAt);
+Future<MobilePimItem> mobileUpsertPimItem({required MobilePimDraft draft}) =>
+    RustLib.instance.api.crateFrbApiMobileUpsertPimItem(draft: draft);
 
 Future<void> mobileDeletePimItem(
         {required String spaceId,

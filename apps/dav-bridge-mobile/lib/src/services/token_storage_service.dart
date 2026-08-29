@@ -91,7 +91,8 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
   }
 
   @override
-  Future<RefreshCredential?> readCredential({required String cloudBaseUrl}) async {
+  Future<RefreshCredential?> readCredential(
+      {required String cloudBaseUrl}) async {
     final encoded = await _storage.read(
       key: _storageKey(cloudBaseUrl),
       aOptions: _androidOptions,
@@ -123,7 +124,8 @@ class SecureRefreshTokenStorage implements RefreshTokenStorage {
       refreshToken: (value['refreshToken'] as String).trim(),
       rotationRequestId: (value['rotationRequestId'] as String).trim(),
     );
-    if (credential.refreshToken.isEmpty || credential.rotationRequestId.isEmpty) {
+    if (credential.refreshToken.isEmpty ||
+        credential.rotationRequestId.isEmpty) {
       throw const FormatException('Stored refresh credential is incomplete');
     }
     return credential;

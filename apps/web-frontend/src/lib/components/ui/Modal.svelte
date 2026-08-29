@@ -8,6 +8,7 @@
     export let title = "";
     export let onClose: () => void = () => {};
     export let embedded = false;
+    export let width: "lg" | "2xl" | "3xl" = "lg";
     import { onDestroy } from "svelte";
     import { locale } from "$lib/i18n";
 
@@ -62,6 +63,12 @@
     }
 
     onDestroy(unlockPageScroll);
+
+    const panelWidths = {
+        lg: "max-w-lg",
+        "2xl": "max-w-2xl",
+        "3xl": "max-w-3xl",
+    } as const;
 </script>
 
 <svelte:window on:keydown|capture={onWindowKeydown} />
@@ -84,7 +91,7 @@
         on:click={onBackdropClick}
         on:keydown={onBackdropKeydown}
     >
-        <div class="modal-panel flex w-full max-w-lg flex-col border border-slate/25 bg-paper p-5 shadow-[10px_10px_0_rgba(23,63,55,0.18)]">
+        <div class={`modal-panel flex w-full ${panelWidths[width]} flex-col border border-slate/25 bg-paper p-5 shadow-[10px_10px_0_rgba(23,63,55,0.18)]`}>
             <div class="mb-4 flex shrink-0 items-center justify-between">
                 <h3 class="font-heading text-lg font-semibold text-slate">
                     {title}

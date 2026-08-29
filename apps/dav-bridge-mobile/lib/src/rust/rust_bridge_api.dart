@@ -66,19 +66,7 @@ abstract class RustBridgeApi {
 
   Future<List<PimItem>> listPimItems();
 
-  Future<PimItem> upsertPimItem({
-    required String spaceId,
-    String? resourceId,
-    String? projectionId,
-    String? headOperationId,
-    required PimItemKind kind,
-    required String title,
-    bool completed,
-    String? email,
-    String? phone,
-    String? startsAt,
-    String? endsAt,
-  });
+  Future<PimItem> upsertPimItem({required PimDraft draft});
 
   Future<void> deletePimItem({required PimItem item});
 
