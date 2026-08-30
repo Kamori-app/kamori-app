@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM oven/bun:1.3.14-alpine AS dependencies
+FROM oven/bun:1.4.0-alpine AS dependencies
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
