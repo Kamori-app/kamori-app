@@ -1,15 +1,15 @@
 module kamori.app/infra
 
-go 1.25.11
+go 1.26.6
 
 require (
 	github.com/pulumi/pulumi-hcloud/sdk v1.41.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.21.1
 	github.com/pulumi/pulumi-terraform-provider/sdks/go/minio/v3 v3.38.5
 	github.com/pulumi/pulumi-terraform-provider/sdks/go/porkbun v0.0.0-00010101000000-000000000000
-	github.com/pulumi/pulumi-tls/sdk/v5 v5.5.1
-	github.com/pulumi/pulumi/sdk/v3 v3.259.0
-	golang.org/x/crypto v0.55.0
+	github.com/pulumi/pulumi-tls/sdk/v5 v5.6.0
+	github.com/pulumi/pulumi/sdk/v3 v3.261.0
+	golang.org/x/crypto v0.56.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -35,6 +35,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/deckarep/golang-set/v2 v2.5.0 // indirect
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
