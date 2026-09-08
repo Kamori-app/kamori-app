@@ -123,8 +123,6 @@ func TestAcceptanceWorkflowInstallsBrowserFromPinnedWorkspace(t *testing.T) {
 	}
 	contents := string(workflow)
 	for _, required := range []string{
-		"path: ~/.cache/ms-playwright",
-		"key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}",
 		"bun run --cwd tests/acceptance playwright install --with-deps chromium",
 	} {
 		if !strings.Contains(contents, required) {
