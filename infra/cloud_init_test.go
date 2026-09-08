@@ -228,6 +228,8 @@ func TestContainerHostsReceiveBoundedLocalStorageConfiguration(t *testing.T) {
 	}
 	for _, required := range []string{
 		"/usr/local/sbin/kamori-activate-container-storage",
+		`if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]`,
+		"app|ops) /usr/local/sbin/kamori-activate-container-storage",
 		"chown 65532:65532 /etc/kamori/secrets/metrics_token",
 		"chown 65534:65534 /etc/kamori/secrets/alertmanager-webhook-url",
 		"--entrypoint /bin/amtool alertmanager",
