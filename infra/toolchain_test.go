@@ -99,6 +99,9 @@ func TestRestrictedEgressRepairSkipsPulumiUpdateAndHostBootstrap(t *testing.T) {
 	if strings.Contains(contents, `pulumi stack output "$output_name" --show-secrets \`) {
 		t.Fatal("secret host configuration must be materialized once, not regenerated through every SSH retry")
 	}
+	if count := strings.Count(contents, `run_host_command "$host" "apply $role" "$payload"`); count != 2 {
+		t.Fatalf("host configuration must be applied twice across installer self-updates; got %d passes", count)
+	}
 }
 
 func TestInfrastructureWorkflowUsesReviewedPulumiAction(t *testing.T) {

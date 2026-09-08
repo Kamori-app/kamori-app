@@ -59,11 +59,14 @@ DHCP. The route and resolver are also declared in a Netplan overlay and a local
 systemd timer reconciles them every minute after networkd changes. Every
 approved changed host configuration regenerates the Netplan backend, reloads
 networkd, restarts the private egress service, and reconstructs the ops NAT
-rules. The installer records the role archive's
-SHA-256 fingerprint only after activation succeeds; an unchanged later `up`
-skips service restarts, package installation, container pulls, and database
-bootstrap. Role files are replaced through same-directory atomic renames, so a
-configuration update cannot truncate the installer that is currently running.
+rules. The installer records the role archive's SHA-256 fingerprint only after
+activation succeeds. Host delivery sends the same already-materialized archive
+twice: after a first pass atomically updates the installer, the second pass
+executes its new lightweight reconciliation path. An unchanged later `up`
+still reconciles container-storage invariants while skipping service restarts,
+package installation, container pulls, and database bootstrap. Role files are
+replaced through same-directory atomic renames, so a configuration update
+cannot truncate the installer that is currently running.
 Release registry login and immutable image pulls use bounded retries, but still
 fail closed after five attempts.
 

@@ -135,10 +135,13 @@ it does not put secrets in GitHub and does not replace a VM. No local PKI
 directory or manual `/etc/kamori` edits are part of provisioning.
 
 Each host records the SHA-256 fingerprint only after its complete role
-activation succeeds. The same encrypted archive on a later `up` is therefore a
-no-op on that host, while an interrupted or changed configuration is applied
-again. This keeps a no-change infrastructure update from reinstalling packages,
+activation succeeds. The workflow delivers the same materialized archive
+twice: the first pass may atomically update the installer itself while its old
+inode is still executing, and the second pass guarantees that the newly
+installed reconciliation logic runs. The second pass and an unchanged later
+`up` reconcile lightweight host invariants without reinstalling packages,
 restarting PostgreSQL, pulling ops containers, or restarting app services.
+An interrupted or changed configuration is applied again.
 Every regular file is staged in its destination directory and atomically
 renamed into place. In particular, the installer never truncates its own live
 script inode while Bash is still reading it.

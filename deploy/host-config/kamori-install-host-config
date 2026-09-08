@@ -94,6 +94,16 @@ if [[ -r "$configuration_marker" ]]; then
   installed_configuration_fingerprint=$(tr -d '\r\n' <"$configuration_marker")
 fi
 if [[ "$installed_configuration_fingerprint" == "$configuration_fingerprint" ]]; then
+  # The installer is itself part of the archive. The process handling the
+  # first update keeps executing its previous inode after the new installer is
+  # atomically installed. A second application therefore reaches this no-op
+  # path through the new installer and must still reconcile invariants added by
+  # that release. Keep this path lightweight: do not restart application or
+  # database services merely because Pulumi is reasserting the same archive.
+  case "$role" in
+    app|ops) /usr/local/sbin/kamori-activate-container-storage ;;
+    db-primary) ;;
+  esac
   echo "${role} host configuration is already applied"
   exit 0
 fi
