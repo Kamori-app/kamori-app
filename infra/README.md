@@ -20,6 +20,12 @@ which Hetzner rejected for every selected production location. The optional
 available for a reviewed resize; any override must be checked against Hetzner's
 current location availability before it is applied.
 
+The protected PostgreSQL volume size is explicit through
+`databaseVolumeSizeGB` and is `100` GB in production. The program refuses a
+smaller value, retains the volume if its Pulumi resource is ever removed, and
+expects every capacity change to be an in-place increase. Database bootstrap
+expands the mounted ext4 filesystem online before starting PostgreSQL.
+
 ## Bootstrap
 
 Follow the complete [production secret procedure](../SECRETS.md). It creates a
@@ -161,11 +167,15 @@ Database bootstrap/PITR assets are in [`deploy/postgres`](../deploy/postgres),
 and cross-provider ciphertext replication is in
 [`deploy/backup`](../deploy/backup).
 
-The same workflow exposes a separate `repair-egress` recovery action for a
-host whose route, resolver, or NAT rules have become stale. It performs no
-Pulumi update and uses the existing forced-command configuration identity to
-restart only the root-owned egress units: ops first, followed by the database
-and both app nodes. It cannot run a shell, pull or restart application
+Private app/database egress is declared in a root-owned Netplan overlay and
+reconciled every minute by a local systemd timer. A networkd reload therefore
+cannot permanently discard the default route to the ops NAT gateway. The same
+workflow exposes a separate `repair-egress` recovery action for a host whose
+route, resolver, or NAT rules have become stale. It performs no Pulumi update
+and uses the existing forced-command configuration identity to regenerate the
+Netplan backend, reload networkd, restart only the root-owned egress units, and
+reconstruct ops NAT: ops first, followed by the database and both app nodes.
+It cannot run a shell, pull or restart application
 containers, bootstrap PostgreSQL, access object-storage configuration, or
 perform an availability probe. SSH transport failures are retried while a host
 is temporarily unreachable. Authentication and pinned-host-key failures stop
@@ -183,6 +193,12 @@ cipher must pass `stanza-create` and `pgbackrest check` before that fingerprint
 is accepted. Routine host updates with the same fingerprint do not block on a
 second repository check; the scheduled backup job continues to check the
 archive and report its heartbeat.
+
+The primary forces an archive switch after five idle minutes. This bounds the
+amount of unarchived recent data without generating one 16 MiB WAL segment per
+minute during an object-store or routing outage. The volume remains the final
+local buffer: capacity alerts and the pgBackRest heartbeat must reach a human;
+CI/CD is not an availability monitor.
 
 The end-to-end bootstrap, secret boundaries, and release gates are in the
 [`hosted-beta` runbook](../docs/runbooks/hosted-beta.md). Pulumi provisioning

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically reconcile Kamori private-host egress
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=kamori-private-egress.service
+
+[Install]
+WantedBy=timers.target

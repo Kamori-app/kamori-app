@@ -50,9 +50,11 @@ route. App and database nodes receive no public IP addresses. `ops` provides
 NAT and is the only SSH bastion. The private-host egress service configures the
 default route and Hetzner's two recursive DNS resolvers before any package
 installation, because the private-only interface receives no resolver through
-DHCP. The resolver pair is also stored in `systemd-resolved`; every approved
-changed host configuration restarts the private egress service and
-reconstructs the ops NAT rules. The installer records the role archive's
+DHCP. The route and resolver are also declared in a Netplan overlay and a local
+systemd timer reconciles them every minute after networkd changes. Every
+approved changed host configuration regenerates the Netplan backend, reloads
+networkd, restarts the private egress service, and reconstructs the ops NAT
+rules. The installer records the role archive's
 SHA-256 fingerprint only after activation succeeds; an unchanged later `up`
 skips service restarts, package installation, container pulls, and database
 bootstrap. Role files are replaced through same-directory atomic renames, so a
@@ -63,7 +65,7 @@ fail closed after five attempts.
 If only private-host egress is broken, run `Hosted infrastructure` with the
 `repair-egress` command. This is a restricted recovery path, not a Pulumi
 preview or update: it reconstructs ops NAT first and then restarts the
-route/resolver service on the database and two app nodes. The configuration SSH
+route/resolver service and timer on the database and two app nodes. The configuration SSH
 identity accepts only the exact role-bound command, and sudo permits only the
 root-owned repair entrypoint. The action cannot open a shell, pull containers,
 apply the encrypted host archive, bootstrap PostgreSQL, run pgBackRest, or
@@ -83,6 +85,12 @@ backup configuration fingerprint changes.
 Unchanged routine infrastructure updates skip that blocking repository check;
 the scheduled backup job remains responsible for ongoing archive checks and
 operator heartbeats.
+
+The protected database volume is controlled by `databaseVolumeSizeGB`, with a
+production floor of 100 GB. A reviewed increase modifies the Hetzner block
+device in place; database bootstrap then runs idempotent online ext4 expansion
+before it starts PostgreSQL. Never approve a preview that replaces or deletes
+this volume.
 
 The SSH bootstrap creates the ephemeral `/run/sshd` runtime directory before
 running `sshd -t`. Ubuntu normally creates that directory through the

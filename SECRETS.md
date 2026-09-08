@@ -231,6 +231,31 @@ stack configuration.
 pulumi config set kamori:sshKeys operator-key
 ```
 
+### `kamori:databaseVolumeSizeGB` — PostgreSQL volume capacity
+
+- **Classification:** non-secret infrastructure configuration.
+- **Value:** the desired Hetzner volume size in whole GB. Production currently
+  uses `100`; the program rejects values below `100`.
+- **Purpose:** reserves durable space for the PostgreSQL data directory and the
+  local WAL queue while pgBackRest archives WAL to B2.
+- **Dependencies:** changing the value updates the protected
+  `kamori-beta-db-primary-data` volume. The database host configuration then
+  runs an idempotent online `resize2fs` before PostgreSQL starts, so the ext4
+  filesystem consumes newly allocated capacity.
+- **Change policy:** Hetzner volumes can grow but cannot shrink. Increase this
+  value only after a reviewed Pulumi preview shows an in-place volume update;
+  never accept volume replacement or deletion. Capacity is safety margin, not
+  a substitute for working WAL archiving and alert delivery.
+
+The reviewed production value is committed as plain configuration in
+`infra/Pulumi.production.yaml`. It is not a credential and must not be entered
+with `--secret`.
+
+```bash
+cd infra
+pulumi config set kamori:databaseVolumeSizeGB 100
+```
+
 The stock image may briefly activate SSH through `ssh.socket` on `22`, but the
 Hetzner firewall never exposes that port. Before package installation,
 cloud-init's `runcmd` installs the staged Pulumi raw host keypair

@@ -42,6 +42,10 @@ func provisionAutomatedHosts(
 	replaceUserData bool,
 ) (*hostResources, error) {
 	opts := pulumi.Provider(provider)
+	databaseVolumeSizeGB := cfg.RequireInt("databaseVolumeSizeGB")
+	if err := validateDatabaseVolumeSizeGB(databaseVolumeSizeGB); err != nil {
+		return nil, err
+	}
 	passwords, err := provisionGeneratedPasswords(ctx)
 	if err != nil {
 		return nil, err
@@ -93,13 +97,13 @@ func provisionAutomatedHosts(
 		return nil, err
 	}
 
-	volumeOptions := []pulumi.ResourceOption{opts, pulumi.DeleteBeforeReplace(true)}
+	volumeOptions := []pulumi.ResourceOption{opts, pulumi.RetainOnDelete(true)}
 	if protected {
 		volumeOptions = append(volumeOptions, pulumi.Protect(true))
 	}
 	dataVolume, err := hcloud.NewVolume(ctx, "db-primary-data", &hcloud.VolumeArgs{
 		Name:             pulumi.String("kamori-beta-db-primary-data"),
-		Size:             pulumi.Int(80),
+		Size:             pulumi.Int(databaseVolumeSizeGB),
 		Location:         pulumi.String("nbg1"),
 		Format:           pulumi.String("ext4"),
 		DeleteProtection: pulumi.Bool(protected),

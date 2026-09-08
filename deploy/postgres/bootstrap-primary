@@ -8,6 +8,7 @@ fi
 
 source /usr/local/lib/kamori/postgres-lib
 load_postgres_env
+resize_postgres_volume_filesystem
 install_postgres_packages
 prepare_primary_data_directory
 require_tls_material

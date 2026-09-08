@@ -1,0 +1,12 @@
+network:
+  version: 2
+  ethernets:
+    enp7s0:
+      routes:
+        - to: default
+          via: 10.42.0.1
+          on-link: true
+      nameservers:
+        addresses:
+          - 185.12.64.1
+          - 185.12.64.2

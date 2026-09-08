@@ -17,6 +17,7 @@ const (
 	defaultAppServerType      = "cx23"
 	defaultOpsServerType      = "cx23"
 	defaultDatabaseServerType = "cx33"
+	minimumDatabaseVolumeGB   = 100
 	hostProvisioningRetire    = "retire"
 	hostProvisioningReplace   = "replace"
 	hostProvisioningProtect   = "protect"
@@ -53,6 +54,13 @@ func validateHostProvisioningPhase(value string) error {
 	default:
 		return fmt.Errorf("hostProvisioningPhase must be %q, %q, or %q", hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect)
 	}
+}
+
+func validateDatabaseVolumeSizeGB(value int) error {
+	if value < minimumDatabaseVolumeGB {
+		return fmt.Errorf("databaseVolumeSizeGB must be at least %d", minimumDatabaseVolumeGB)
+	}
+	return nil
 }
 
 type cloudEnvSecrets struct {

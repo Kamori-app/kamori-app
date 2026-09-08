@@ -34,6 +34,38 @@ Both jobs update `operator_job_heartbeats` through narrowly scoped identities.
 A green heartbeat means the last check completed; it does not replace the
 quarterly restore exercise.
 
+PostgreSQL forces an archive switch after five idle minutes. This keeps the
+PITR window moving during low traffic while limiting forced WAL growth during
+an archive outage. The local volume is only a bounded buffer; stale archive
+heartbeats and capacity alerts require human delivery.
+
+## WAL archive outage or full database volume
+
+Treat a growing `pg_wal/archive_status/*.ready` queue as an archive-path
+failure, not disposable data. Never delete or move WAL files, run
+`pg_resetwal`, or start PostgreSQL on a completely full filesystem.
+
+1. Inspect the real cluster unit (`postgresql@16-main`), the mounted
+   `/srv/kamori-postgres` filesystem, its `pg_wal` queue, and pgBackRest logs.
+   The umbrella `postgresql.service` can remain active when the cluster failed.
+2. If the private default route or DNS was lost, dispatch `Hosted
+   infrastructure` with `repair-egress`. It only restores network
+   configuration and performs no service or availability probe.
+3. If free space is insufficient to start PostgreSQL safely, increase the
+   committed `kamori:databaseVolumeSizeGB`. Run `Hosted infrastructure /
+   preview` and proceed only when it shows an in-place volume grow with no
+   replacement or deletion.
+4. Run `Hosted infrastructure / up`. Pulumi grows the block device, and the
+   delivered database configuration expands ext4 before PostgreSQL starts.
+   With B2 reachable, pgBackRest archives the existing `.ready` backlog and
+   PostgreSQL recycles WAL normally.
+5. Inspect systemd state, filesystem usage, pgBackRest logs, and the `.ready`
+   count until the queue is draining. Public endpoint checks belong to the
+   dedicated monitoring service, not CI/CD.
+6. Confirm that both the stale-backup and disk-capacity alerts deliver to a
+   human. A configured Prometheus rule without a real Alertmanager receiver is
+   not an operational alert.
+
 ## Quarterly restore exercise
 
 1. Create isolated database and worker nodes with no public application route.
