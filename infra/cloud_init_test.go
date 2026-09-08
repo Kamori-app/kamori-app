@@ -214,6 +214,18 @@ func TestPrivateHostEgressConfiguresProviderDNSBeforePackageInstallation(t *test
 			t.Fatalf("private egress setup is missing %q", command)
 		}
 	}
+	for path, required := range map[string]string{
+		"/etc/netplan/60-kamori-private-egress.yaml":        "via: 10.42.0.1",
+		"/etc/systemd/system/kamori-private-egress.service": "ExecStart=/usr/local/sbin/kamori-private-default-route",
+		"/etc/systemd/system/kamori-private-egress.timer":   "OnUnitActiveSec=1min",
+	} {
+		if !strings.Contains(files[path], required) {
+			t.Fatalf("private cloud-init file %s is missing %q", path, required)
+		}
+	}
+	if !strings.Contains(script, "systemctl enable --now kamori-private-egress.timer") {
+		t.Fatal("private first-boot script does not enable continuous egress reconciliation")
+	}
 }
 
 func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
@@ -237,6 +249,16 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 	}
 	if _, ok := files["root/usr/local/sbin/kamori-repair-egress"]; !ok {
 		t.Fatal("host configuration is missing the restricted egress repair entrypoint")
+	}
+	for path, required := range map[string]string{
+		"root/etc/netplan/60-kamori-private-egress.yaml":        "via: 10.42.0.1",
+		"root/etc/systemd/system/kamori-private-egress.service": "ExecStart=/usr/local/sbin/kamori-private-default-route",
+		"root/etc/systemd/system/kamori-private-egress.timer":   "OnUnitActiveSec=1min",
+		"root/usr/local/sbin/kamori-private-default-route":      "ip route replace default via 10.42.0.1",
+	} {
+		if !strings.Contains(files[path], required) {
+			t.Fatalf("private host configuration file %s is missing %q", path, required)
+		}
 	}
 	if _, ok := files["root/usr/local/sbin/kamori-install-host-config"]; !ok {
 		t.Fatal("host configuration is missing the atomic configuration installer")
@@ -277,6 +299,9 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
+		"netplan generate",
+		"networkctl reload",
+		"systemctl enable --now kamori-private-egress.timer",
 		"systemctl restart systemd-resolved.service",
 		"systemctl restart kamori-private-egress.service",
 		"systemctl restart kamori-nat-gateway.service",
@@ -297,6 +322,41 @@ func TestPrivateHostConfigurationPersistsAndReappliesEgress(t *testing.T) {
 		if strings.Contains(repairScript, forbidden) {
 			t.Fatalf("restricted egress repair must not contain %q", forbidden)
 		}
+	}
+}
+
+func TestPostgresVolumeIsExpandedBeforeDatabaseActivation(t *testing.T) {
+	t.Parallel()
+
+	bootstrap, err := deploymentAsset("postgres/bootstrap-primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	postgresLibrary, err := deploymentAsset("postgres/postgres-lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resize := strings.Index(bootstrap, "resize_postgres_volume_filesystem")
+	start := strings.Index(bootstrap, "systemctl enable --now postgresql.service")
+	if resize < 0 || start < 0 || resize >= start {
+		t.Fatal("PostgreSQL bootstrap must expand the dedicated filesystem before starting PostgreSQL")
+	}
+	for _, required := range []string{
+		`mountpoint -q "$volume_mount"`,
+		`mounted_target=$(findmnt --noheadings --output TARGET --target "$POSTGRES_DATA_DIR")`,
+		`if [[ "$mounted_target" != "$volume_mount" ]]`,
+		`if [[ ! -b "$mounted_source" ]]`,
+		`if [[ "$filesystem_type" != ext4 ]]`,
+		`resize2fs "$mounted_source"`,
+		"archive_timeout = '5min'",
+	} {
+		if !strings.Contains(postgresLibrary, required) {
+			t.Fatalf("PostgreSQL volume/WAL guardrail is missing %q", required)
+		}
+	}
+	if strings.Contains(postgresLibrary, "archive_timeout = '60s'") {
+		t.Fatal("one-minute forced WAL rotation would exhaust the beta volume too quickly during an archive outage")
 	}
 }
 

@@ -49,3 +49,16 @@ func TestOnlyReplacePhaseAdoptsChangedImmutableUserData(t *testing.T) {
 		}
 	}
 }
+
+func TestDatabaseVolumeSizeCannotDropBelowRecoveryFloor(t *testing.T) {
+	for _, size := range []int{minimumDatabaseVolumeGB, 160, 1024} {
+		if err := validateDatabaseVolumeSizeGB(size); err != nil {
+			t.Fatalf("valid database volume size %d rejected: %v", size, err)
+		}
+	}
+	for _, size := range []int{0, 80, minimumDatabaseVolumeGB - 1} {
+		if err := validateDatabaseVolumeSizeGB(size); err == nil {
+			t.Fatalf("unsafe database volume size %d accepted", size)
+		}
+	}
+}

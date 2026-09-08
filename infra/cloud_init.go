@@ -99,6 +99,30 @@ func deploymentFiles(mapping map[string]string) ([]cloudInitFile, error) {
 	return files, nil
 }
 
+func privateEgressFiles() ([]cloudInitFile, error) {
+	assets := []struct {
+		path        string
+		source      string
+		permissions string
+	}{
+		{path: "/usr/local/sbin/kamori-private-default-route", source: "host-config/kamori-private-default-route", permissions: "0755"},
+		{path: "/etc/systemd/system/kamori-private-egress.service", source: "host-config/kamori-private-egress.service", permissions: "0644"},
+		{path: "/etc/systemd/system/kamori-private-egress.timer", source: "host-config/kamori-private-egress.timer", permissions: "0644"},
+		{path: "/etc/netplan/60-kamori-private-egress.yaml", source: "host-config/60-kamori-private-egress.yaml", permissions: "0600"},
+	}
+	files := make([]cloudInitFile, 0, len(assets))
+	for _, asset := range assets {
+		contents, err := deploymentAsset(asset.source)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, cloudInitFile{
+			path: asset.path, owner: "root:root", permissions: asset.permissions, content: contents,
+		})
+	}
+	return files, nil
+}
+
 func compressedBase64(value string) (string, error) {
 	var compressed bytes.Buffer
 	encoder := gzip.NewWriter(&compressed)
@@ -222,38 +246,11 @@ fs.protected_symlinks=1
 		{path: "/usr/local/sbin/kamori-first-boot", owner: "root:root", permissions: "0755", content: firstBootScript},
 	}
 	if role != "ops" {
-		commonFiles = append(commonFiles,
-			cloudInitFile{path: "/usr/local/sbin/kamori-private-default-route", owner: "root:root", permissions: "0755", content: `#!/usr/bin/env bash
-set -euo pipefail
-for attempt in $(seq 1 120); do
-  private_interface=$(ip -o -4 addr show | awk '$4 ~ /^10\.42\./ {print $2; exit}')
-  if [[ -n "$private_interface" ]]; then
-    ip route replace default via 10.42.0.1 dev "$private_interface" onlink
-    resolvectl dns "$private_interface" 185.12.64.1 185.12.64.2
-    resolvectl domain "$private_interface" '~.'
-    resolvectl default-route "$private_interface" yes
-    exit 0
-  fi
-  sleep 1
-done
-echo "private network interface did not become available" >&2
-exit 1
-`},
-			cloudInitFile{path: "/etc/systemd/system/kamori-private-egress.service", owner: "root:root", permissions: "0644", content: `[Unit]
-Description=Route private-only host egress through the Kamori NAT gateway
-After=network-online.target
-Wants=network-online.target
-Before=docker.service postgresql.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/kamori-private-default-route
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-`},
-		)
+		egressFiles, err := privateEgressFiles()
+		if err != nil {
+			return "", err
+		}
+		commonFiles = append(commonFiles, egressFiles...)
 	}
 	files = append(commonFiles, files...)
 
@@ -278,7 +275,7 @@ WantedBy=multi-user.target
 func commonFirstBoot(packages string, privateEgress bool) string {
 	routeSetup := ""
 	if privateEgress {
-		routeSetup = "/usr/local/sbin/kamori-private-default-route\nsystemctl daemon-reload\nsystemctl enable kamori-private-egress.service\n"
+		routeSetup = "/usr/local/sbin/kamori-private-default-route\nsystemctl daemon-reload\nsystemctl enable kamori-private-egress.service\nsystemctl enable --now kamori-private-egress.timer\n"
 	}
 	return fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
@@ -350,6 +347,11 @@ func commonHostConfigurationFiles(role string, material commonHostMaterial, rele
 		cloudInitFile{path: "/etc/sudoers.d/kamori-configure", owner: "root:root", permissions: "0440", content: configurationSudoers(role)},
 	)
 	if role != "ops" {
+		egressFiles, err := privateEgressFiles()
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, egressFiles...)
 		files = append(files, cloudInitFile{
 			path:        "/etc/systemd/resolved.conf.d/60-kamori-private-egress.conf",
 			owner:       "root:root",

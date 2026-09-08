@@ -23,7 +23,10 @@ flock 8
 
 case "$role" in
   app|db-primary)
+    netplan generate
+    networkctl reload
     systemctl enable kamori-private-egress.service
+    systemctl enable --now kamori-private-egress.timer
     systemctl restart systemd-resolved.service
     systemctl restart kamori-private-egress.service
     resolvectl flush-caches

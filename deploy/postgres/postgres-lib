@@ -24,6 +24,37 @@ load_postgres_env() {
   export POSTGRES_VERSION POSTGRES_PRIMARY_IP POSTGRES_DATA_DIR
 }
 
+resize_postgres_volume_filesystem() {
+  local volume_mount=/srv/kamori-postgres
+  local mounted_target
+  local mounted_source
+  local filesystem_type
+
+  if ! mountpoint -q "$volume_mount"; then
+    echo "$volume_mount is not a mounted PostgreSQL volume" >&2
+    exit 1
+  fi
+  mounted_target=$(findmnt --noheadings --output TARGET --target "$POSTGRES_DATA_DIR")
+  mounted_source=$(findmnt --noheadings --output SOURCE --target "$POSTGRES_DATA_DIR")
+  filesystem_type=$(findmnt --noheadings --output FSTYPE --target "$POSTGRES_DATA_DIR")
+  if [[ "$mounted_target" != "$volume_mount" ]]; then
+    echo "POSTGRES_DATA_DIR is not backed by the dedicated PostgreSQL volume" >&2
+    exit 1
+  fi
+  if [[ ! -b "$mounted_source" ]]; then
+    echo "PostgreSQL volume source is not a block device: $mounted_source" >&2
+    exit 1
+  fi
+  if [[ "$filesystem_type" != ext4 ]]; then
+    echo "unsupported PostgreSQL volume filesystem: $filesystem_type" >&2
+    exit 1
+  fi
+
+  # Hetzner grows the block device in place. resize2fs is idempotent and grows
+  # the mounted ext4 filesystem to consume the newly available capacity.
+  resize2fs "$mounted_source"
+}
+
 install_postgres_packages() {
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -112,7 +143,7 @@ max_replication_slots = 0
 wal_log_hints = on
 archive_mode = '${archive_mode}'
 archive_command = 'pgbackrest --stanza=kamori archive-push %p'
-archive_timeout = '60s'
+archive_timeout = '5min'
 hot_standby = on
 shared_preload_libraries = 'pg_stat_statements'
 track_commit_timestamp = on

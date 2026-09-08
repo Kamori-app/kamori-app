@@ -1,0 +1,12 @@
+[Unit]
+Description=Route private-only host egress through the Kamori NAT gateway
+After=network-online.target
+Wants=network-online.target
+Before=docker.service postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kamori-private-default-route
+
+[Install]
+WantedBy=multi-user.target
