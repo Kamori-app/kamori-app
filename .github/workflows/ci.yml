@@ -341,8 +341,16 @@ jobs:
           restore-keys: bun-${{ runner.os }}-${{ runner.arch }}-
       - name: Install acceptance dependencies
         run: bun install --frozen-lockfile
+      - name: Restore Playwright browser cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        # Run the workspace-pinned binary. A root-level `bunx playwright`
+        # resolves the latest release and can install a browser revision that
+        # differs from the version used by the acceptance test workspace.
+        run: bun run --cwd tests/acceptance playwright install --with-deps chromium
       - name: Pull pinned acceptance service images
         run: docker compose --project-directory tests/acceptance -f tests/acceptance/compose.yaml pull postgres valkey minio minio-init
       - name: Run pull request acceptance smoke
