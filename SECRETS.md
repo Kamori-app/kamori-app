@@ -699,6 +699,39 @@ openssl rand -base64 32
 pulumi config set --secret kamori:metricsBearerToken
 ```
 
+### `kamori:alertmanagerWebhookUrl` — operator alert destination
+
+- **Classification:** optional during infrastructure bootstrap, but required
+  before production is considered monitored. Treat it as a secret because
+  webhook URLs commonly contain a bearer credential in their path or query.
+- **Value:** an absolute HTTPS endpoint that accepts the standard Alertmanager
+  webhook JSON payload and delivers it to a human-owned notification channel.
+  A raw webhook for a service with an incompatible payload schema is not
+  sufficient; use that service's Alertmanager integration or a reviewed relay.
+- **Purpose:** delivers warning, critical, and resolved infrastructure alerts,
+  including filesystem capacity and stale PostgreSQL backup alarms.
+- **Dependencies:** without this value, Alertmanager deliberately renders the
+  `operator-placeholder` receiver and sends nothing. This makes the missing
+  integration visible without blocking unrelated infrastructure recovery.
+- **Delivery:** Pulumi installs the URL as
+  `/etc/kamori/secrets/alertmanager-webhook-url`, owned by Alertmanager's
+  numeric UID and mode `0400`. The readable Alertmanager YAML contains only a
+  `url_file` reference, never the URL itself.
+- **Rotation:** create and test the replacement endpoint, update this value,
+  apply the stack, verify a synthetic alert and its resolved notification, and
+  only then revoke the old endpoint.
+
+From `infra`, open Pulumi's hidden value prompt and paste the complete HTTPS
+URL:
+
+```bash
+pulumi config set --secret kamori:alertmanagerWebhookUrl
+```
+
+After `Hosted infrastructure / preview` and `up`, verify receipt using the
+dedicated monitoring/alert exercise. Do not add a CI/CD availability probe to
+test it.
+
 Pulumi renders the application values into `/etc/kamori/cloud.env` and the
 certificate/key files on both app nodes. Do not create or patch those generated
 files manually: unmanaged changes disappear on replacement and can leave the

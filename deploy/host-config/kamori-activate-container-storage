@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  echo "kamori-activate-container-storage must run as root" >&2
+  exit 1
+fi
+
+docker_config=/etc/docker/daemon.json
+journal_config=/etc/systemd/journald.conf.d/60-kamori-storage.conf
+configuration_marker=/var/lib/kamori/container-storage-configuration.sha256
+marker_temporary=""
+cleanup() {
+  if [[ -n "$marker_temporary" ]]; then
+    rm -f "$marker_temporary"
+  fi
+}
+trap cleanup EXIT
+
+test -r "$docker_config"
+test -r "$journal_config"
+/usr/bin/dockerd --validate --config-file "$docker_config"
+
+configuration_fingerprint=$(
+  sha256sum "$docker_config" "$journal_config" | sha256sum | awk '{print $1}'
+)
+installed_configuration_fingerprint=""
+if [[ -r "$configuration_marker" ]]; then
+  installed_configuration_fingerprint=$(tr -d '\r\n' <"$configuration_marker")
+fi
+
+if [[ "$installed_configuration_fingerprint" != "$configuration_fingerprint" ]]; then
+  systemctl restart systemd-journald.service
+  journalctl --rotate
+  journalctl --vacuum-size=512M
+  systemctl restart docker.service
+
+  install -d -o root -g root -m 0700 /var/lib/kamori
+  marker_temporary=$(mktemp /var/lib/kamori/container-storage-configuration.sha256.XXXXXX)
+  printf '%s\n' "$configuration_fingerprint" >"$marker_temporary"
+  chmod 0600 "$marker_temporary"
+  mv "$marker_temporary" "$configuration_marker"
+  marker_temporary=""
+fi
+
+systemctl enable --now kamori-container-image-prune.timer

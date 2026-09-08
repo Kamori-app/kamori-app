@@ -5,8 +5,7 @@ route:
   group_interval: 5m
   repeat_interval: 4h
 
-# This receiver intentionally sends nowhere. The beta release gate requires
-# replacing it with an operator-owned webhook or email receiver and firing a
-# synthetic alert before registration is opened.
+# Local/standalone fallback. Pulumi renders the production receiver at this
+# path from encrypted stack configuration without exposing the webhook URL.
 receivers:
   - name: operator-placeholder

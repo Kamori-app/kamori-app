@@ -1,0 +1,22 @@
+[Unit]
+Description=Remove old Docker images not used by any Kamori container
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/var/run/docker.sock
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune --all --force --filter until=336h
+TimeoutStartSec=30min
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=

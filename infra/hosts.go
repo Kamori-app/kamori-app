@@ -199,6 +199,7 @@ func provisionAutomatedHosts(
 				cfg.RequireSecret("valkeyPassword"),
 				passwords.grafanaAdmin,
 				cfg.RequireSecret("metricsBearerToken"),
+				cfg.GetSecret("alertmanagerWebhookUrl"),
 				backupEnvironment,
 				postgresIdentity.caCertificate,
 				postgresIdentity.jobsClientCertificate,
@@ -206,8 +207,8 @@ func provisionAutomatedHosts(
 			).ApplyT(func(values []interface{}) (string, error) {
 				return renderOpsHostConfiguration(opsCloudInitMaterial{
 					commonHostMaterial: commonHostMaterial{hostName: hostName, hostCertificate: values[0].(string), configPublicKey: values[1].(string)},
-					deployPublicKey:    values[2].(string), valkeyPassword: values[3].(string), grafanaAdminPassword: values[4].(string), metricsBearerToken: values[5].(string), backupEnvironment: values[6].(string),
-					postgresCACertificate: values[7].(string), postgresJobsCertificate: values[8].(string), postgresJobsPrivateKey: values[9].(string),
+					deployPublicKey:    values[2].(string), valkeyPassword: values[3].(string), grafanaAdminPassword: values[4].(string), metricsBearerToken: values[5].(string), alertmanagerWebhookURL: values[6].(string),
+					backupEnvironment: values[7].(string), postgresCACertificate: values[8].(string), postgresJobsCertificate: values[9].(string), postgresJobsPrivateKey: values[10].(string),
 				})
 			}).(pulumi.StringOutput)
 		case "db-primary":

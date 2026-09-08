@@ -49,6 +49,7 @@ type opsCloudInitMaterial struct {
 	valkeyPassword          string
 	grafanaAdminPassword    string
 	metricsBearerToken      string
+	alertmanagerWebhookURL  string
 	backupEnvironment       string
 	postgresCACertificate   string
 	postgresJobsCertificate string
@@ -121,6 +122,70 @@ func privateEgressFiles() ([]cloudInitFile, error) {
 		})
 	}
 	return files, nil
+}
+
+func containerHostFiles() ([]cloudInitFile, error) {
+	assets := []struct {
+		path        string
+		source      string
+		permissions string
+	}{
+		{path: "/etc/docker/daemon.json", source: "host-config/docker-daemon.json", permissions: "0644"},
+		{path: "/etc/systemd/journald.conf.d/60-kamori-storage.conf", source: "host-config/60-kamori-journald.conf", permissions: "0644"},
+		{path: "/usr/local/sbin/kamori-activate-container-storage", source: "host-config/kamori-activate-container-storage", permissions: "0755"},
+		{path: "/etc/systemd/system/kamori-container-image-prune.service", source: "host-config/kamori-container-image-prune.service", permissions: "0644"},
+		{path: "/etc/systemd/system/kamori-container-image-prune.timer", source: "host-config/kamori-container-image-prune.timer", permissions: "0644"},
+	}
+	files := make([]cloudInitFile, 0, len(assets))
+	for _, asset := range assets {
+		contents, err := deploymentAsset(asset.source)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, cloudInitFile{
+			path: asset.path, owner: "root:root", permissions: asset.permissions, content: contents,
+		})
+	}
+	return files, nil
+}
+
+func renderAlertmanagerConfiguration(webhookURL string) (string, string, error) {
+	trimmedURL := strings.TrimSpace(webhookURL)
+	if trimmedURL == "" {
+		return `route:
+  receiver: operator-placeholder
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: operator-placeholder
+`, "", nil
+	}
+	if strings.ContainsAny(trimmedURL, "\r\n") {
+		return "", "", fmt.Errorf("alertmanagerWebhookUrl must be a single-line URL")
+	}
+	if strings.Contains(trimmedURL, "#") {
+		return "", "", fmt.Errorf("alertmanagerWebhookUrl must not contain a fragment")
+	}
+	parsedURL, err := url.ParseRequestURI(trimmedURL)
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+		return "", "", fmt.Errorf("alertmanagerWebhookUrl must be an absolute HTTPS URL without a fragment")
+	}
+	return `route:
+  receiver: operator-webhook
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: operator-webhook
+    webhook_configs:
+      - url_file: /run/secrets/operator_webhook_url
+        send_resolved: true
+`, trimmedURL + "\n", nil
 }
 
 func compressedBase64(value string) (string, error) {
@@ -376,6 +441,11 @@ func appConfigurationFiles(material appCloudInitMaterial) ([]cloudInitFile, erro
 	if err != nil {
 		return nil, err
 	}
+	containerFiles, err := containerHostFiles()
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, containerFiles...)
 	files = append(files,
 		cloudInitFile{path: "/etc/kamori/cloud.env", owner: "root:root", permissions: "0400", content: material.cloudEnvironment},
 		cloudInitFile{path: "/etc/kamori/secrets/opaque-server-setup", owner: "root:root", permissions: "0400", content: material.opaqueServerSetup},
@@ -404,11 +474,16 @@ func renderAppHostConfiguration(material appCloudInitMaterial) (string, error) {
 }
 
 func renderAppCloudInit(material appCloudInitMaterial) (string, error) {
+	files, err := containerHostFiles()
+	if err != nil {
+		return "", err
+	}
 	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo docker.io docker-compose-v2", true) + disableCloudInitNetworkHotplug() + `
 systemctl daemon-reload
 systemctl enable --now docker.service
+/usr/local/sbin/kamori-activate-container-storage
 `
-	return renderCloudInit("app", material.commonHostMaterial, nil, firstBoot)
+	return renderCloudInit("app", material.commonHostMaterial, files, firstBoot)
 }
 
 func opsConfigurationFiles(material opsCloudInitMaterial) ([]cloudInitFile, error) {
@@ -416,7 +491,6 @@ func opsConfigurationFiles(material opsCloudInitMaterial) ([]cloudInitFile, erro
 		"/opt/kamori/ops/compose.yaml":                        "ops/compose.yaml",
 		"/opt/kamori/ops/prometheus.yml":                      "ops/prometheus.yml",
 		"/opt/kamori/ops/alerts.yml":                          "ops/alerts.yml",
-		"/opt/kamori/ops/alertmanager.yml":                    "ops/alertmanager.yml",
 		"/opt/kamori/ops/grafana-datasource.yml":              "ops/grafana-datasource.yml",
 		"/usr/local/lib/kamori/replicate-blobs":               "backup/replicate-blobs",
 		"/etc/systemd/system/kamori-blob-replication.service": "backup/kamori-blob-replication.service",
@@ -425,8 +499,19 @@ func opsConfigurationFiles(material opsCloudInitMaterial) ([]cloudInitFile, erro
 	if err != nil {
 		return nil, err
 	}
+	containerFiles, err := containerHostFiles()
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, containerFiles...)
+	alertmanagerConfiguration, alertmanagerWebhookSecret, err := renderAlertmanagerConfiguration(material.alertmanagerWebhookURL)
+	if err != nil {
+		return nil, err
+	}
 	opsEnvironment := envLine("VALKEY_PASSWORD", material.valkeyPassword) + envLine("GRAFANA_ADMIN_PASSWORD", material.grafanaAdminPassword)
 	files = append(files,
+		cloudInitFile{path: "/opt/kamori/ops/alertmanager.yml", owner: "root:root", permissions: "0644", content: alertmanagerConfiguration},
+		cloudInitFile{path: "/etc/kamori/secrets/alertmanager-webhook-url", owner: "65534:65534", permissions: "0400", content: alertmanagerWebhookSecret},
 		cloudInitFile{path: "/etc/kamori/ops.env", owner: "root:root", permissions: "0600", content: opsEnvironment},
 		cloudInitFile{path: "/etc/kamori/backup.env", owner: "root:root", permissions: "0600", content: material.backupEnvironment},
 		cloudInitFile{path: "/etc/kamori/secrets/metrics_token", owner: "root:root", permissions: "0400", content: material.metricsBearerToken},
@@ -477,10 +562,16 @@ func renderOpsHostConfiguration(material opsCloudInitMaterial) (string, error) {
 }
 
 func renderOpsCloudInit(material opsCloudInitMaterial) (string, error) {
+	files, err := containerHostFiles()
+	if err != nil {
+		return "", err
+	}
 	firstBoot := commonFirstBoot("ca-certificates curl jq unattended-upgrades fail2ban chrony prometheus-node-exporter sudo iptables docker.io docker-compose-v2 postgresql-client rclone", false) + disableCloudInitNetworkHotplug() + `
+systemctl daemon-reload
 systemctl enable --now docker.service
+/usr/local/sbin/kamori-activate-container-storage
 `
-	return renderCloudInit("ops", material.commonHostMaterial, nil, firstBoot)
+	return renderCloudInit("ops", material.commonHostMaterial, files, firstBoot)
 }
 
 func databaseConfigurationFiles(material databaseCloudInitMaterial) ([]cloudInitFile, error) {

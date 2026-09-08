@@ -19,6 +19,11 @@ Enter their `keyID` and one-time `applicationKey` values with the four hidden
 `pulumi config set --secret` commands in `SECRETS.md`. Never copy these values
 to a host or GitHub. Pulumi installs them only on DB and ops respectively.
 
+Configure `kamori:alertmanagerWebhookUrl` using the separate hidden command in
+`SECRETS.md` when the operator-owned HTTPS receiver is ready. Until then the
+stack remains deployable for recovery, but Alertmanager deliberately uses a
+no-delivery placeholder and the monitoring release gate is not satisfied.
+
 ## 2. Replace and protect the empty hosts
 
 The first rollout is deliberately split into three protected infrastructure
@@ -158,6 +163,18 @@ Grafana binds only to ops localhost. An operator may view it through a local SSH
 tunnel using the break-glass operator key; this is observation, not
 provisioning. Valkey remains deliberately ephemeral and single-node.
 
+App and ops containers use explicit bounded local logging. A daily systemd
+timer removes only images unused by every container and older than fourteen
+days; it never prunes volumes, containers, or networks. Journald is capped at
+512 MiB and reserves 2 GB of root-filesystem free space. Docker and journald
+configuration changes are fingerprinted, validated, and activated only when
+their content changes. Ops containers are recreated after an accepted host
+configuration so atomically replaced bind-mounted configuration and secret
+files cannot leave a running container attached to an old inode. Prometheus
+retains at most 30 days or 5 GB of TSDB data, whichever bound is reached first.
+The installer compares database-specific inputs before replacing files, so
+these container-host changes do not restart PostgreSQL.
+
 ## 4. Create the first operator
 
 Run `cloud-server admin-bootstrap <username>` only in a trusted terminal on an
@@ -186,7 +203,10 @@ confirmation.
   current and green in the operator console.
 - Both app targets independently pass readiness through the load balancer.
 - Prometheus sees both app nodes and all four node exporters.
-- Alertmanager delivers a synthetic critical alert to a human.
+- Alertmanager delivers a synthetic critical alert and its resolved
+  notification to a human-owned channel.
+- Filesystem warning and critical alerts fire at 70 and 85 percent
+  respectively.
 - Quota alerts at account 80/95% and egress 10/14 TB are loaded.
 - The dedicated external monitoring service checks API readiness, user web,
   operator console, DNS, and TLS from outside Hetzner, and its failure
