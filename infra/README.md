@@ -142,6 +142,9 @@ restarting PostgreSQL, pulling ops containers, or restarting app services.
 Every regular file is staged in its destination directory and atomically
 renamed into place. In particular, the installer never truncates its own live
 script inode while Bash is still reading it.
+Database activation inputs are compared before installation; a change limited
+to common SSH, container, or ops assets updates the host archive marker without
+restarting PostgreSQL.
 
 ## Application rollout
 
@@ -163,6 +166,14 @@ environment template live in
 Grafana, and ephemeral Valkey stack lives in [`deploy/ops`](../deploy/ops).
 Valkey runs directly as the pinned image's non-root UID/GID; its root filesystem
 stays read-only and only its non-persistent `/data` tmpfs is writable.
+Every app/ops container uses Docker's bounded `local` log driver with at most
+three 10 MiB files. The same defaults cover future unmanaged containers,
+systemd-journald targets a 512 MiB cap while reserving 2 GB on the root
+filesystem, and a hardened daily timer removes only Docker images unused by
+any container and older than fourteen days. It never prunes containers,
+networks, or volumes; an older release digest remains recoverable from GHCR.
+Prometheus retention is bounded by both 30 days and 5 GB, whichever limit is
+reached first.
 Database bootstrap/PITR assets are in [`deploy/postgres`](../deploy/postgres),
 and cross-provider ciphertext replication is in
 [`deploy/backup`](../deploy/backup).
@@ -199,6 +210,13 @@ amount of unarchived recent data without generating one 16 MiB WAL segment per
 minute during an object-store or routing outage. The volume remains the final
 local buffer: capacity alerts and the pgBackRest heartbeat must reach a human;
 CI/CD is not an availability monitor.
+
+Host filesystem alerts begin at 70 percent and become critical at 85 percent.
+Alertmanager reads its optional operator webhook URL from a UID-owned `0400`
+secret file; the URL never appears in its readable YAML. An unset
+`alertmanagerWebhookUrl` intentionally selects a no-delivery placeholder, so
+the release gate remains failed until an HTTPS Alertmanager-compatible
+endpoint has received both a synthetic firing and resolved notification.
 
 The end-to-end bootstrap, secret boundaries, and release gates are in the
 [`hosted-beta` runbook](../docs/runbooks/hosted-beta.md). Pulumi provisioning

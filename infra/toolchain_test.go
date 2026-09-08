@@ -114,6 +114,26 @@ func TestInfrastructureWorkflowUsesReviewedPulumiAction(t *testing.T) {
 	}
 }
 
+func TestAcceptanceWorkflowInstallsBrowserFromPinnedWorkspace(t *testing.T) {
+	t.Parallel()
+
+	workflow, err := os.ReadFile("../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatalf("read CI workflow: %v", err)
+	}
+	contents := string(workflow)
+	for _, required := range []string{
+		"bun run --cwd tests/acceptance playwright install --with-deps chromium",
+	} {
+		if !strings.Contains(contents, required) {
+			t.Fatalf("acceptance browser setup is missing %q", required)
+		}
+	}
+	if strings.Contains(contents, "bunx playwright install") {
+		t.Fatal("acceptance browser setup must not resolve an unpinned Playwright release")
+	}
+}
+
 func requiredMatch(t *testing.T, contents []byte, pattern string) string {
 	t.Helper()
 

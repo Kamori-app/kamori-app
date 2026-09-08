@@ -5,12 +5,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+type composeLogging struct {
+	Driver  string            `yaml:"driver"`
+	Options map[string]string `yaml:"options"`
+}
 
 func decodeHostConfiguration(t *testing.T, encoded string) map[string]string {
 	t.Helper()
@@ -126,6 +132,211 @@ func TestRotatableApplicationMaterialLivesOutsideImmutableCloudInit(t *testing.T
 	} {
 		if got := configurationFiles[path]; got != expected {
 			t.Fatalf("host configuration %s = %q, want %q", path, got, expected)
+		}
+	}
+}
+
+func TestContainerHostsReceiveBoundedLocalStorageConfiguration(t *testing.T) {
+	t.Parallel()
+	common := commonHostMaterial{hostName: "kamori-beta-test", hostCertificate: "HOST CERT", configPublicKey: "ssh-ed25519 CONFIG"}
+	app, err := renderAppHostConfiguration(appCloudInitMaterial{
+		commonHostMaterial: common, deployPublicKey: "ssh-ed25519 DEPLOY", cloudEnvironment: "KAMORI_JWT_SECRET=secret\n", opaqueServerSetup: "opaque", refreshRotationKey: "rotation",
+		postgresCACertificate: "CA", postgresClientCertificate: "CLIENT CERT", postgresClientPrivateKey: "CLIENT KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := renderOpsHostConfiguration(opsCloudInitMaterial{
+		commonHostMaterial: common, deployPublicKey: "ssh-ed25519 DEPLOY", valkeyPassword: "valkey", grafanaAdminPassword: "grafana", metricsBearerToken: "metrics",
+		backupEnvironment: "PRIMARY_S3_KEY_ID=read\n", postgresCACertificate: "CA", postgresJobsCertificate: "JOBS CERT", postgresJobsPrivateKey: "JOBS KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := renderDatabaseHostConfiguration(databaseCloudInitMaterial{
+		commonHostMaterial: common, postgresEnvironment: "POSTGRES_VERSION=16\n", postgresCACertificate: "CA", postgresServerCertificate: "SERVER CERT", postgresServerPrivateKey: "SERVER KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for role, configuration := range map[string]string{"app": app, "ops": ops} {
+		files := decodeHostConfiguration(t, configuration)
+		for path := range map[string]struct{}{
+			"root/etc/docker/daemon.json":                                  {},
+			"root/etc/systemd/journald.conf.d/60-kamori-storage.conf":      {},
+			"root/usr/local/sbin/kamori-activate-container-storage":        {},
+			"root/etc/systemd/system/kamori-container-image-prune.service": {},
+			"root/etc/systemd/system/kamori-container-image-prune.timer":   {},
+		} {
+			if _, ok := files[path]; !ok {
+				t.Fatalf("%s host configuration is missing %s", role, path)
+			}
+		}
+	}
+	databaseFiles := decodeHostConfiguration(t, database)
+	if _, ok := databaseFiles["root/etc/docker/daemon.json"]; ok {
+		t.Fatal("database host must not receive Docker storage configuration")
+	}
+
+	dockerConfiguration, err := deploymentAsset("host-config/docker-daemon.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var daemon struct {
+		LiveRestore bool              `json:"live-restore"`
+		LogDriver   string            `json:"log-driver"`
+		LogOptions  map[string]string `json:"log-opts"`
+	}
+	if err := json.Unmarshal([]byte(dockerConfiguration), &daemon); err != nil {
+		t.Fatalf("Docker daemon configuration is invalid JSON: %v", err)
+	}
+	if !daemon.LiveRestore || daemon.LogDriver != "local" || daemon.LogOptions["max-size"] != "10m" || daemon.LogOptions["max-file"] != "3" {
+		t.Fatalf("unexpected Docker storage bounds: %+v", daemon)
+	}
+
+	activation, err := deploymentAsset("host-config/kamori-activate-container-storage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`dockerd --validate --config-file "$docker_config"`,
+		"container-storage-configuration.sha256",
+		"journalctl --vacuum-size=512M",
+		"systemctl restart docker.service",
+		"systemctl enable --now kamori-container-image-prune.timer",
+	} {
+		if !strings.Contains(activation, required) {
+			t.Fatalf("container storage activation is missing %q", required)
+		}
+	}
+	pruneService, err := deploymentAsset("host-config/kamori-container-image-prune.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pruneService, "docker image prune --all --force --filter until=336h") {
+		t.Fatal("container image cleanup must remove only unused images older than fourteen days")
+	}
+	for _, forbidden := range []string{"volume prune", "system prune", "container prune"} {
+		if strings.Contains(pruneService, forbidden) {
+			t.Fatalf("container cleanup must not execute %q", forbidden)
+		}
+	}
+	installer, err := deploymentAsset("host-config/kamori-install-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"/usr/local/sbin/kamori-activate-container-storage",
+		"chown 65532:65532 /etc/kamori/secrets/metrics_token",
+		"chown 65534:65534 /etc/kamori/secrets/alertmanager-webhook-url",
+		"--entrypoint /bin/amtool alertmanager",
+		"check-config /etc/alertmanager/alertmanager.yml",
+		"up -d --remove-orphans --force-recreate",
+	} {
+		if !strings.Contains(installer, required) {
+			t.Fatalf("host configuration installer is missing %q", required)
+		}
+	}
+}
+
+func TestAlertmanagerWebhookSecretStaysOutsideConfiguration(t *testing.T) {
+	t.Parallel()
+	configuration, secret, err := renderAlertmanagerConfiguration("https://alerts.example.test/alertmanager?token=secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(configuration, "url_file: /run/secrets/operator_webhook_url") || !strings.Contains(configuration, "send_resolved: true") {
+		t.Fatal("Alertmanager webhook configuration does not use its mounted secret file")
+	}
+	if strings.Contains(configuration, "token=secret") {
+		t.Fatal("Alertmanager webhook credential leaked into its readable configuration")
+	}
+	if secret != "https://alerts.example.test/alertmanager?token=secret\n" {
+		t.Fatalf("unexpected Alertmanager secret file: %q", secret)
+	}
+
+	disabled, disabledSecret, err := renderAlertmanagerConfiguration("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(disabled, "operator-placeholder") || disabledSecret != "" {
+		t.Fatal("missing webhook must retain an explicit no-delivery placeholder")
+	}
+	for _, invalid := range []string{
+		"http://alerts.example.test/hook",
+		"/relative/hook",
+		"https://alerts.example.test/hook#fragment",
+		"https://alerts.example.test/first\nhttps://attacker.example.test/second",
+	} {
+		if _, _, err := renderAlertmanagerConfiguration(invalid); err == nil {
+			t.Fatalf("unsafe Alertmanager webhook URL %q was accepted", invalid)
+		}
+	}
+}
+
+func TestEveryContainerHasBoundedLocalLogs(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		asset    string
+		services []string
+	}{
+		{asset: "cloud-server/compose.yaml", services: []string{"edge", "cloud", "migration", "web", "admin"}},
+		{asset: "ops/compose.yaml", services: []string{"valkey", "prometheus", "alertmanager", "grafana"}},
+	} {
+		contents, err := deploymentAsset(test.asset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compose struct {
+			Services map[string]struct {
+				Logging composeLogging `yaml:"logging"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal([]byte(contents), &compose); err != nil {
+			t.Fatalf("parse %s: %v", test.asset, err)
+		}
+		for _, service := range test.services {
+			logging := compose.Services[service].Logging
+			if logging.Driver != "local" || logging.Options["max-size"] != "10m" || logging.Options["max-file"] != "3" {
+				t.Errorf("%s service %s has unbounded logging: %+v", test.asset, service, logging)
+			}
+		}
+	}
+}
+
+func TestHostDiskAlertsHaveEarlyAndCriticalThresholds(t *testing.T) {
+	t.Parallel()
+	alerts, err := deploymentAsset("ops/alerts.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"alert: KamoriHostDiskSpaceWarning",
+		`> 0.70`,
+		"severity: warning",
+		"alert: KamoriHostDiskSpaceCritical",
+		`> 0.85`,
+		"severity: critical",
+	} {
+		if !strings.Contains(alerts, required) {
+			t.Fatalf("host disk alert rules are missing %q", required)
+		}
+	}
+}
+
+func TestPrometheusRetentionIsBoundedByTimeAndDisk(t *testing.T) {
+	t.Parallel()
+	compose, err := deploymentAsset("ops/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"--storage.tsdb.retention.time=30d",
+		"--storage.tsdb.retention.size=5GB",
+	} {
+		if !strings.Contains(compose, required) {
+			t.Fatalf("Prometheus retention is missing %q", required)
 		}
 	}
 }
@@ -411,6 +622,32 @@ func TestUnchangedHostConfigurationSkipsRoleActivation(t *testing.T) {
 	lastRepair := strings.LastIndex(installer, repairCall)
 	if firstRepair >= skip || lastRepair <= installFiles {
 		t.Fatal("deploy SSH permissions must be repaired before the no-op check and after file installation")
+	}
+}
+
+func TestUnrelatedHostConfigurationDoesNotRestartPostgres(t *testing.T) {
+	t.Parallel()
+	installer, err := deploymentAsset("host-config/kamori-install-host-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparison := strings.Index(installer, `database_activation_required=0`)
+	installation := strings.Index(installer, `while IFS= read -r -d '' source; do`)
+	activation := strings.Index(installer, `if [[ "$database_activation_required" == 1 ]]`)
+	if comparison < 0 || installation < 0 || activation < 0 || comparison >= installation || installation >= activation {
+		t.Fatal("database activation inputs must be compared before installation and checked before bootstrap")
+	}
+	for _, required := range []string{
+		"etc/kamori/postgres.env",
+		"etc/kamori/tls/postgres.key",
+		"usr/local/lib/kamori/postgres-lib",
+		"usr/local/lib/kamori/bootstrap-primary",
+		`cmp --silent "$work_dir/root/$relative_path" "/$relative_path"`,
+		"PostgreSQL activation inputs are unchanged; skipping database restart",
+	} {
+		if !strings.Contains(installer, required) {
+			t.Fatalf("database activation guard is missing %q", required)
+		}
 	}
 }
 
