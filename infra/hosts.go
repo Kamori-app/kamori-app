@@ -24,9 +24,10 @@ func provisionHosts(
 	sshKeys []string,
 	drBucketName string,
 	phase string,
+	deploymentLifecycle deploymentLifecycle,
 ) (*hostResources, error) {
 	lifecycle := hostLifecycleForPhase(phase)
-	return provisionAutomatedHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, lifecycle.protected, lifecycle.replaceUserData)
+	return provisionAutomatedHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, lifecycle.replaceUserData, deploymentLifecycle)
 }
 
 func provisionAutomatedHosts(
@@ -38,8 +39,8 @@ func provisionAutomatedHosts(
 	appPlacement *hcloud.PlacementGroup,
 	sshKeys []string,
 	drBucketName string,
-	protected bool,
 	replaceUserData bool,
+	deploymentLifecycle deploymentLifecycle,
 ) (*hostResources, error) {
 	opts := pulumi.Provider(provider)
 	databaseVolumeSizeGB := cfg.RequireInt("databaseVolumeSizeGB")
@@ -98,7 +99,7 @@ func provisionAutomatedHosts(
 	}
 
 	volumeOptions := []pulumi.ResourceOption{opts, pulumi.RetainOnDelete(true)}
-	if protected {
+	if deploymentLifecycle.volumeProtected {
 		volumeOptions = append(volumeOptions, pulumi.Protect(true))
 	}
 	dataVolume, err := hcloud.NewVolume(ctx, "db-primary-data", &hcloud.VolumeArgs{
@@ -106,25 +107,9 @@ func provisionAutomatedHosts(
 		Size:             pulumi.Int(databaseVolumeSizeGB),
 		Location:         pulumi.String("nbg1"),
 		Format:           pulumi.String("ext4"),
-		DeleteProtection: pulumi.Bool(protected),
+		DeleteProtection: pulumi.Bool(deploymentLifecycle.volumeProtected),
 		Labels:           commonLabels("postgres-data"),
 	}, volumeOptions...)
-	if err != nil {
-		return nil, err
-	}
-
-	opPrimaryIPOptions := []pulumi.ResourceOption{opts}
-	if protected {
-		opPrimaryIPOptions = append(opPrimaryIPOptions, pulumi.Protect(true))
-	}
-	opsPrimaryIP, err := hcloud.NewPrimaryIp(ctx, "ops-primary-ipv4", &hcloud.PrimaryIpArgs{
-		Name:             pulumi.String("kamori-beta-ops"),
-		Type:             pulumi.String("ipv4"),
-		Location:         pulumi.String("hel1"),
-		AutoDelete:       pulumi.Bool(false),
-		DeleteProtection: pulumi.Bool(protected),
-		Labels:           commonLabels("ops-public-ip"),
-	}, opPrimaryIPOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +223,25 @@ func provisionAutomatedHosts(
 			}).(pulumi.StringOutput)
 		}
 	}
+	if !deploymentLifecycle.active {
+		return &hostResources{servers: map[string]*hcloud.Server{}, sshPKI: sshIdentity}, nil
+	}
+
+	opPrimaryIPOptions := []pulumi.ResourceOption{opts}
+	if deploymentLifecycle.runtimeProtected {
+		opPrimaryIPOptions = append(opPrimaryIPOptions, pulumi.Protect(true))
+	}
+	opsPrimaryIP, err := hcloud.NewPrimaryIp(ctx, "ops-primary-ipv4", &hcloud.PrimaryIpArgs{
+		Name:             pulumi.String("kamori-beta-ops"),
+		Type:             pulumi.String("ipv4"),
+		Location:         pulumi.String("hel1"),
+		AutoDelete:       pulumi.Bool(false),
+		DeleteProtection: pulumi.Bool(deploymentLifecycle.runtimeProtected),
+		Labels:           commonLabels("ops-public-ip"),
+	}, opPrimaryIPOptions...)
+	if err != nil {
+		return nil, err
+	}
 
 	servers := make(map[string]*hcloud.Server, len(nodes))
 	createServer := func(spec nodeSpec, dependencies []pulumi.Resource) (*hcloud.Server, error) {
@@ -252,8 +256,8 @@ func provisionAutomatedHosts(
 		}
 		args := standardServerArgs(spec, subnet, sshKeys, pulumi.IntArray{idToInt(firewall.ID())})
 		args.UserData = userData[spec.name]
-		args.DeleteProtection = pulumi.Bool(protected)
-		args.RebuildProtection = pulumi.Bool(protected)
+		args.DeleteProtection = pulumi.Bool(deploymentLifecycle.runtimeProtected)
+		args.RebuildProtection = pulumi.Bool(deploymentLifecycle.runtimeProtected)
 		if spec.role == "ops" {
 			args.PublicNets = hcloud.ServerPublicNetArray{&hcloud.ServerPublicNetArgs{Ipv4: idToInt(opsPrimaryIP.ID()).ToIntPtrOutput(), Ipv4Enabled: pulumi.Bool(true), Ipv6Enabled: pulumi.Bool(false)}}
 		} else {
@@ -276,7 +280,7 @@ func provisionAutomatedHosts(
 			// bootstrap code evolved. Only the explicit replace phase adopts it.
 			resourceOptions = append(resourceOptions, pulumi.IgnoreChanges([]string{"userData"}))
 		}
-		if protected {
+		if deploymentLifecycle.runtimeProtected {
 			resourceOptions = append(resourceOptions, pulumi.Protect(true))
 		}
 		return hcloud.NewServer(ctx, spec.name, args, resourceOptions...)

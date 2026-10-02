@@ -253,6 +253,36 @@ the `repair-egress` workflow action is safe to repeat and does not depend on a
 new preview. It is rejected during `retire`, when the dedicated configuration
 identity is not yet trusted by the replacement hosts.
 
+## Pausing the hosted deployment
+
+`deploymentMode=paused` removes the billed runtime while retaining the data and
+recovery material needed to resume. A paused stack keeps the protected
+PostgreSQL volume, Backblaze prerequisites, Hetzner DR bucket, Pulumi state,
+generated backup cipher and PKI resources, private network, firewalls, ACME DNS
+delegations, and managed certificate. It removes the four servers, the stable
+ops IPv4, load balancer and its attachments, and the public A/AAAA records.
+
+Pausing is deliberately a two-update operation:
+
+1. Keep `deploymentMode=active`, set `hostProvisioningPhase=retire`, preview,
+   and apply. Confirm that this update only disables Pulumi and Hetzner
+   deletion protection for runtime resources and the database volume.
+2. Set `deploymentMode=paused`, preview, and apply. Confirm that the database
+   volume changes back to protected, that the retained storage and generated
+   secrets are unchanged, and that only runtime resources and public address
+   records are deleted.
+
+Do not replace this sequence with `pulumi destroy`: removing a retained volume
+from Pulumi state would make a later update create a new empty volume, and
+deleting the generated pgBackRest cipher would make existing encrypted backups
+unrecoverable.
+
+To resume, set `deploymentMode=active` and
+`hostProvisioningPhase=replace`, review and apply the creation plan, then set
+`hostProvisioningPhase=protect` and apply the protection-only update. Refresh
+the protected GitHub deployment variables from the new stack outputs before
+deploying an application release.
+
 ## Parameterized provider maintenance
 
 Porkbun has no native Pulumi package. The native Pulumi MinIO provider also
