@@ -37,6 +37,40 @@ func TestHostProvisioningPhaseIsExplicitlyBounded(t *testing.T) {
 	}
 }
 
+func TestDeploymentModeIsExplicitlyBounded(t *testing.T) {
+	for _, mode := range []string{deploymentModeActive, deploymentModePaused} {
+		if err := validateDeploymentMode(mode); err != nil {
+			t.Fatalf("valid deployment mode %q rejected: %v", mode, err)
+		}
+	}
+	if err := validateDeploymentMode("destroyed"); err == nil {
+		t.Fatal("unknown deployment mode was accepted")
+	}
+}
+
+func TestPausedDeploymentRemovesRuntimeAndProtectsDatabaseVolume(t *testing.T) {
+	lifecycle := deploymentLifecycleFor(deploymentModePaused, hostProvisioningRetire)
+	if lifecycle.active {
+		t.Fatal("paused deployment unexpectedly provisions runtime resources")
+	}
+	if lifecycle.runtimeProtected {
+		t.Fatal("absent paused runtime unexpectedly has protection enabled")
+	}
+	if !lifecycle.volumeProtected {
+		t.Fatal("paused deployment does not protect the retained database volume")
+	}
+}
+
+func TestRetirePhaseUnprotectsActiveRuntimeBeforePause(t *testing.T) {
+	lifecycle := deploymentLifecycleFor(deploymentModeActive, hostProvisioningRetire)
+	if !lifecycle.active {
+		t.Fatal("retire phase removed runtime before deletion protection was disabled")
+	}
+	if lifecycle.runtimeProtected || lifecycle.volumeProtected {
+		t.Fatal("retire phase did not disable active runtime and volume protection")
+	}
+}
+
 func TestOnlyReplacePhaseAdoptsChangedImmutableUserData(t *testing.T) {
 	tests := map[string]hostLifecycle{
 		hostProvisioningRetire:  {protected: false, replaceUserData: false},

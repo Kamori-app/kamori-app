@@ -21,6 +21,7 @@ var publicDNSSubdomains = []string{"", "app", "api", "admin"}
 type publicEdgeResources struct {
 	certificate     *hcloud.ManagedCertificate
 	certificateZone *hcloud.Zone
+	porkbunProvider *porkbun.Provider
 }
 
 func publicDNSDomains() []string {
@@ -52,11 +53,10 @@ func acmeDelegationSubdomain(subdomain string) string {
 	return acmeChallengeDNSName + "." + subdomain
 }
 
-func provisionPublicDNSAndTLS(
+func provisionPublicTLS(
 	ctx *pulumi.Context,
 	cfg *config.Config,
 	hcloudProvider *hcloud.Provider,
-	loadBalancer *hcloud.LoadBalancer,
 ) (*publicEdgeResources, error) {
 	hcloudOpts := pulumi.Provider(hcloudProvider)
 
@@ -101,30 +101,6 @@ func provisionPublicDNSAndTLS(
 		}
 	}
 
-	for _, subdomain := range publicDNSSubdomains {
-		resourceName := publicDNSResourceName(subdomain)
-		fqdn := publicDNSFQDN(subdomain)
-		for _, record := range []struct {
-			name     string
-			typeName string
-			content  pulumi.StringInput
-		}{
-			{name: "ipv4", typeName: "A", content: loadBalancer.Ipv4},
-			{name: "ipv6", typeName: "AAAA", content: loadBalancer.Ipv6},
-		} {
-			_, err := porkbun.NewDnsRecord(ctx, "public-"+resourceName+"-"+record.name, &porkbun.DnsRecordArgs{
-				Domain:    pulumi.String(publicDNSDomain),
-				Subdomain: pulumi.String(subdomain),
-				Type:      pulumi.String(record.typeName),
-				Content:   record.content,
-				Ttl:       pulumi.Float64(publicDNSTTL).ToFloat64PtrOutput(),
-			}, porkbunOpts, pulumi.Protect(true))
-			if err != nil {
-				return nil, fmt.Errorf("create Porkbun %s record for %s: %w", record.typeName, fqdn, err)
-			}
-		}
-	}
-
 	certificate, err := hcloud.NewManagedCertificate(ctx, "public-tls-certificate", &hcloud.ManagedCertificateArgs{
 		Name:        pulumi.String("kamori-beta-public"),
 		DomainNames: stringsToInputs(publicDNSDomains()),
@@ -137,5 +113,43 @@ func provisionPublicDNSAndTLS(
 	return &publicEdgeResources{
 		certificate:     certificate,
 		certificateZone: certificateZone,
+		porkbunProvider: porkbunProvider,
 	}, nil
+}
+
+func provisionPublicDNSRecords(
+	ctx *pulumi.Context,
+	porkbunProvider *porkbun.Provider,
+	loadBalancer *hcloud.LoadBalancer,
+	protected bool,
+) error {
+	porkbunOpts := pulumi.Provider(porkbunProvider)
+	for _, subdomain := range publicDNSSubdomains {
+		resourceName := publicDNSResourceName(subdomain)
+		fqdn := publicDNSFQDN(subdomain)
+		for _, record := range []struct {
+			name     string
+			typeName string
+			content  pulumi.StringInput
+		}{
+			{name: "ipv4", typeName: "A", content: loadBalancer.Ipv4},
+			{name: "ipv6", typeName: "AAAA", content: loadBalancer.Ipv6},
+		} {
+			resourceOptions := []pulumi.ResourceOption{porkbunOpts}
+			if protected {
+				resourceOptions = append(resourceOptions, pulumi.Protect(true))
+			}
+			_, err := porkbun.NewDnsRecord(ctx, "public-"+resourceName+"-"+record.name, &porkbun.DnsRecordArgs{
+				Domain:    pulumi.String(publicDNSDomain),
+				Subdomain: pulumi.String(subdomain),
+				Type:      pulumi.String(record.typeName),
+				Content:   record.content,
+				Ttl:       pulumi.Float64(publicDNSTTL).ToFloat64PtrOutput(),
+			}, resourceOptions...)
+			if err != nil {
+				return fmt.Errorf("create Porkbun %s record for %s: %w", record.typeName, fqdn, err)
+			}
+		}
+	}
+	return nil
 }

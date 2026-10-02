@@ -21,6 +21,8 @@ const (
 	hostProvisioningRetire    = "retire"
 	hostProvisioningReplace   = "replace"
 	hostProvisioningProtect   = "protect"
+	deploymentModeActive      = "active"
+	deploymentModePaused      = "paused"
 
 	// The generated Go SDK documents camelCase values, but the bridged hcloud
 	// provider validates the Terraform wire value.
@@ -40,10 +42,26 @@ type hostLifecycle struct {
 	replaceUserData bool
 }
 
+type deploymentLifecycle struct {
+	active           bool
+	runtimeProtected bool
+	volumeProtected  bool
+}
+
 func hostLifecycleForPhase(phase string) hostLifecycle {
 	return hostLifecycle{
 		protected:       phase == hostProvisioningProtect,
 		replaceUserData: phase == hostProvisioningReplace,
+	}
+}
+
+func deploymentLifecycleFor(mode, phase string) deploymentLifecycle {
+	active := mode == deploymentModeActive
+	runtimeProtected := active && phase == hostProvisioningProtect
+	return deploymentLifecycle{
+		active:           active,
+		runtimeProtected: runtimeProtected,
+		volumeProtected:  !active || runtimeProtected,
 	}
 }
 
@@ -53,6 +71,15 @@ func validateHostProvisioningPhase(value string) error {
 		return nil
 	default:
 		return fmt.Errorf("hostProvisioningPhase must be %q, %q, or %q", hostProvisioningRetire, hostProvisioningReplace, hostProvisioningProtect)
+	}
+}
+
+func validateDeploymentMode(value string) error {
+	switch value {
+	case deploymentModeActive, deploymentModePaused:
+		return nil
+	default:
+		return fmt.Errorf("deploymentMode must be %q or %q", deploymentModeActive, deploymentModePaused)
 	}
 }
 
@@ -149,6 +176,13 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := config.New(ctx, "kamori")
+		deploymentMode := cfg.Get("deploymentMode")
+		if deploymentMode == "" {
+			deploymentMode = deploymentModeActive
+		}
+		if err := validateDeploymentMode(deploymentMode); err != nil {
+			return err
+		}
 		hostProvisioningPhase := cfg.Get("hostProvisioningPhase")
 		if hostProvisioningPhase == "" {
 			hostProvisioningPhase = hostProvisioningRetire
@@ -156,6 +190,7 @@ func main() {
 		if err := validateHostProvisioningPhase(hostProvisioningPhase); err != nil {
 			return err
 		}
+		lifecycle := deploymentLifecycleFor(deploymentMode, hostProvisioningPhase)
 		provider, err := hcloud.NewProvider(ctx, "hetzner", &hcloud.ProviderArgs{
 			Token: cfg.RequireSecret("hcloudToken").ToStringPtrOutput(),
 		})
@@ -204,43 +239,51 @@ func main() {
 			return err
 		}
 
-		hosts, err := provisionHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, hostProvisioningPhase)
+		hosts, err := provisionHosts(ctx, cfg, provider, network, subnet, appPlacement, sshKeys, drBucketName, hostProvisioningPhase, lifecycle)
 		if err != nil {
 			return err
 		}
-		servers := hosts.servers
+		publicEdge, err := provisionPublicTLS(ctx, cfg, provider)
+		if err != nil {
+			return err
+		}
 
-		loadBalancer, err := hcloud.NewLoadBalancer(ctx, "public-load-balancer", &hcloud.LoadBalancerArgs{
-			Name: pulumi.String("kamori-beta-public"), LoadBalancerType: pulumi.String("lb11"), Location: pulumi.String("nbg1"), DeleteProtection: pulumi.Bool(true), Labels: commonLabels("public-edge"), Algorithm: &hcloud.LoadBalancerAlgorithmArgs{Type: pulumi.String(loadBalancerAlgorithm)},
-		}, opts)
-		if err != nil {
-			return err
-		}
-		publicEdge, err := provisionPublicDNSAndTLS(ctx, cfg, provider, loadBalancer)
-		if err != nil {
-			return err
-		}
-		lbNetwork, err := hcloud.NewLoadBalancerNetwork(ctx, "load-balancer-network", &hcloud.LoadBalancerNetworkArgs{
-			LoadBalancerId: idToInt(loadBalancer.ID()), NetworkId: idToInt(network.ID()).ToIntPtrOutput(), EnablePublicInterface: pulumi.Bool(true), Ip: pulumi.String("10.42.0.5"),
-		}, opts, pulumi.DependsOn([]pulumi.Resource{subnet}))
-		if err != nil {
-			return err
-		}
-		for _, name := range []string{"app-1", "app-2"} {
-			_, err = hcloud.NewLoadBalancerTarget(ctx, "target-"+name, &hcloud.LoadBalancerTargetArgs{
-				LoadBalancerId: idToInt(loadBalancer.ID()), Type: pulumi.String("server"), ServerId: idToInt(servers[name].ID()).ToIntPtrOutput(), UsePrivateIp: pulumi.Bool(true),
-			}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork, servers[name]}))
+		if lifecycle.active {
+			servers := hosts.servers
+			loadBalancer, err := hcloud.NewLoadBalancer(ctx, "public-load-balancer", &hcloud.LoadBalancerArgs{
+				Name: pulumi.String("kamori-beta-public"), LoadBalancerType: pulumi.String("lb11"), Location: pulumi.String("nbg1"), DeleteProtection: pulumi.Bool(lifecycle.runtimeProtected), Labels: commonLabels("public-edge"), Algorithm: &hcloud.LoadBalancerAlgorithmArgs{Type: pulumi.String(loadBalancerAlgorithm)},
+			}, opts)
 			if err != nil {
 				return err
 			}
-		}
-		_, err = hcloud.NewLoadBalancerService(ctx, "https-service", &hcloud.LoadBalancerServiceArgs{
-			LoadBalancerId: loadBalancer.ID(), Protocol: pulumi.String("https"), ListenPort: pulumi.Int(443), DestinationPort: pulumi.Int(8080),
-			Http:        &hcloud.LoadBalancerServiceHttpArgs{Certificates: pulumi.IntArray{idToInt(publicEdge.certificate.ID())}, RedirectHttp: pulumi.Bool(true), StickySessions: pulumi.Bool(false), TimeoutIdle: pulumi.Int(60)},
-			HealthCheck: &hcloud.LoadBalancerServiceHealthCheckArgs{Protocol: pulumi.String("http"), Port: pulumi.Int(8080), Interval: pulumi.Int(15), Timeout: pulumi.Int(5), Retries: pulumi.Int(3), Http: &hcloud.LoadBalancerServiceHealthCheckHttpArgs{Path: pulumi.String("/health/ready"), StatusCodes: pulumi.StringArray{pulumi.String("200")}}},
-		}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork, publicEdge.certificate}))
-		if err != nil {
-			return err
+			if err := provisionPublicDNSRecords(ctx, publicEdge.porkbunProvider, loadBalancer, lifecycle.runtimeProtected); err != nil {
+				return err
+			}
+			lbNetwork, err := hcloud.NewLoadBalancerNetwork(ctx, "load-balancer-network", &hcloud.LoadBalancerNetworkArgs{
+				LoadBalancerId: idToInt(loadBalancer.ID()), NetworkId: idToInt(network.ID()).ToIntPtrOutput(), EnablePublicInterface: pulumi.Bool(true), Ip: pulumi.String("10.42.0.5"),
+			}, opts, pulumi.DependsOn([]pulumi.Resource{subnet}))
+			if err != nil {
+				return err
+			}
+			for _, name := range []string{"app-1", "app-2"} {
+				_, err = hcloud.NewLoadBalancerTarget(ctx, "target-"+name, &hcloud.LoadBalancerTargetArgs{
+					LoadBalancerId: idToInt(loadBalancer.ID()), Type: pulumi.String("server"), ServerId: idToInt(servers[name].ID()).ToIntPtrOutput(), UsePrivateIp: pulumi.Bool(true),
+				}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork, servers[name]}))
+				if err != nil {
+					return err
+				}
+			}
+			_, err = hcloud.NewLoadBalancerService(ctx, "https-service", &hcloud.LoadBalancerServiceArgs{
+				LoadBalancerId: loadBalancer.ID(), Protocol: pulumi.String("https"), ListenPort: pulumi.Int(443), DestinationPort: pulumi.Int(8080),
+				Http:        &hcloud.LoadBalancerServiceHttpArgs{Certificates: pulumi.IntArray{idToInt(publicEdge.certificate.ID())}, RedirectHttp: pulumi.Bool(true), StickySessions: pulumi.Bool(false), TimeoutIdle: pulumi.Int(60)},
+				HealthCheck: &hcloud.LoadBalancerServiceHealthCheckArgs{Protocol: pulumi.String("http"), Port: pulumi.Int(8080), Interval: pulumi.Int(15), Timeout: pulumi.Int(5), Retries: pulumi.Int(3), Http: &hcloud.LoadBalancerServiceHealthCheckHttpArgs{Path: pulumi.String("/health/ready"), StatusCodes: pulumi.StringArray{pulumi.String("200")}}},
+			}, opts, pulumi.DependsOn([]pulumi.Resource{lbNetwork, publicEdge.certificate}))
+			if err != nil {
+				return err
+			}
+			ctx.Export("loadBalancerIPv4", loadBalancer.Ipv4)
+			ctx.Export("loadBalancerIPv6", loadBalancer.Ipv6)
+			ctx.Export("opsPublicIPv4", servers["ops"].Ipv4Address)
 		}
 
 		drProvider, err := minio.NewProvider(ctx, "hetzner-object-storage", &minio.ProviderArgs{
@@ -267,8 +310,7 @@ func main() {
 			return err
 		}
 
-		ctx.Export("loadBalancerIPv4", loadBalancer.Ipv4)
-		ctx.Export("loadBalancerIPv6", loadBalancer.Ipv6)
+		ctx.Export("deploymentMode", pulumi.String(deploymentMode))
 		ctx.Export("publicDNSNameservers", publicEdge.certificateZone.AuthoritativeNameservers.Assigneds())
 		ctx.Export("tlsCertificateID", publicEdge.certificate.ID())
 		ctx.Export("tlsCertificateNotValidAfter", publicEdge.certificate.NotValidAfter)
@@ -282,7 +324,6 @@ func main() {
 		ctx.Export("appOnePrivateIP", pulumi.String("10.42.0.11"))
 		ctx.Export("appTwoPrivateIP", pulumi.String("10.42.0.12"))
 		ctx.Export("opsPrivateIP", pulumi.String(valkeyPrivateIP))
-		ctx.Export("opsPublicIPv4", servers["ops"].Ipv4Address)
 		return nil
 	})
 }
