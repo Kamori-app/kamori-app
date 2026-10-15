@@ -46,13 +46,15 @@
 
 ### Task 2: Make missing PostgreSQL test configuration fail explicitly
 
-**Files:** existing `apps/cloud-server/src/platform/test_support.rs` (extend current test_config/test_state helpers without replacing them); `platform/mod.rs` only if needed; DB helpers/callers in auth/handlers, admin, invites and operations integration tests, including operations/lock_regressions.rs if it shares the helper; `apps/cloud-server/package.json`, root testing docs/CI only when required to expose the intended test command.
+**Files:** existing `apps/cloud-server/src/platform/test_support.rs` (extend current test_config/test_state helpers without replacing them); `platform/mod.rs` only if needed; DB helpers/callers in auth/handlers, admin, invites and operations integration tests, including operations/lock_regressions.rs if it shares the helper; `apps/cloud-server/package.json`, `turbo.json`, root testing docs/CI only when required to expose the intended test command.
 **Interfaces:** A shared test-only `required_test_database_url() -> String` resolves nonempty KAMORI_DATABASE_URL then DATABASE_URL, otherwise fails with an actionable missing-PostgreSQL message. No environment mutation in concurrently running tests.
 
 - [x] Add a subprocess regression proving a representative real DB integration test exits nonzero with both DB variables absent; old behavior must produce RED because it exits successfully without executing assertions.
 - [x] Centralize required URL resolution and remove silent missing-DB success paths across all current cloud-server DB helpers. Keep normal unit-only filtered commands possible and explain the full suite's DB prerequisite; preserve existing migrations/schema isolation.
 - [x] Cover explicit URL, fallback URL and absent/empty inputs through isolated subprocesses or a pure resolver; do not log credentials or modify global environment unsafely.
 - [x] Run no-DB regression plus full server suite against supplied dedicated PostgreSQL, strict Clippy/fmt and appropriate CI detector/shell checks if touched. Commit and report exact counts; no-DB failure must be intentional and documented.
+
+- [ ] Controller follow-up: make the documented root Turbo server-test path retain the required DB configuration in strict env and execute real DB tests instead of cached success; verify the actual one-test supplied-URL path, absent-URL failure, fallback and repeat-run behavior. Initial helper review is complete; this boundary was discovered during Task4 and is queued immediately afterward without parallel implementers.
 
 ### Task 3: Prove reset versus refresh and deferred passkey commit ordering
 
@@ -66,13 +68,13 @@
 
 ### Task 4: Exercise real client crash durability and multi-tab coordination
 
-**Files:** core local_bridge_runner cache/tests or test-only sibling module; web cryptoVault/auth refresh-attempt implementation only for demonstrated defects; new `tests/acceptance/specs/browser-durability.spec.ts`, synthetic fixture/helper changes as needed.
+**Files:** core local_bridge_runner cache/tests or test-only sibling module; web cryptoVault/auth refresh-attempt implementation and AppWorkspace materialization only for demonstrated durability/account-scope defects; new `tests/acceptance/specs/browser-durability.spec.ts`, synthetic fixture/helper changes as needed.
 **Interfaces:** Existing scoped SQLCipher RefreshCredentialStore, durable pending refresh attempt, IndexedDB outbox/materialization/cursors, browser Web Locks and shared cookies. No new production test hooks or unsafe refresh fallback.
 
-- [ ] Add child-process crash/reopen tests using actual encrypted SQLite: committed pending attempt survives abrupt child exit; committed local PIM/outbox remains after reopening; applied server cursor is monotonic; unsupported old secure token never reaches network. Distinguish process termination from physical power-loss certification.
-- [ ] Add genuine Playwright two-page/same-context tests for shared-cookie refresh serialization and lost/partial refresh response. Assert exact request identity/number and preserve unrelated session; use real Web Locks, browser storage and production client orchestration.
-- [ ] Add IndexedDB durability/account-scope tests across page close/reopen and tab concurrency: acknowledged local edits remain queued/materialized, sync acknowledgement is idempotent, account switching never exposes another account's cache. Use synthetic accounts and real browser storage, not fake IndexedDB.
-- [ ] Run focused native/browser cases; apply only demonstrated minimal fixes with RED→GREEN evidence. Run affected core FRB/desktop or web checks/units/builds once, regenerate bindings only if an unavoidable API change, commit and report.
+- [x] Add child-process crash/reopen tests using actual encrypted SQLite: committed pending attempt survives abrupt child exit; committed local PIM/outbox remains after reopening; applied server cursor is monotonic; unsupported old secure token never reaches network. Distinguish process termination from physical power-loss certification.
+- [x] Add genuine Playwright two-page/same-context tests for shared-cookie refresh serialization and lost/partial refresh response. Assert exact request identity/number and preserve unrelated session; use real Web Locks, browser storage and production client orchestration.
+- [x] Add IndexedDB durability/account-scope tests across page close/reopen and tab concurrency: acknowledged local edits remain queued/materialized, sync acknowledgement is idempotent, account switching never exposes another account's cache. Use synthetic accounts and real browser storage, not fake IndexedDB.
+- [x] Run focused native/browser cases; apply only demonstrated minimal fixes with RED→GREEN evidence. Run affected core FRB/desktop or web checks/units/builds once, regenerate bindings only if an unavoidable API change, commit and report.
 
 ### Task 5: Add behavioral desktop and admin UI gates
 
