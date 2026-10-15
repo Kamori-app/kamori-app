@@ -52,3 +52,17 @@ Startup читает тот же SQLCipher credential state, что runtime, п�
 RED воспроизвёл UUID string decode failure, несовместимый HPKE schema и refresh reuse после потери ответа. GREEN: **18 desktop +65 core/FRB +14 DAV passed**, fmt/strict Clippy чистые, независимое ревью без замечаний. Проверены повторные crash, response loss, OS-write failure, другой account/endpoint, legacy migration и сохранение кэша после нового входа.
 
 Принятое ограничение: если keychain отстал более чем на одно поколение runtime-ротации, требуется новый вход; старый токен не отправляется с новым ID и не вызывает отзыв остальных сессий. Реальный OS keychain и аппаратный power-loss не испытывались.
+
+## PIM даты, частичные правки и повторения
+
+Коммиты `4a6612a`, `40437ae`; закрыты U01–U03. Изменение названия задачи сохраняет original due record целиком; явная правка времени сохраняет его зону. Web разворачивает wall-clock повторения и применяет исходный typed TZID к каждому occurrence, затем сравнивает реальные instants. Это обходит подтверждённое host-dependent rezone поведение pinned RRule 2.8.1, сохраняя DST, COUNT и inclusive UTC UNTIL. Mobile UTC anchor больше не получает device offset второй раз.
+
+RED: четыре ошибки редактора в Chromium, Tbilisi/New York recurrence, mobile UTC в non-UTC окружении. Ревью дополнительно выявило дорогой перебор истёкших UNTIL и host-dependent fixtures; обе ошибки воспроизведены и устранены. Generator имеет conservative floating bound, actual-instant UNTIL filter сохранён. Два bounded-process теста проверяют истёкший SECONDLY и очень длинный overlap без хрупких миллисекундных порогов.
+
+GREEN: **60 web units** обычной командой в UTC, Asia/Tbilisi и America/Los_Angeles; **4 Chromium editor tests**, **40 Flutter tests**, модели отдельно в трёх timezone; check/build/analyze чистые. Независимое и scoped повторное ревью пройдены. Существующая политика elapsed duration и разрешения неоднозначных/nonexistent wall times сохранена; импортированные recurrence exceptions не выдаются за проверенные.
+
+## Промежуточные общие gates
+
+Rust 1.97.1 workspace + FRB с отдельной PostgreSQL: **142 server +65 core +14 DAV +18 desktop =239 passed**, без пропусков; общий strict Clippy и fmt чистые. LLVM line coverage при том же фильтре: **48,71% →55,19%**; ограничения inline test modules и branch coverage приведены в основном аудите. Admin: 4 unit/check/build; desktop UI: check/build; закреплённый Bun 1.3.14. Existing Rollup empty virtual env chunk notice не является Svelte diagnostic.
+
+Предварительный Android release с реальным FRB собран; все три native ABI присутствуют. Итоговая упаковка после background/offline изменений ещё обязательна. iOS SDK query завершается кодом 69: лицензия Xcode не принята; системные условия от имени пользователя не принимались.

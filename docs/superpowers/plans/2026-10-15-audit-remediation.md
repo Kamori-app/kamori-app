@@ -41,10 +41,10 @@
 **Interfaces:** Consumes existing HTTP payloads and sessions. Produces transactionally validated authorization binding; wire payloads remain compatible.
 **Requirements:** Resolve S04/S05 in server audit. Bind OPAQUE login exchanges and TOTP continuations to the credential state used to authenticate, and approved device flows to that state and their approving live session. Prefer durable `users.auth_generation BIGINT NOT NULL DEFAULT 0` incremented atomically with password/recovery changes; an equivalent exact credential snapshot is acceptable only if it closes the same transactional race. Validate the expected binding while holding the same user/session locks used to insert the new refresh session. Reject stale flows after recovery, password change and approving-session revocation; do not merely compare in a service before a separate insert. Audit neighboring deferred authentication completions for the same race (passkey and reauth/enrollment grants) and carry the binding consistently. Existing active exact device-token retries remain idempotent, revoked replacements remain rejected. No key material returned before all factors pass.
 
-- [ ] Add HTTP/DB regressions: `opaque_login_started_before_recovery_is_rejected`, `opaque_login_started_before_password_change_is_rejected`, `device_approval_before_recovery_is_rejected`, `device_approval_before_password_change_is_rejected`, `device_approval_from_revoked_session_is_rejected`, and stale TOTP continuation. Assert rejection plus no newly active refresh session/enrollment access, fresh login succeeds.
-- [ ] Run focused tests before implementation and record the expected unauthorized-session bug.
-- [ ] Implement generation/snapshot binding and atomic final validation; keep existing same-flow retry behavior.
-- [ ] Run `cargo test -p cloud-server` against the disposable DB, then format and focused Clippy using pinned Rust. Commit and report with full RED/GREEN commands/results.
+- [x] Add HTTP/DB regressions: `opaque_login_started_before_recovery_is_rejected`, `opaque_login_started_before_password_change_is_rejected`, `device_approval_before_recovery_is_rejected`, `device_approval_before_password_change_is_rejected`, `device_approval_from_revoked_session_is_rejected`, and stale TOTP continuation. Assert rejection plus no newly active refresh session/enrollment access, fresh login succeeds.
+- [x] Run focused tests before implementation and record the expected unauthorized-session bug.
+- [x] Implement generation/snapshot binding and atomic final validation; keep existing same-flow retry behavior.
+- [x] Run `cargo test -p cloud-server` against the disposable DB, then format and focused Clippy using pinned Rust. Commit and report with full RED/GREEN commands/results.
 
 ### Task 2: Repair sharing retries and operation accounting/concurrency
 
@@ -52,10 +52,10 @@
 **Interfaces:** Consumes Task 1 unchanged auth wire model. Produces retry-safe invite response and consistent operation accounting; no new UI member-id flow.
 **Requirements:** Resolve S01/S02/S03. Same normalized invite hash + same recipient is the exact redemption identity (no wire request-id addition needed); repeat returns the original package/role/epoch/current-state floor while entitlement/space/epoch remain valid. It must not increment use count or change membership again, allow a second recipient, revive removed membership or return obsolete epoch keys. Preserve an already-active member's entitlement on a retry. Add a new migration to release OLD.operation_bytes on cascaded parent deletion without double-counting direct op deletes and recompute existing account totals to repair drift. Acquire the strongest necessary space lock before quota/sequence work so distinct appends never upgrade competing SHARE locks. Preserve revocation and epoch rechecks and consistent lock order.
 
-- [ ] Add red tests for lost-response invite retry (and concurrent same/different recipient), expired unused invite, removed member/stale epoch, and acceptance same-recipient retry. Assert exact same ciphertext and metadata, unchanged used_count/membership.
-- [ ] Add DB tests for operation DELETE, space DELETE and workspace cascade, plus migration recalculation of pre-existing drift; assert owner totals equal live operations and another space's charge remains.
-- [ ] Add deterministic concurrent distinct-client-op append test; assert both accepted with distinct monotonic sequences and exact counters. Retain existing same-id retry tests.
-- [ ] Implement fixes, run DB-backed server suite and relevant sharing acceptance when available, format/check, commit and report RED/GREEN evidence.
+- [x] Add red tests for lost-response invite retry (and concurrent same/different recipient), expired unused invite, removed member/stale epoch, and acceptance same-recipient retry. Assert exact same ciphertext and metadata, unchanged used_count/membership.
+- [x] Add DB tests for operation DELETE, space DELETE and workspace cascade, plus migration recalculation of pre-existing drift; assert owner totals equal live operations and another space's charge remains.
+- [x] Add deterministic concurrent distinct-client-op append test; assert both accepted with distinct monotonic sequences and exact counters. Retain existing same-id retry tests.
+- [x] Implement fixes, run DB-backed server suite and relevant sharing acceptance when available, format/check, commit and report RED/GREEN evidence.
 
 ### Task 3: Preserve DAV stream identity and enable isolated native HTTPS
 
@@ -63,10 +63,10 @@
 **Interfaces:** Existing runner/public DAV API retained. Reqwest TLS capability must be explicit in independently built native crates.
 **Requirements:** Resolve C01/C05. Existing resource writes use cached head stream_id and actual PIM kind, including Task tombstones and conflict copies; only new DAV hrefs derive a fresh deterministic stream id. Validate graph dependency before persisting invalid outbox state. Enable the supported TLS backend in both reqwest declarations rather than rely on cloud-server feature unification.
 
-- [ ] Add real HTTP DAV regressions editing/deleting first-party random-stream task/event/contact and conflict branches with ETags. Assert same-stream parent, immediate projection, valid tombstone kind, replay/retry semantics and no invalid queued operation after rejection.
-- [ ] Expand `signature_covers_every_client_field_and_ciphertext` to mutate each public envelope field and ciphertext separately, asserting verification failure; this strengthens an existing invariant and needs no artificial failing-before-code step.
-- [ ] Add an isolated feature/transport regression proving core FRB and desktop builds have TLS, with local synthetic CA HTTPS handshake using the real configured client or equivalent connector smoke. No production network required.
-- [ ] Run tests RED, implement minimal fixes, then core FRB tests, DAV suite and isolated native graph/build checks on pinned Rust. Commit with evidence and explain platform trust limits.
+- [x] Add real HTTP DAV regressions editing/deleting first-party random-stream task/event/contact and conflict branches with ETags. Assert same-stream parent, immediate projection, valid tombstone kind, replay/retry semantics and no invalid queued operation after rejection.
+- [x] Expand `signature_covers_every_client_field_and_ciphertext` to mutate each public envelope field and ciphertext separately, asserting verification failure; this strengthens an existing invariant and needs no artificial failing-before-code step.
+- [x] Add an isolated feature/transport regression proving core FRB and desktop builds have TLS, with local synthetic CA HTTPS handshake using the real configured client or equivalent connector smoke. No production network required.
+- [x] Run tests RED, implement minimal fixes, then core FRB tests, DAV suite and isolated native graph/build checks on pinned Rust. Commit with evidence and explain platform trust limits.
 
 ### Task 4: Repair desktop cloud decode, recovery packages and startup refresh recovery
 
@@ -74,21 +74,21 @@
 **Interfaces:** Consumes Task 3 TLS and existing LocalBridgeRunner durable refresh state. Produces one credential-generation source shared by startup/active runtime; unchanged cloud wire schema.
 **Requirements:** Resolve C02/C03/C04. All cloud response decodes use human-readable MessagePack semantics. Desktop collection recovery packages use HPKE EncryptedGroupKey addressed to the deterministic account recovery identity, matching FRB. Repair/rewrite a legacy malformed package only where the current authorized device holds the space key; never pretend unavailable old keys can be recovered. Before any startup refresh, consult cache replacement/pending-attempt state and use the same persisted rotation request id as runtime. A keychain-only fallback is valid only when no matching cache generation exists. Keep endpoint/account matching strict, preserve monotonic cursors and secure cache paths.
 
-- [ ] RED regression for nonempty ListSpacesResponse UUID strings/binary packages in runner and direct transport paths.
-- [ ] RED recovery wrapping round-trip with only account master/recovery identity on a second device, asserting schema and exact key.
-- [ ] RED startup credential-manager tests at three boundaries: server rotated/response lost; cache replacement committed/keychain stale; keychain current. Assert same request identity or recovered replacement and no all-session reuse path. Use fake keychain/network boundaries while exercising production selection/orchestration.
-- [ ] Implement, run desktop Rust suite and affected core FRB suite, format/Clippy, commit and report.
+- [x] RED regression for nonempty ListSpacesResponse UUID strings/binary packages in runner and direct transport paths.
+- [x] RED recovery wrapping round-trip with only account master/recovery identity on a second device, asserting schema and exact key.
+- [x] RED startup credential-manager tests at three boundaries: server rotated/response lost; cache replacement committed/keychain stale; keychain current. Assert same request identity or recovered replacement and no all-session reuse path. Use fake keychain/network boundaries while exercising production selection/orchestration.
+- [x] Implement, run desktop Rust suite and affected core FRB suite, format/Clippy, commit and report.
 
 ### Task 5: Preserve PIM temporal edits and recurrence across zones
 
 **Files:** web/src/lib/pim.ts, components/app/TaskWorkspace.svelte, pim.test.mjs and focused editor helper/tests if needed; mobile/lib/src/models/bridge_models.dart, test/pim_models_test.dart.
 **Interfaces:** Retain typed date/utc/zoned records and existing PIM operation wire schema.
-**Requirements:** Resolve U01/U02/U03. Unchanged task due input preserves original record exactly (date kind, timezone, seconds), matching existing CalendarWorkspace behavior. An explicit due edit retains original zone unless user explicitly chooses another. For web RRule TZID, construct floating DTSTART from zoned local fields; compare intervals using actual instants. For mobile UTC recurrence, anchor from UTC fields without device-local conversion; date and zoned cases retain their semantics. Preserve DST rather than deleting TZID.
+**Requirements:** Resolve U01/U02/U03. Unchanged task due input preserves original record exactly (date kind, timezone, seconds), matching existing CalendarWorkspace behavior. An explicit due edit retains original zone unless user explicitly chooses another. For web recurrence, expand floating zoned local fields and map every occurrence through the original typed TZID before actual-instant comparison; pinned RRule 2.8.1 host-dependent rezoning must not affect results. Preserve COUNT and inclusive UTC UNTIL. For mobile UTC recurrence, anchor from UTC fields without device-local conversion; date and zoned cases retain their semantics. Preserve DST rather than deleting TZID.
 
-- [ ] RED task-title edit due roundtrips: Asia/Tbilisi 18:30/14:30Z in UTC browser, date-only, nonzero seconds; explicit time edit has expected zone/instant.
-- [ ] RED web weekly Asia/Tbilisi 2026-08-28 07:00–07:30: Sep 3 absent, Sep 4 present under TZ=UTC; include negative offset midnight and DST weekly fixture plus all-day.
-- [ ] RED mobile UTC weekly 20260828T180000Z under TZ=Asia/Tbilisi: Sep 4 present, Sep 5 absent; also UTC, a negative offset, zoned DST and all-day.
-- [ ] Implement and run web check/unit/build plus Flutter analyze/test, including non-UTC subprocess/test environment. Commit and report.
+- [x] RED task-title edit due roundtrips: Asia/Tbilisi 18:30/14:30Z in UTC browser, date-only, nonzero seconds; explicit time edit has expected zone/instant.
+- [x] RED web weekly Asia/Tbilisi 2026-08-28 07:00–07:30: Sep 3 absent, Sep 4 present under TZ=UTC; include negative offset midnight, both host-offset signs, DST weekly fixture, COUNT, inclusive UTC UNTIL and all-day.
+- [x] RED mobile UTC weekly 20260828T180000Z under TZ=Asia/Tbilisi: Sep 4 present, Sep 5 absent; also UTC, a negative offset, zoned DST and all-day.
+- [x] Implement and run web check/unit/build plus Flutter analyze/test, including non-UTC subprocess/test environment. Commit and report.
 
 ### Task 6: Restore offline sessions and reconcile background projections safely
 

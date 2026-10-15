@@ -1,0 +1,84 @@
+{
+  "revision": "81248927f1ad734c246f582486d9840da6b47637",
+  "toolchain": "Go 1.25.11",
+  "scope": "infra go test ./... -coverprofile; statements, not branch coverage",
+  "totals": {
+    "count": 589,
+    "covered": 213,
+    "percent": 36.16298811544991
+  },
+  "files": [
+    {
+      "path": "infra/budget.go",
+      "statements": {
+        "count": 12,
+        "covered": 8,
+        "percent": 66.66666666666667
+      }
+    },
+    {
+      "path": "infra/cloud_init.go",
+      "statements": {
+        "count": 194,
+        "covered": 160,
+        "percent": 82.47422680412372
+      }
+    },
+    {
+      "path": "infra/database.go",
+      "statements": {
+        "count": 2,
+        "covered": 2,
+        "percent": 100.0
+      }
+    },
+    {
+      "path": "infra/dns.go",
+      "statements": {
+        "count": 47,
+        "covered": 13,
+        "percent": 27.659574468085108
+      }
+    },
+    {
+      "path": "infra/hosts.go",
+      "statements": {
+        "count": 141,
+        "covered": 0,
+        "percent": 0.0
+      }
+    },
+    {
+      "path": "infra/main.go",
+      "statements": {
+        "count": 116,
+        "covered": 15,
+        "percent": 12.931034482758621
+      }
+    },
+    {
+      "path": "infra/security.go",
+      "statements": {
+        "count": 71,
+        "covered": 9,
+        "percent": 12.67605633802817
+      }
+    },
+    {
+      "path": "infra/storage.go",
+      "statements": {
+        "count": 4,
+        "covered": 4,
+        "percent": 100.0
+      }
+    },
+    {
+      "path": "infra/valkey.go",
+      "statements": {
+        "count": 2,
+        "covered": 2,
+        "percent": 100.0
+      }
+    }
+  ]
+}
