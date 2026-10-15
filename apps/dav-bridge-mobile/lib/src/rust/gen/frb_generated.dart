@@ -1234,10 +1234,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MobilePimTemporal> dco_decode_list_mobile_pim_temporal(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_mobile_pim_temporal).toList();
+  }
+
+  @protected
   List<MobilePostalAddress> dco_decode_list_mobile_postal_address(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
         .map(dco_decode_mobile_postal_address)
+        .toList();
+  }
+
+  @protected
+  List<MobileRecurrenceOverride> dco_decode_list_mobile_recurrence_override(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_mobile_recurrence_override)
         .toList();
   }
 
@@ -1372,8 +1387,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MobilePimItem dco_decode_mobile_pim_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 31)
-      throw Exception('unexpected arr length: expect 31 but see ${arr.length}');
+    if (arr.length != 35)
+      throw Exception('unexpected arr length: expect 35 but see ${arr.length}');
     return MobilePimItem(
       spaceId: dco_decode_String(arr[0]),
       resourceId: dco_decode_String(arr[1]),
@@ -1390,22 +1405,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       priority: dco_decode_i_64(arr[12]),
       location: dco_decode_opt_String(arr[13]),
       recurrenceRule: dco_decode_opt_String(arr[14]),
-      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[15]),
-      categories: dco_decode_list_String(arr[16]),
-      namePrefix: dco_decode_String(arr[17]),
-      givenName: dco_decode_String(arr[18]),
-      middleName: dco_decode_String(arr[19]),
-      familyName: dco_decode_String(arr[20]),
-      nameSuffix: dco_decode_String(arr[21]),
-      emails: dco_decode_list_mobile_labeled_value(arr[22]),
-      phones: dco_decode_list_mobile_labeled_value(arr[23]),
-      addresses: dco_decode_list_mobile_postal_address(arr[24]),
-      organization: dco_decode_opt_String(arr[25]),
-      jobTitle: dco_decode_opt_String(arr[26]),
-      birthday: dco_decode_opt_String(arr[27]),
-      url: dco_decode_opt_String(arr[28]),
-      favorite: dco_decode_bool(arr[29]),
-      conflict: dco_decode_bool(arr[30]),
+      recurrenceExdates: dco_decode_list_mobile_pim_temporal(arr[15]),
+      recurrenceRdates: dco_decode_list_mobile_pim_temporal(arr[16]),
+      recurrenceOverrides: dco_decode_list_mobile_recurrence_override(arr[17]),
+      recurrenceUnsupported: dco_decode_list_String(arr[18]),
+      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[19]),
+      categories: dco_decode_list_String(arr[20]),
+      namePrefix: dco_decode_String(arr[21]),
+      givenName: dco_decode_String(arr[22]),
+      middleName: dco_decode_String(arr[23]),
+      familyName: dco_decode_String(arr[24]),
+      nameSuffix: dco_decode_String(arr[25]),
+      emails: dco_decode_list_mobile_labeled_value(arr[26]),
+      phones: dco_decode_list_mobile_labeled_value(arr[27]),
+      addresses: dco_decode_list_mobile_postal_address(arr[28]),
+      organization: dco_decode_opt_String(arr[29]),
+      jobTitle: dco_decode_opt_String(arr[30]),
+      birthday: dco_decode_opt_String(arr[31]),
+      url: dco_decode_opt_String(arr[32]),
+      favorite: dco_decode_bool(arr[33]),
+      conflict: dco_decode_bool(arr[34]),
     );
   }
 
@@ -1453,6 +1472,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       accessToken: dco_decode_String(arr[0]),
       device: dco_decode_mobile_device_secrets(arr[1]),
       collections: dco_decode_list_mobile_collection(arr[2]),
+    );
+  }
+
+  @protected
+  MobileRecurrenceOverride dco_decode_mobile_recurrence_override(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return MobileRecurrenceOverride(
+      recurrenceId: dco_decode_mobile_pim_temporal(arr[0]),
+      startsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[1]),
+      endsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[2]),
+      title: dco_decode_opt_String(arr[3]),
+      notes: dco_decode_opt_String(arr[4]),
+      location: dco_decode_opt_String(arr[5]),
+      cancelled: dco_decode_bool(arr[6]),
     );
   }
 
@@ -1745,6 +1781,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MobilePimTemporal> sse_decode_list_mobile_pim_temporal(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobilePimTemporal>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_pim_temporal(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<MobilePostalAddress> sse_decode_list_mobile_postal_address(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1753,6 +1802,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <MobilePostalAddress>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_mobile_postal_address(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<MobileRecurrenceOverride> sse_decode_list_mobile_recurrence_override(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobileRecurrenceOverride>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_recurrence_override(deserializer));
     }
     return ans_;
   }
@@ -1943,6 +2005,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_priority = sse_decode_i_64(deserializer);
     var var_location = sse_decode_opt_String(deserializer);
     var var_recurrenceRule = sse_decode_opt_String(deserializer);
+    var var_recurrenceExdates =
+        sse_decode_list_mobile_pim_temporal(deserializer);
+    var var_recurrenceRdates =
+        sse_decode_list_mobile_pim_temporal(deserializer);
+    var var_recurrenceOverrides =
+        sse_decode_list_mobile_recurrence_override(deserializer);
+    var var_recurrenceUnsupported = sse_decode_list_String(deserializer);
     var var_reminderMinutes = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_categories = sse_decode_list_String(deserializer);
     var var_namePrefix = sse_decode_String(deserializer);
@@ -1975,6 +2044,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         priority: var_priority,
         location: var_location,
         recurrenceRule: var_recurrenceRule,
+        recurrenceExdates: var_recurrenceExdates,
+        recurrenceRdates: var_recurrenceRdates,
+        recurrenceOverrides: var_recurrenceOverrides,
+        recurrenceUnsupported: var_recurrenceUnsupported,
         reminderMinutes: var_reminderMinutes,
         categories: var_categories,
         namePrefix: var_namePrefix,
@@ -2046,6 +2119,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         accessToken: var_accessToken,
         device: var_device,
         collections: var_collections);
+  }
+
+  @protected
+  MobileRecurrenceOverride sse_decode_mobile_recurrence_override(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_recurrenceId = sse_decode_mobile_pim_temporal(deserializer);
+    var var_startsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_endsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_title = sse_decode_opt_String(deserializer);
+    var var_notes = sse_decode_opt_String(deserializer);
+    var var_location = sse_decode_opt_String(deserializer);
+    var var_cancelled = sse_decode_bool(deserializer);
+    return MobileRecurrenceOverride(
+        recurrenceId: var_recurrenceId,
+        startsAt: var_startsAt,
+        endsAt: var_endsAt,
+        title: var_title,
+        notes: var_notes,
+        location: var_location,
+        cancelled: var_cancelled);
   }
 
   @protected
@@ -2351,12 +2447,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_mobile_pim_temporal(
+      List<MobilePimTemporal> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_pim_temporal(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_mobile_postal_address(
       List<MobilePostalAddress> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_mobile_postal_address(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_mobile_recurrence_override(
+      List<MobileRecurrenceOverride> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_recurrence_override(item, serializer);
     }
   }
 
@@ -2487,6 +2603,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.priority, serializer);
     sse_encode_opt_String(self.location, serializer);
     sse_encode_opt_String(self.recurrenceRule, serializer);
+    sse_encode_list_mobile_pim_temporal(self.recurrenceExdates, serializer);
+    sse_encode_list_mobile_pim_temporal(self.recurrenceRdates, serializer);
+    sse_encode_list_mobile_recurrence_override(
+        self.recurrenceOverrides, serializer);
+    sse_encode_list_String(self.recurrenceUnsupported, serializer);
     sse_encode_opt_box_autoadd_i_64(self.reminderMinutes, serializer);
     sse_encode_list_String(self.categories, serializer);
     sse_encode_String(self.namePrefix, serializer);
@@ -2538,6 +2659,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.accessToken, serializer);
     sse_encode_mobile_device_secrets(self.device, serializer);
     sse_encode_list_mobile_collection(self.collections, serializer);
+  }
+
+  @protected
+  void sse_encode_mobile_recurrence_override(
+      MobileRecurrenceOverride self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_mobile_pim_temporal(self.recurrenceId, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.startsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.endsAt, serializer);
+    sse_encode_opt_String(self.title, serializer);
+    sse_encode_opt_String(self.notes, serializer);
+    sse_encode_opt_String(self.location, serializer);
+    sse_encode_bool(self.cancelled, serializer);
   }
 
   @protected

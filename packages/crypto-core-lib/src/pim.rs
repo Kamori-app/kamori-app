@@ -1582,6 +1582,100 @@ pub fn projection_fields(
     if let Some(minutes) = managed_alarm_minutes(&parsed, component) {
         fields.insert("reminder_minutes".to_string(), PimValue::Integer(minutes));
     }
+    if kind != PimResourceKind::Contact {
+        let mut unsupported = Vec::new();
+        for (field, property) in [
+            ("recurrence_exdates", "EXDATE"),
+            ("recurrence_rdates", "RDATE"),
+        ] {
+            let mut values = Vec::new();
+            for line in parsed.property_lines(component, property) {
+                if property == "RDATE"
+                    && projection_parameter(&line.head, "VALUE")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("PERIOD"))
+                {
+                    if !unsupported.contains(&"RDATE;VALUE=PERIOD".to_string()) {
+                        unsupported.push("RDATE;VALUE=PERIOD".into());
+                    }
+                    continue;
+                }
+                for value in line.value.split(',') {
+                    let mut temporal_line = line.clone();
+                    temporal_line.value = value.to_string();
+                    if let PimValue::Record(record) = temporal_from_projection(&temporal_line)? {
+                        values.push(record);
+                    }
+                }
+            }
+            if !values.is_empty() {
+                fields.insert(field.into(), PimValue::Records(values));
+            }
+        }
+        let mut overrides = Vec::new();
+        for (id, candidate) in parsed.components.iter().enumerate() {
+            if candidate.name != parsed.components[component].name {
+                continue;
+            }
+            let Some(recurrence_id) = parsed.property_lines(id, "RECURRENCE-ID").first().copied()
+            else {
+                continue;
+            };
+            if projection_parameter(&recurrence_id.head, "RANGE").is_some() {
+                if !unsupported.contains(&"RECURRENCE-ID;RANGE".to_string()) {
+                    unsupported.push("RECURRENCE-ID;RANGE".into());
+                }
+                continue;
+            }
+            let mut record = BTreeMap::new();
+            for (name, line) in [
+                ("recurrence_id", Some(recurrence_id)),
+                (
+                    "starts_at",
+                    parsed.property_lines(id, "DTSTART").first().copied(),
+                ),
+                (
+                    "ends_at",
+                    parsed.property_lines(id, "DTEND").first().copied(),
+                ),
+            ] {
+                if let Some(line) = line
+                    && let PimValue::Record(temporal) = temporal_from_projection(line)?
+                {
+                    record.extend(
+                        temporal
+                            .into_iter()
+                            .map(|(key, value)| (format!("{name}_{key}"), value)),
+                    );
+                }
+            }
+            for (name, property) in [
+                ("title", "SUMMARY"),
+                ("notes", "DESCRIPTION"),
+                ("location", "LOCATION"),
+            ] {
+                if let Some(value) = parsed.property_values(id, property).first() {
+                    record.insert(name.into(), unescape_projection_text(value));
+                }
+            }
+            if parsed
+                .property_values(id, "STATUS")
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case("CANCELLED"))
+            {
+                record.insert("cancelled".into(), "true".into());
+            }
+            overrides.push(record);
+        }
+        if !overrides.is_empty() {
+            fields.insert("recurrence_overrides".into(), PimValue::Records(overrides));
+        }
+        if !unsupported.is_empty() {
+            fields.insert(
+                "recurrence_unsupported".into(),
+                PimValue::TextList(unsupported),
+            );
+        }
+    }
     Ok(fields)
 }
 

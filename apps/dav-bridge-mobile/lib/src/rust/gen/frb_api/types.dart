@@ -8,7 +8,7 @@ import '../lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `MobileCreateInviteCodeRequest`, `MobileCreateInviteCodeResponse`, `MobileCreateSpaceRequest`, `MobileCreateSpaceResponse`, `MobileDeviceKeyPackage`, `MobileDeviceSummary`, `MobileListRecoveryKeyPackagesResponse`, `MobileListSpaceDevicesResponse`, `MobileListSpaceMembersResponse`, `MobileListSpacesResponse`, `MobileLogoutRequest`, `MobileLogoutResponse`, `MobileMemberRecoveryKeyPackage`, `MobilePutDeviceKeyPackageRequest`, `MobilePutRecoveryKeyPackageRequest`, `MobileRecoverySpaceKeyPackage`, `MobileRedeemInviteCodeRequest`, `MobileRedeemInviteCodeResponse`, `MobileRefreshRequest`, `MobileRefreshResponse`, `MobileRegisterDeviceRequest`, `MobileRegisterDeviceResponse`, `MobileRotateSpaceKeyRequest`, `MobileRotateSpaceKeyResponse`, `MobileSigninFinishRequest`, `MobileSigninFinishResponse`, `MobileSigninStartRequest`, `MobileSigninStartResponse`, `MobileSigninTotpRequest`, `MobileSpaceDeviceSummary`, `MobileSpaceLifecycleResponse`, `MobileSpaceMemberSummary`, `MobileSpaceSummary`, `MobileStoredResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class MobileCollection {
   final String collectionId;
@@ -333,6 +333,10 @@ class MobilePimItem {
   final PlatformInt64 priority;
   final String? location;
   final String? recurrenceRule;
+  final List<MobilePimTemporal> recurrenceExdates;
+  final List<MobilePimTemporal> recurrenceRdates;
+  final List<MobileRecurrenceOverride> recurrenceOverrides;
+  final List<String> recurrenceUnsupported;
   final PlatformInt64? reminderMinutes;
   final List<String> categories;
   final String namePrefix;
@@ -366,6 +370,10 @@ class MobilePimItem {
     required this.priority,
     this.location,
     this.recurrenceRule,
+    required this.recurrenceExdates,
+    required this.recurrenceRdates,
+    required this.recurrenceOverrides,
+    required this.recurrenceUnsupported,
     this.reminderMinutes,
     required this.categories,
     required this.namePrefix,
@@ -401,6 +409,10 @@ class MobilePimItem {
       priority.hashCode ^
       location.hashCode ^
       recurrenceRule.hashCode ^
+      recurrenceExdates.hashCode ^
+      recurrenceRdates.hashCode ^
+      recurrenceOverrides.hashCode ^
+      recurrenceUnsupported.hashCode ^
       reminderMinutes.hashCode ^
       categories.hashCode ^
       namePrefix.hashCode ^
@@ -438,6 +450,10 @@ class MobilePimItem {
           priority == other.priority &&
           location == other.location &&
           recurrenceRule == other.recurrenceRule &&
+          recurrenceExdates == other.recurrenceExdates &&
+          recurrenceRdates == other.recurrenceRdates &&
+          recurrenceOverrides == other.recurrenceOverrides &&
+          recurrenceUnsupported == other.recurrenceUnsupported &&
           reminderMinutes == other.reminderMinutes &&
           categories == other.categories &&
           namePrefix == other.namePrefix &&
@@ -565,6 +581,49 @@ class MobileProvisionResult {
           accessToken == other.accessToken &&
           device == other.device &&
           collections == other.collections;
+}
+
+class MobileRecurrenceOverride {
+  final MobilePimTemporal recurrenceId;
+  final MobilePimTemporal? startsAt;
+  final MobilePimTemporal? endsAt;
+  final String? title;
+  final String? notes;
+  final String? location;
+  final bool cancelled;
+
+  const MobileRecurrenceOverride({
+    required this.recurrenceId,
+    this.startsAt,
+    this.endsAt,
+    this.title,
+    this.notes,
+    this.location,
+    required this.cancelled,
+  });
+
+  @override
+  int get hashCode =>
+      recurrenceId.hashCode ^
+      startsAt.hashCode ^
+      endsAt.hashCode ^
+      title.hashCode ^
+      notes.hashCode ^
+      location.hashCode ^
+      cancelled.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MobileRecurrenceOverride &&
+          runtimeType == other.runtimeType &&
+          recurrenceId == other.recurrenceId &&
+          startsAt == other.startsAt &&
+          endsAt == other.endsAt &&
+          title == other.title &&
+          notes == other.notes &&
+          location == other.location &&
+          cancelled == other.cancelled;
 }
 
 class MobileRedeemedInvite {

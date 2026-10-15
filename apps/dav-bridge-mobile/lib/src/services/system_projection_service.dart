@@ -92,6 +92,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
     String collectionId,
     List<PimItem> items,
   ) async {
+    await _rejectUnsupportedRecurrenceSets(items, {collectionId});
     final status = await _calendar.requestPermissions(
       level: CalendarAccessLevel.full,
     );
@@ -190,10 +191,53 @@ class NativeSystemProjectionService implements SystemProjectionService {
     }
   }
 
+  // The pinned calendar provider can write RRULE only. Refuse a lossy set,
+  // removing any prior owned master so the OS does not keep showing false dates.
+  Future<void> _rejectUnsupportedRecurrenceSets(
+    List<PimItem> items,
+    Set<String> collectionIds,
+  ) async {
+    final unsupported = items
+        .where((item) =>
+            item.kind == PimItemKind.calendarEvent &&
+            !item.conflict &&
+            collectionIds.contains(item.spaceId) &&
+            (item.recurrenceExdates.isNotEmpty ||
+                item.recurrenceRdates.isNotEmpty ||
+                item.recurrenceOverrides.isNotEmpty ||
+                item.recurrenceUnsupported.isNotEmpty))
+        .toList();
+    if (unsupported.isEmpty) return;
+    final mapping = await _readMap(_eventMapKey);
+    final calendarId = await _read(_calendarIdKey);
+    for (final item in unsupported) {
+      final key = _itemKey(item);
+      final eventId = mapping[key];
+      if (eventId == null) continue;
+      final existing = await _calendar.getEvent(eventId);
+      if (existing != null) {
+        if (calendarId == null ||
+            existing.calendarId != calendarId ||
+            existing.description?.startsWith(_descriptionPrefix) != true) {
+          throw StateError(
+              'Cannot remove an unverified system calendar copy of “${item.title}”.');
+        }
+        await _calendar.deleteEvent(eventId: eventId);
+      }
+      // Persist only after provider success. If storage fails, a later run sees
+      // the missing provider event and retries this mapping removal safely.
+      mapping.remove(key);
+      await _writeMap(_eventMapKey, mapping);
+    }
+    throw FormatException(
+        'Cannot project “${unsupported.first.title}”: imported recurrence exceptions are not supported by the system calendar. Previous owned system copies were removed; original calendar data remains in Kamori.');
+  }
+
   Future<void> _projectCalendar(
     List<PimItem> items,
     Set<String> enabledCollectionIds,
   ) async {
+    await _rejectUnsupportedRecurrenceSets(items, enabledCollectionIds);
     final calendarId = await _getOrCreateCalendarId();
     final mapping = await _readMap(_eventMapKey);
     final events = items

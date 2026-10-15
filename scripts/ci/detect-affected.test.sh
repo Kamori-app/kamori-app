@@ -95,7 +95,10 @@ for ui_input in \
   tests/acceptance/fixtures/uiGates.bundle.mjs \
   tests/acceptance/fixtures/desktopUi.js \
   tests/acceptance/fixtures/adminUi.js \
-  tests/acceptance/fixtures/inviteUi.js; do
+  tests/acceptance/fixtures/inviteUi.js \
+  tests/acceptance/specs/pim-recurrence.spec.ts \
+  tests/acceptance/fixtures/calendarCorpus.js \
+  tests/acceptance/fixtures/taskEditor.bundle.mjs; do
   assert_case "frontend UI input: $ui_input" "$web" "$ui_input"
 done
 
@@ -121,3 +124,16 @@ if [[ "$actual_all" != "$all" ]]; then
   diff -u <(printf '%s\n' "$all") <(printf '%s\n' "$actual_all") >&2 || true
   exit 1
 fi
+
+# Shared authored corpus is consumed by Rust, web and Flutter unit tests only.
+corpus=$(printf '%s\n' \
+  'rust=true' \
+  'frontend=true' \
+  'mobile=true' \
+  'android=false' \
+  'ios=false' \
+  'server=false' \
+  'infrastructure=false')
+for corpus_input in tests/fixtures/pim/zoned-exceptions.ics tests/fixtures/pim/custom-contact.vcf tests/fixtures/pim/corpus.json; do
+  assert_case "shared PIM corpus: $corpus_input" "$corpus" "$corpus_input"
+done

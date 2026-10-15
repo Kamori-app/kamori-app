@@ -39,12 +39,22 @@ class _PimScreenState extends ConsumerState<PimScreen> {
         .where((item) =>
             item.kind != PimItemKind.task || _showCompleted || !item.completed)
         .toList();
-    if (_filter == PimItemKind.calendarEvent) {
-      visible = visible
-          .where((item) => pimIntervalOccursOnDate(item, _calendarDay))
-          .toList();
-    }
     visible.sort(_compareItems);
+    final rows = <({PimItem item, PimCalendarOccurrence? occurrence})>[];
+    for (final item in visible) {
+      if (_filter != PimItemKind.calendarEvent ||
+          item.recurrenceUnsupported.isNotEmpty) {
+        rows.add((item: item, occurrence: null));
+      } else {
+        for (final occurrence in pimOccurrencesOnDate(item, _calendarDay)) {
+          rows.add((item: item, occurrence: occurrence));
+        }
+      }
+    }
+    if (_filter == PimItemKind.calendarEvent) {
+      rows.sort((a, b) => (a.occurrence?.startsAt ?? DateTime(0))
+          .compareTo(b.occurrence?.startsAt ?? DateTime(0)));
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -156,26 +166,27 @@ class _PimScreenState extends ConsumerState<PimScreen> {
               ],
             ),
           Expanded(
-            child: visible.isEmpty
+            child: rows.isEmpty
                 ? _EmptyOrganizer(kind: _filter)
                 : RefreshIndicator(
                     onRefresh:
                         ref.read(bridgeControllerProvider.notifier).syncNow,
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                      itemCount: visible.length,
+                      itemCount: rows.length,
                       itemBuilder: (context, index) => _PimItemTile(
-                        item: visible[index],
+                        item: rows[index].item,
+                        occurrence: rows[index].occurrence,
                         onEdit: () =>
-                            _openEditor(context, existing: visible[index]),
+                            _openEditor(context, existing: rows[index].item),
                         onDelete: () => ref
                             .read(bridgeControllerProvider.notifier)
-                            .deletePimItem(visible[index]),
-                        onTaskChanged: visible[index].kind == PimItemKind.task
+                            .deletePimItem(rows[index].item),
+                        onTaskChanged: rows[index].item.kind == PimItemKind.task
                             ? (value) => ref
                                 .read(bridgeControllerProvider.notifier)
                                 .savePimItem(PimDraft.fromItem(
-                                  visible[index],
+                                  rows[index].item,
                                   completed: value,
                                 ))
                             : null,
@@ -259,6 +270,11 @@ class _PimScreenState extends ConsumerState<PimScreen> {
         initial: initial,
         spaces: state.collections,
         kindLocked: existing != null,
+        editingSeries: existing != null &&
+            existing.kind == PimItemKind.calendarEvent &&
+            (existing.recurrenceRule?.isNotEmpty == true ||
+                existing.recurrenceRdates.isNotEmpty ||
+                existing.recurrenceOverrides.isNotEmpty),
         onSave: (draft) =>
             ref.read(bridgeControllerProvider.notifier).savePimItem(draft),
       ),
@@ -271,12 +287,14 @@ class _PimEditorSheet extends StatefulWidget {
     required this.initial,
     required this.spaces,
     required this.kindLocked,
+    required this.editingSeries,
     required this.onSave,
   });
 
   final PimDraft initial;
   final List<CollectionEntry> spaces;
   final bool kindLocked;
+  final bool editingSeries;
   final Future<bool> Function(PimDraft) onSave;
 
   @override
@@ -452,7 +470,8 @@ class _PimEditorSheetState extends State<_PimEditorSheet> {
                 Expanded(
                   child: Text(
                     widget.kindLocked
-                        ? context.strings.text('editItem')
+                        ? context.strings.text(
+                            widget.editingSeries ? 'editSeries' : 'editItem')
                         : context.strings.text('newOrganizerItem'),
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
@@ -635,6 +654,7 @@ class _PimEditorSheetState extends State<_PimEditorSheet> {
       [
         if (includeRepeat)
           DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _recurrence,
             decoration:
                 InputDecoration(labelText: context.strings.text('repeat')),
@@ -1109,12 +1129,14 @@ class _PimItemTile extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.onTaskChanged,
+    this.occurrence,
   });
 
   final PimItem item;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool>? onTaskChanged;
+  final PimCalendarOccurrence? occurrence;
 
   @override
   Widget build(BuildContext context) {
@@ -1124,10 +1146,19 @@ class _PimItemTile extends StatelessWidget {
           item.emails.firstOrNull?.value,
           item.phones.firstOrNull?.value,
         ].whereType<String>().where((value) => value.isNotEmpty).join(' · '),
-      PimItemKind.calendarEvent => [
-          _displayTemporal(item.startsAt),
-          item.location,
-        ].whereType<String>().where((value) => value.isNotEmpty).join(' · '),
+      PimItemKind.calendarEvent => item.recurrenceUnsupported.isNotEmpty
+          ? context.strings.text('unsupportedRecurrence')
+          : [
+              occurrence == null
+                  ? _displayTemporal(item.startsAt)
+                  : _displayDateTime(occurrence!.startsAt,
+                      dateOnly: occurrence!.allDay),
+              occurrence?.location ?? item.location,
+              occurrence?.notes ?? item.notes,
+            ]
+              .whereType<String>()
+              .where((value) => value.isNotEmpty)
+              .join(' · '),
       PimItemKind.task => item.completed
           ? context.strings.text('completed')
           : item.dueAt == null
@@ -1148,7 +1179,7 @@ class _PimItemTile extends StatelessWidget {
                   item.favorite ? Icons.star : Icons.person_outline,
               }),
         title: Text(
-          item.title,
+          occurrence?.title ?? item.title,
           style: item.completed
               ? const TextStyle(decoration: TextDecoration.lineThrough)
               : null,
@@ -1160,7 +1191,11 @@ class _PimItemTile extends StatelessWidget {
                 : subtitle),
         onTap: onEdit,
         trailing: IconButton(
-          tooltip: context.strings.text('delete'),
+          tooltip: context.strings.text(
+              item.recurrenceRule?.isNotEmpty == true ||
+                      item.recurrenceOverrides.isNotEmpty
+                  ? 'deleteSeries'
+                  : 'delete'),
           onPressed: onDelete,
           icon: const Icon(Icons.delete_outline),
         ),

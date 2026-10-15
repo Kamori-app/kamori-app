@@ -7,7 +7,7 @@ const { compile } = requireWeb("svelte/compiler");
 const fixtures = dirname(new URL(import.meta.url).pathname);
 const lib = resolve(fixtures, "../../../apps/web-frontend/src/lib");
 const bundle = await Bun.build({
-  entrypoints: [resolve(fixtures, "taskEditor.js")],
+  entrypoints: [resolve(fixtures, process.argv[2] ?? "taskEditor.js")],
   target: "browser",
   conditions: ["browser"],
   plugins: [{

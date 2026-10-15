@@ -12,7 +12,8 @@
     "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json",
     "lint": "bun run check",
     "test:unit": "bun test src/lib",
-    "test": "bun run check && bun run test:unit"
+    "test": "bun run check && bun run test:unit && bun run test:ui",
+    "test:ui": "cd ../../tests/acceptance && env -u NO_COLOR KAMORI_UI_GATE=web node node_modules/@playwright/test/cli.js test --config ui-gates.config.ts pim-recurrence.spec.ts"
   },
   "dependencies": {
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",

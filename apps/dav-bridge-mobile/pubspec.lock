@@ -129,7 +129,7 @@ packages:
     source: hosted
     version: "0.8.0"
   device_calendar_plus_android:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: device_calendar_plus_android
       sha256: "7143fa08a3e1b57a1c81f478af1f4c6a1c47eee768fd5d322a69ed7abb43dcf8"

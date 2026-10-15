@@ -1,0 +1,409 @@
+[
+  {
+    "file": "zoned-exceptions.ics",
+    "kind": "calendar_event",
+    "uid": "synthetic-zoned@example.invalid",
+    "fields": {
+      "title": {
+        "type": "text",
+        "value": "Imported zoned master"
+      },
+      "notes": {
+        "type": "text",
+        "value": "Imported zoned notes"
+      },
+      "starts_at": {
+        "type": "record",
+        "value": {
+          "kind": "zoned_datetime",
+          "local": "20261023T193000",
+          "timezone": "America/New_York"
+        }
+      },
+      "ends_at": {
+        "type": "record",
+        "value": {
+          "kind": "zoned_datetime",
+          "local": "20261023T194500",
+          "timezone": "America/New_York"
+        }
+      },
+      "recurrence_rule": {
+        "type": "text",
+        "value": "FREQ=WEEKLY;BYDAY=FR;COUNT=5"
+      },
+      "reminder_minutes": {
+        "type": "integer",
+        "value": 17
+      },
+      "categories": {
+        "type": "text_list",
+        "value": [
+          "Research, unusual",
+          "External"
+        ]
+      },
+      "recurrence_exdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "zoned_datetime",
+            "local": "20261030T193000",
+            "timezone": "America/New_York"
+          }
+        ]
+      },
+      "recurrence_rdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "zoned_datetime",
+            "local": "20261110T193000",
+            "timezone": "America/New_York"
+          },
+          {
+            "kind": "zoned_datetime",
+            "local": "20261113T193000",
+            "timezone": "America/New_York"
+          },
+          {
+            "kind": "zoned_datetime",
+            "local": "20261110T193000",
+            "timezone": "America/New_York"
+          }
+        ]
+      },
+      "recurrence_overrides": {
+        "type": "records",
+        "value": [
+          {
+            "recurrence_id_kind": "zoned_datetime",
+            "recurrence_id_local": "20261106T193000",
+            "recurrence_id_timezone": "America/New_York",
+            "starts_at_kind": "zoned_datetime",
+            "starts_at_local": "20261107T203000",
+            "starts_at_timezone": "America/New_York",
+            "ends_at_kind": "zoned_datetime",
+            "ends_at_local": "20261107T204500",
+            "ends_at_timezone": "America/New_York",
+            "title": "Detached override",
+            "notes": "Leave this exception untouched",
+            "location": "Override room"
+          },
+          {
+            "recurrence_id_kind": "zoned_datetime",
+            "recurrence_id_local": "20261120T193000",
+            "recurrence_id_timezone": "America/New_York",
+            "cancelled": "true"
+          }
+        ]
+      },
+      "location": {
+        "type": "text",
+        "value": "Master room"
+      }
+    },
+    "display": [
+      {
+        "instant": "2026-10-23T23:30:00Z",
+        "occurs": true,
+        "title": "Imported zoned master",
+        "start": "2026-10-23T23:30:00Z",
+        "end": "2026-10-23T23:45:00Z",
+        "location": "Master room",
+        "notes": "Imported zoned notes"
+      },
+      {
+        "instant": "2026-10-24T23:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-11-14T00:30:00Z",
+        "occurs": true,
+        "title": "Imported zoned master",
+        "start": "2026-11-14T00:30:00Z",
+        "end": "2026-11-14T00:45:00Z",
+        "location": "Master room",
+        "notes": "Imported zoned notes"
+      },
+      {
+        "instant": "2026-11-15T00:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-11-21T00:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-11-28T00:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-10-30T23:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-11-07T00:30:00Z",
+        "occurs": false
+      },
+      {
+        "instant": "2026-11-08T01:30:00Z",
+        "occurs": true,
+        "title": "Detached override",
+        "start": "2026-11-08T01:30:00Z",
+        "end": "2026-11-08T01:45:00Z",
+        "location": "Override room",
+        "notes": "Leave this exception untouched"
+      },
+      {
+        "instant": "2026-11-11T00:30:00Z",
+        "occurs": true,
+        "title": "Imported zoned master",
+        "start": "2026-11-11T00:30:00Z",
+        "end": "2026-11-11T00:45:00Z",
+        "location": "Master room",
+        "notes": "Imported zoned notes"
+      }
+    ]
+  },
+  {
+    "file": "all-day-exceptions.ics",
+    "kind": "calendar_event",
+    "uid": "synthetic-all-day@example.invalid",
+    "fields": {
+      "title": {
+        "type": "text",
+        "value": "Imported all-day master"
+      },
+      "notes": {
+        "type": "text",
+        "value": "Imported all-day notes"
+      },
+      "starts_at": {
+        "type": "record",
+        "value": {
+          "kind": "date",
+          "date": "2026-10-30"
+        }
+      },
+      "ends_at": {
+        "type": "record",
+        "value": {
+          "kind": "date",
+          "date": "2026-10-31"
+        }
+      },
+      "recurrence_rule": {
+        "type": "text",
+        "value": "FREQ=WEEKLY;BYDAY=FR;COUNT=3"
+      },
+      "recurrence_exdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "date",
+            "date": "2026-11-06"
+          }
+        ]
+      },
+      "recurrence_rdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "date",
+            "date": "2026-11-10"
+          }
+        ]
+      },
+      "recurrence_overrides": {
+        "type": "records",
+        "value": [
+          {
+            "recurrence_id_kind": "date",
+            "recurrence_id_date": "2026-11-13",
+            "starts_at_kind": "date",
+            "starts_at_date": "2026-11-14",
+            "ends_at_kind": "date",
+            "ends_at_date": "2026-11-15",
+            "title": "Detached all-day override"
+          }
+        ]
+      }
+    },
+    "display": [
+      {
+        "day": "2026-10-30",
+        "occurs": true,
+        "title": "Imported all-day master",
+        "start_day": "2026-10-30",
+        "end_day": "2026-10-31"
+      },
+      {
+        "day": "2026-10-31",
+        "occurs": false
+      },
+      {
+        "day": "2026-11-01",
+        "occurs": false
+      },
+      {
+        "day": "2026-11-20",
+        "occurs": false
+      },
+      {
+        "day": "2026-11-06",
+        "occurs": false
+      },
+      {
+        "day": "2026-11-10",
+        "occurs": true,
+        "title": "Imported all-day master",
+        "start_day": "2026-11-10",
+        "end_day": "2026-11-11"
+      },
+      {
+        "day": "2026-11-13",
+        "occurs": false
+      },
+      {
+        "day": "2026-11-14",
+        "occurs": true,
+        "title": "Detached all-day override",
+        "start_day": "2026-11-14",
+        "end_day": "2026-11-15"
+      }
+    ]
+  },
+  {
+    "file": "recurring-task.ics",
+    "kind": "task",
+    "uid": "synthetic-task@example.invalid",
+    "fields": {
+      "title": {
+        "type": "text",
+        "value": "Imported task master"
+      },
+      "notes": {
+        "type": "text",
+        "value": "Imported task notes"
+      },
+      "starts_at": {
+        "type": "record",
+        "value": {
+          "kind": "date",
+          "date": "2026-10-30"
+        }
+      },
+      "due_at": {
+        "type": "record",
+        "value": {
+          "kind": "date",
+          "date": "2026-10-31"
+        }
+      },
+      "recurrence_rule": {
+        "type": "text",
+        "value": "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+      },
+      "priority": {
+        "type": "integer",
+        "value": 4
+      },
+      "completed": {
+        "type": "boolean",
+        "value": false
+      },
+      "recurrence_exdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "date",
+            "date": "2026-11-27"
+          }
+        ]
+      },
+      "recurrence_rdates": {
+        "type": "records",
+        "value": [
+          {
+            "kind": "date",
+            "date": "2026-11-26"
+          }
+        ]
+      }
+    },
+    "display": []
+  },
+  {
+    "file": "custom-contact.vcf",
+    "kind": "contact",
+    "uid": "synthetic-contact@example.invalid",
+    "fields": {
+      "title": {
+        "type": "text",
+        "value": "Imported contact master"
+      },
+      "notes": {
+        "type": "text",
+        "value": "Imported contact notes"
+      },
+      "emails": {
+        "type": "records",
+        "value": [
+          {
+            "label": "personal;secure",
+            "value": "synthetic@example.invalid",
+            "raw_head": "item1.EMAIL;X-KAMORI-LABEL=\"personal;secure\";PREF=2"
+          }
+        ]
+      }
+    },
+    "display": []
+  },
+  {
+    "file": "unsupported-period-range.ics",
+    "kind": "calendar_event",
+    "uid": "synthetic-advanced@example.invalid",
+    "fields": {
+      "title": {
+        "type": "text",
+        "value": "Imported advanced master"
+      },
+      "notes": {
+        "type": "text",
+        "value": "Imported advanced notes"
+      },
+      "starts_at": {
+        "type": "record",
+        "value": {
+          "kind": "utc",
+          "utc": "20261023T120000Z"
+        }
+      },
+      "ends_at": {
+        "type": "record",
+        "value": {
+          "kind": "utc",
+          "utc": "20261023T130000Z"
+        }
+      },
+      "recurrence_rule": {
+        "type": "text",
+        "value": "FREQ=WEEKLY;COUNT=4"
+      },
+      "recurrence_unsupported": {
+        "type": "text_list",
+        "value": [
+          "RDATE;VALUE=PERIOD",
+          "RECURRENCE-ID;RANGE"
+        ]
+      }
+    },
+    "display": [
+      {
+        "instant": "2026-10-30T14:00:00Z",
+        "occurs": false
+      }
+    ]
+  }
+]

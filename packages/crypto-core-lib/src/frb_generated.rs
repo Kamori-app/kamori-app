@@ -1309,6 +1309,20 @@ impl SseDecode for Vec<crate::frb_api::types::MobilePimItem> {
     }
 }
 
+impl SseDecode for Vec<crate::frb_api::types::MobilePimTemporal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::frb_api::types::MobilePimTemporal>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::frb_api::types::MobilePostalAddress> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1318,6 +1332,18 @@ impl SseDecode for Vec<crate::frb_api::types::MobilePostalAddress> {
             ans_.push(<crate::frb_api::types::MobilePostalAddress>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::frb_api::types::MobileRecurrenceOverride> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::frb_api::types::MobileRecurrenceOverride>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -1520,6 +1546,13 @@ impl SseDecode for crate::frb_api::types::MobilePimItem {
         let mut var_priority = <i64>::sse_decode(deserializer);
         let mut var_location = <Option<String>>::sse_decode(deserializer);
         let mut var_recurrenceRule = <Option<String>>::sse_decode(deserializer);
+        let mut var_recurrenceExdates =
+            <Vec<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_recurrenceRdates =
+            <Vec<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_recurrenceOverrides =
+            <Vec<crate::frb_api::types::MobileRecurrenceOverride>>::sse_decode(deserializer);
+        let mut var_recurrenceUnsupported = <Vec<String>>::sse_decode(deserializer);
         let mut var_reminderMinutes = <Option<i64>>::sse_decode(deserializer);
         let mut var_categories = <Vec<String>>::sse_decode(deserializer);
         let mut var_namePrefix = <String>::sse_decode(deserializer);
@@ -1555,6 +1588,10 @@ impl SseDecode for crate::frb_api::types::MobilePimItem {
             priority: var_priority,
             location: var_location,
             recurrence_rule: var_recurrenceRule,
+            recurrence_exdates: var_recurrenceExdates,
+            recurrence_rdates: var_recurrenceRdates,
+            recurrence_overrides: var_recurrenceOverrides,
+            recurrence_unsupported: var_recurrenceUnsupported,
             reminder_minutes: var_reminderMinutes,
             categories: var_categories,
             name_prefix: var_namePrefix,
@@ -1630,6 +1667,31 @@ impl SseDecode for crate::frb_api::types::MobileProvisionResult {
             access_token: var_accessToken,
             device: var_device,
             collections: var_collections,
+        };
+    }
+}
+
+impl SseDecode for crate::frb_api::types::MobileRecurrenceOverride {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_recurrenceId =
+            <crate::frb_api::types::MobilePimTemporal>::sse_decode(deserializer);
+        let mut var_startsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_endsAt =
+            <Option<crate::frb_api::types::MobilePimTemporal>>::sse_decode(deserializer);
+        let mut var_title = <Option<String>>::sse_decode(deserializer);
+        let mut var_notes = <Option<String>>::sse_decode(deserializer);
+        let mut var_location = <Option<String>>::sse_decode(deserializer);
+        let mut var_cancelled = <bool>::sse_decode(deserializer);
+        return crate::frb_api::types::MobileRecurrenceOverride {
+            recurrence_id: var_recurrenceId,
+            starts_at: var_startsAt,
+            ends_at: var_endsAt,
+            title: var_title,
+            notes: var_notes,
+            location: var_location,
+            cancelled: var_cancelled,
         };
     }
 }
@@ -2195,6 +2257,10 @@ impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobilePimItem {
             self.priority.into_into_dart().into_dart(),
             self.location.into_into_dart().into_dart(),
             self.recurrence_rule.into_into_dart().into_dart(),
+            self.recurrence_exdates.into_into_dart().into_dart(),
+            self.recurrence_rdates.into_into_dart().into_dart(),
+            self.recurrence_overrides.into_into_dart().into_dart(),
+            self.recurrence_unsupported.into_into_dart().into_dart(),
             self.reminder_minutes.into_into_dart().into_dart(),
             self.categories.into_into_dart().into_dart(),
             self.name_prefix.into_into_dart().into_dart(),
@@ -2297,6 +2363,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileProvisionRes
     for crate::frb_api::types::MobileProvisionResult
 {
     fn into_into_dart(self) -> crate::frb_api::types::MobileProvisionResult {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobileRecurrenceOverride {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.recurrence_id.into_into_dart().into_dart(),
+            self.starts_at.into_into_dart().into_dart(),
+            self.ends_at.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.notes.into_into_dart().into_dart(),
+            self.location.into_into_dart().into_dart(),
+            self.cancelled.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::frb_api::types::MobileRecurrenceOverride
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileRecurrenceOverride>
+    for crate::frb_api::types::MobileRecurrenceOverride
+{
+    fn into_into_dart(self) -> crate::frb_api::types::MobileRecurrenceOverride {
         self
     }
 }
@@ -2486,12 +2578,32 @@ impl SseEncode for Vec<crate::frb_api::types::MobilePimItem> {
     }
 }
 
+impl SseEncode for Vec<crate::frb_api::types::MobilePimTemporal> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::frb_api::types::MobilePimTemporal>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::frb_api::types::MobilePostalAddress> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::frb_api::types::MobilePostalAddress>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::frb_api::types::MobileRecurrenceOverride> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::frb_api::types::MobileRecurrenceOverride>::sse_encode(item, serializer);
         }
     }
 }
@@ -2615,6 +2727,19 @@ impl SseEncode for crate::frb_api::types::MobilePimItem {
         <i64>::sse_encode(self.priority, serializer);
         <Option<String>>::sse_encode(self.location, serializer);
         <Option<String>>::sse_encode(self.recurrence_rule, serializer);
+        <Vec<crate::frb_api::types::MobilePimTemporal>>::sse_encode(
+            self.recurrence_exdates,
+            serializer,
+        );
+        <Vec<crate::frb_api::types::MobilePimTemporal>>::sse_encode(
+            self.recurrence_rdates,
+            serializer,
+        );
+        <Vec<crate::frb_api::types::MobileRecurrenceOverride>>::sse_encode(
+            self.recurrence_overrides,
+            serializer,
+        );
+        <Vec<String>>::sse_encode(self.recurrence_unsupported, serializer);
         <Option<i64>>::sse_encode(self.reminder_minutes, serializer);
         <Vec<String>>::sse_encode(self.categories, serializer);
         <String>::sse_encode(self.name_prefix, serializer);
@@ -2666,6 +2791,19 @@ impl SseEncode for crate::frb_api::types::MobileProvisionResult {
         <String>::sse_encode(self.access_token, serializer);
         <crate::frb_api::types::MobileDeviceSecrets>::sse_encode(self.device, serializer);
         <Vec<crate::frb_api::types::MobileCollection>>::sse_encode(self.collections, serializer);
+    }
+}
+
+impl SseEncode for crate::frb_api::types::MobileRecurrenceOverride {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::frb_api::types::MobilePimTemporal>::sse_encode(self.recurrence_id, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.starts_at, serializer);
+        <Option<crate::frb_api::types::MobilePimTemporal>>::sse_encode(self.ends_at, serializer);
+        <Option<String>>::sse_encode(self.title, serializer);
+        <Option<String>>::sse_encode(self.notes, serializer);
+        <Option<String>>::sse_encode(self.location, serializer);
+        <bool>::sse_encode(self.cancelled, serializer);
     }
 }
 

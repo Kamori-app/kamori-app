@@ -269,6 +269,24 @@ class FrbRustBridgeApi implements RustBridgeApi {
         priority: item.priority.toInt(),
         location: item.location,
         recurrenceRule: item.recurrenceRule,
+        recurrenceUnsupported: item.recurrenceUnsupported,
+        recurrenceExdates: item.recurrenceExdates
+            .map((value) => _fromFrbTemporal(value)!)
+            .toList(growable: false),
+        recurrenceRdates: item.recurrenceRdates
+            .map((value) => _fromFrbTemporal(value)!)
+            .toList(growable: false),
+        recurrenceOverrides: item.recurrenceOverrides
+            .map((value) => PimRecurrenceOverride(
+                  recurrenceId: _fromFrbTemporal(value.recurrenceId)!,
+                  startsAt: _fromFrbTemporal(value.startsAt),
+                  endsAt: _fromFrbTemporal(value.endsAt),
+                  title: value.title,
+                  notes: value.notes,
+                  location: value.location,
+                  cancelled: value.cancelled,
+                ))
+            .toList(growable: false),
         reminderMinutes: item.reminderMinutes?.toInt(),
         categories: item.categories,
         namePrefix: item.namePrefix,

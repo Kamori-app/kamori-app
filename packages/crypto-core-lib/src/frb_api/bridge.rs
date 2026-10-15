@@ -14,7 +14,7 @@ use super::{
     },
     types::{
         MobileDeviceSecrets, MobileLabeledValue, MobilePimDraft, MobilePimItem, MobilePimTemporal,
-        MobilePostalAddress, MobileSyncConfig,
+        MobilePostalAddress, MobileRecurrenceOverride, MobileSyncConfig,
     },
 };
 
@@ -204,6 +204,10 @@ fn materialize_mobile_item(branch: MaterializedPimBranch) -> Option<MobilePimIte
         priority: pim_integer(&fields, "priority").unwrap_or(0),
         location: pim_text(&fields, "location"),
         recurrence_rule: pim_text(&fields, "recurrence_rule"),
+        recurrence_exdates: pim_temporal_records(&fields, "recurrence_exdates"),
+        recurrence_rdates: pim_temporal_records(&fields, "recurrence_rdates"),
+        recurrence_overrides: pim_recurrence_overrides(&fields),
+        recurrence_unsupported: pim_text_list(&fields, "recurrence_unsupported"),
         reminder_minutes: pim_integer(&fields, "reminder_minutes"),
         categories: pim_text_list(&fields, "categories"),
         name_prefix: pim_record_value(&fields, "name", "prefix"),
@@ -260,16 +264,40 @@ fn pim_record_value(
 }
 
 fn pim_temporal(fields: &BTreeMap<String, PimValue>, name: &str) -> Option<MobilePimTemporal> {
-    let PimValue::Record(record) = fields.get(name)? else {
-        return None;
-    };
+    let PimValue::Record(record) = fields.get(name)? else { return None; };
+    pim_temporal_record(record, "")
+}
+
+fn pim_temporal_record(record: &BTreeMap<String, String>, prefix: &str) -> Option<MobilePimTemporal> {
     Some(MobilePimTemporal {
-        kind: record.get("kind").cloned().unwrap_or_default(),
-        date: record.get("date").cloned(),
-        utc: record.get("utc").cloned(),
-        local: record.get("local").cloned(),
-        timezone: record.get("timezone").cloned(),
+        kind: record.get(&format!("{prefix}kind"))?.clone(),
+        date: record.get(&format!("{prefix}date")).cloned(),
+        utc: record.get(&format!("{prefix}utc")).cloned(),
+        local: record.get(&format!("{prefix}local")).cloned(),
+        timezone: record.get(&format!("{prefix}timezone")).cloned(),
     })
+}
+
+fn pim_temporal_records(fields: &BTreeMap<String, PimValue>, name: &str) -> Vec<MobilePimTemporal> {
+    match fields.get(name) {
+        Some(PimValue::Records(records)) => records.iter().filter_map(|record| pim_temporal_record(record, "")).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn pim_recurrence_overrides(fields: &BTreeMap<String, PimValue>) -> Vec<MobileRecurrenceOverride> {
+    match fields.get("recurrence_overrides") {
+        Some(PimValue::Records(records)) => records.iter().filter_map(|record| Some(MobileRecurrenceOverride {
+            recurrence_id: pim_temporal_record(record, "recurrence_id_")?,
+            starts_at: pim_temporal_record(record, "starts_at_"),
+            ends_at: pim_temporal_record(record, "ends_at_"),
+            title: record.get("title").cloned(),
+            notes: record.get("notes").cloned(),
+            location: record.get("location").cloned(),
+            cancelled: record.get("cancelled").is_some_and(|value| value == "true"),
+        })).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn pim_labeled_values(
@@ -646,3 +674,7 @@ pub(super) async fn mobile_unregister_collection_key_impl(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "bridge_corpus_tests.rs"]
+mod corpus_tests;

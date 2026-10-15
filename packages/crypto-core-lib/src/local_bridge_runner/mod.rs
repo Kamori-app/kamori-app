@@ -1361,6 +1361,16 @@ impl LocalBridgeState {
                 "PIM branch changed since it was loaded; sync and retry"
             );
         }
+        let logical_resource_id = if let Some(head) = current_head {
+            let state = self
+                .load_operation_state(space_id.to_string(), head)
+                .await?
+                .ok_or_else(|| anyhow!("PIM branch head operation is missing"))?;
+            anyhow::ensure!(state.stream_id == resource_id, "PIM branch stream mismatch");
+            state.logical_resource_id
+        } else {
+            default_resource_id(resource_kind, resource_id)
+        };
         let dependencies = current_head.into_iter().collect();
         if resource_kind != PimResourceKind::Contact && !fields.contains_key("dtstamp") {
             fields.insert("dtstamp".to_string(), PimValue::Text(current_ical_utc()?));
@@ -1406,7 +1416,7 @@ impl LocalBridgeState {
             space_seq: 0,
             collection_id: space_id.to_string(),
             stream_id: resource_id,
-            logical_resource_id: projection_resource_id.clone(),
+            logical_resource_id: logical_resource_id.clone(),
             materialized_resource_id: projection_resource_id.clone(),
             kind: dav_kind(resource_kind),
             payload: Some(payload),
@@ -1418,7 +1428,7 @@ impl LocalBridgeState {
         self.reconcile_pim_stream(
             space_id.to_string(),
             resource_id,
-            default_resource_id(resource_kind, resource_id),
+            logical_resource_id,
             dav_kind(resource_kind),
         )
         .await?;
@@ -1453,6 +1463,16 @@ impl LocalBridgeState {
                 "PIM branch changed since it was loaded; sync and retry"
             );
         }
+        let logical_resource_id = if let Some(head) = current_head {
+            let state = self
+                .load_operation_state(space_id.to_string(), head)
+                .await?
+                .ok_or_else(|| anyhow!("PIM branch head operation is missing"))?;
+            anyhow::ensure!(state.stream_id == resource_id, "PIM branch stream mismatch");
+            state.logical_resource_id
+        } else {
+            default_resource_id(resource_kind, resource_id)
+        };
         let dependencies = current_head.into_iter().collect();
         let operation = PimOperationV1::Delete(PimDeleteV1 {
             schema_version: CURRENT_PIM_SCHEMA_VERSION,
@@ -1481,7 +1501,7 @@ impl LocalBridgeState {
             space_seq: 0,
             collection_id: space_id.to_string(),
             stream_id: resource_id,
-            logical_resource_id: projection_resource_id.clone(),
+            logical_resource_id: logical_resource_id.clone(),
             materialized_resource_id: projection_resource_id.clone(),
             kind: dav_kind(resource_kind),
             payload: None,
@@ -1493,7 +1513,7 @@ impl LocalBridgeState {
         self.reconcile_pim_stream(
             space_id.to_string(),
             resource_id,
-            default_resource_id(resource_kind, resource_id),
+            logical_resource_id,
             dav_kind(resource_kind),
         )
         .await?;

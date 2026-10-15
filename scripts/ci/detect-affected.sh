@@ -70,8 +70,8 @@ else
       package.json|bun.lock|bunfig.toml|turbo.json|apps/*/package.json|packages/*/package.json|tests/*/package.json|apps/web-frontend/*|apps/admin-frontend/*|apps/dav-bridge-desktop/*)
         frontend=true
         ;;
-      tests/acceptance/ui-gates.config.ts|tests/acceptance/specs/uiHost.ts|tests/acceptance/specs/*-ui.spec.ts|tests/acceptance/fixtures/uiGates.bundle.mjs|tests/acceptance/fixtures/*Ui.js)
-        # Default desktop/admin tests consume these shared UI inputs. The
+      tests/acceptance/ui-gates.config.ts|tests/acceptance/specs/uiHost.ts|tests/acceptance/specs/*-ui.spec.ts|tests/acceptance/fixtures/uiGates.bundle.mjs|tests/acceptance/fixtures/*Ui.js|tests/acceptance/specs/pim-recurrence.spec.ts|tests/acceptance/fixtures/calendarCorpus.js|tests/acceptance/fixtures/taskEditor.bundle.mjs)
+        # Default frontend package tests consume these shared UI inputs. The
         # acceptance PR smoke subset alone does not execute these gates.
         frontend=true
         ;;
@@ -98,6 +98,15 @@ else
     case "$file" in
       package.json|bun.lock|bunfig.toml|apps/*/package.json|packages/*/package.json|tests/*/package.json|Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/cloud-server/*|apps/web-frontend/*|apps/admin-frontend/*|packages/crypto-core-lib/*|deploy/cloud-server/*|deploy/edge/*|tests/acceptance/*|scripts/acceptance.sh)
         server=true
+        ;;
+    esac
+
+    case "$file" in
+      tests/fixtures/pim/*)
+        # Test-only shared corpus: no native or container rebuild is required.
+        rust=true
+        frontend=true
+        mobile=true
         ;;
     esac
 

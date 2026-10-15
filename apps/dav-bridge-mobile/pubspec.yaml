@@ -27,6 +27,8 @@ dependencies:
   crypto_core_lib:
     path: rust_builder
 dev_dependencies:
+  # Exercise the installed calendar provider channel without native OS access.
+  device_calendar_plus_android: 0.7.1
   integration_test:
     sdk: flutter
   flutter_test:

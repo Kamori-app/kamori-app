@@ -176,6 +176,17 @@ pub struct MobilePimDraft {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MobileRecurrenceOverride {
+    pub recurrence_id: MobilePimTemporal,
+    pub starts_at: Option<MobilePimTemporal>,
+    pub ends_at: Option<MobilePimTemporal>,
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub location: Option<String>,
+    pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MobilePimItem {
     pub space_id: String,
     pub resource_id: String,
@@ -192,6 +203,10 @@ pub struct MobilePimItem {
     pub priority: i64,
     pub location: Option<String>,
     pub recurrence_rule: Option<String>,
+    pub recurrence_exdates: Vec<MobilePimTemporal>,
+    pub recurrence_rdates: Vec<MobilePimTemporal>,
+    pub recurrence_overrides: Vec<MobileRecurrenceOverride>,
+    pub recurrence_unsupported: Vec<String>,
     pub reminder_minutes: Option<i64>,
     pub categories: Vec<String>,
     pub name_prefix: String,

@@ -88,7 +88,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MobilePimItem> dco_decode_list_mobile_pim_item(dynamic raw);
 
   @protected
+  List<MobilePimTemporal> dco_decode_list_mobile_pim_temporal(dynamic raw);
+
+  @protected
   List<MobilePostalAddress> dco_decode_list_mobile_postal_address(dynamic raw);
+
+  @protected
+  List<MobileRecurrenceOverride> dco_decode_list_mobile_recurrence_override(
+      dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -125,6 +132,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MobileProvisionResult dco_decode_mobile_provision_result(dynamic raw);
+
+  @protected
+  MobileRecurrenceOverride dco_decode_mobile_recurrence_override(dynamic raw);
 
   @protected
   MobileRedeemedInvite dco_decode_mobile_redeemed_invite(dynamic raw);
@@ -245,7 +255,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<MobilePimTemporal> sse_decode_list_mobile_pim_temporal(
+      SseDeserializer deserializer);
+
+  @protected
   List<MobilePostalAddress> sse_decode_list_mobile_postal_address(
+      SseDeserializer deserializer);
+
+  @protected
+  List<MobileRecurrenceOverride> sse_decode_list_mobile_recurrence_override(
       SseDeserializer deserializer);
 
   @protected
@@ -289,6 +307,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MobileProvisionResult sse_decode_mobile_provision_result(
+      SseDeserializer deserializer);
+
+  @protected
+  MobileRecurrenceOverride sse_decode_mobile_recurrence_override(
       SseDeserializer deserializer);
 
   @protected
@@ -416,8 +438,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<MobilePimItem> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_mobile_pim_temporal(
+      List<MobilePimTemporal> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_mobile_postal_address(
       List<MobilePostalAddress> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_mobile_recurrence_override(
+      List<MobileRecurrenceOverride> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
@@ -464,6 +494,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_mobile_provision_result(
       MobileProvisionResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_mobile_recurrence_override(
+      MobileRecurrenceOverride self, SseSerializer serializer);
 
   @protected
   void sse_encode_mobile_redeemed_invite(

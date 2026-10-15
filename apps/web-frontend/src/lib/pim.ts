@@ -614,6 +614,43 @@ export const projectionFields = (
       };
     }
   }
+  if (kind !== "contact") {
+    const unsupported = new Set<string>();
+    for (const [field, property] of [["recurrence_exdates", "EXDATE"], ["recurrence_rdates", "RDATE"]]) {
+      const values = projectionProperties(projection, kind, property).flatMap(line => {
+        if (property === "RDATE" && projectionParameter(line.head, "VALUE")?.toUpperCase() === "PERIOD") {
+          unsupported.add("RDATE;VALUE=PERIOD"); return [];
+        }
+        return line.value.split(",").map(value => temporalFromProjection({ ...line, value }));
+      });
+      if (values.length) fields[field] = { type: "records", value: values.flatMap(value => value.type === "record" ? [value.value] : []) };
+    }
+    const parsed = parseProjectionLines(projection);
+    const componentName = kind === "task" ? "VTODO" : "VEVENT";
+    const overrides: Record<string, string>[] = [];
+    parsed.components.forEach((name, id) => {
+      if (name !== componentName) return;
+      const lines = parsed.lines.filter(line => line.componentId === id);
+      const recurrenceId = lines.find(line => line.property === "RECURRENCE-ID");
+      if (!recurrenceId) return;
+      if (projectionParameter(recurrenceId.head, "RANGE")) { unsupported.add("RECURRENCE-ID;RANGE"); return; }
+      const record: Record<string, string> = {};
+      for (const [field, property] of [["recurrence_id", "RECURRENCE-ID"], ["starts_at", "DTSTART"], ["ends_at", "DTEND"]]) {
+        const line = lines.find(line => line.property === property);
+        if (!line) continue;
+        const temporal = temporalFromProjection(line);
+        if (temporal.type === "record") for (const [key, value] of Object.entries(temporal.value)) record[`${field}_${key}`] = value;
+      }
+      for (const [field, property] of [["title", "SUMMARY"], ["notes", "DESCRIPTION"], ["location", "LOCATION"]]) {
+        const line = lines.find(line => line.property === property);
+        if (line) record[field] = unescapeProjectionText(line.value);
+      }
+      if (lines.some(line => line.property === "STATUS" && line.value.toUpperCase() === "CANCELLED")) record.cancelled = "true";
+      overrides.push(record);
+    });
+    if (overrides.length) fields.recurrence_overrides = { type: "records", value: overrides };
+    if (unsupported.size) fields.recurrence_unsupported = { type: "text_list", value: [...unsupported] };
+  }
   const categories = projectionProperty(projection, kind, "CATEGORIES");
   if (categories !== undefined) {
     fields.categories = { type: "text_list", value: splitEscaped(categories, ",") };
@@ -815,79 +852,119 @@ export const intervalOccursOnDay = (
   return startsAt < dayEnd && effectiveEnd > dayStart;
 };
 
-/** Expands an RFC 5545 RRULE and tests occurrence intervals against one local day. */
-export const recurringIntervalOccursOnDay = (
-  startsValue: PimValue | undefined,
-  endsValue: PimValue | undefined,
-  recurrenceRule: string,
-  day: Date,
-): boolean => {
-  const startsAt = temporalToDate(startsValue);
-  if (!startsAt) return false;
-  const explicitEnd = temporalToDate(endsValue);
-  if (!recurrenceRule) {
-    const effectiveEnd = explicitEnd ?? (
-      startsValue?.type === "record" && startsValue.value.kind === "date"
-        ? new Date(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate() + 1)
-        : new Date(startsAt.getTime() + 1)
-    );
-    return intervalOccursOnDay(startsAt, effectiveEnd, day);
-  }
+export interface PimCalendarOccurrence {
+  /** Original scheduled identity; moved instances can share actual times. */
+  recurrenceId: number;
+  startsAt: Date;
+  endsAt: Date;
+  allDay: boolean;
+  title?: string;
+  notes?: string;
+  location?: string;
+}
 
-  const dateOnly = startsValue?.type === "record" && startsValue.value.kind === "date";
-  const dayStart = dateOnly
-    ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()))
-    : new Date(day.getFullYear(), day.getMonth(), day.getDate());
-  const dayEnd = dateOnly
-    ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate() + 1))
-    : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-  const ruleStart = dateOnly
-    ? new Date(Date.UTC(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate()))
-    : startsAt;
-  const ruleEnd = dateOnly && explicitEnd
-    ? new Date(Date.UTC(explicitEnd.getFullYear(), explicitEnd.getMonth(), explicitEnd.getDate()))
-    : explicitEnd;
-  const duration = Math.max(1, (ruleEnd?.getTime() ?? (
-    dateOnly ? ruleStart.getTime() + 86_400_000 : ruleStart.getTime() + 1
-  )) - ruleStart.getTime());
-  try {
-    const timezone = startsValue?.type === "record" &&
-        startsValue.value.kind === "zoned_datetime"
-      ? startsValue.value.timezone
-      : null;
-    const options = RRule.parseString(recurrenceRule);
-    // rrule 2.8.1's TZID rezone returns host-relative pseudo-local Dates.
-    // Expand wall-clock fields in its UTC domain, then apply the authoritative
-    // temporal TZID to EACH occurrence ourselves (including DST transitions).
-    options.dtstart = timezone && startsValue?.type === "record"
-      ? temporalToDate({ type: "text", value: `${startsValue.value.local}Z` }) ?? ruleStart
-      : ruleStart;
-    options.tzid = "UTC";
-    const untilInstant = timezone ? options.until : undefined;
-    // A floating wall time and its instant can differ by a timezone offset.
-    // Two days cover all IANA offsets and date-line/DST changes at either bound.
-    const margin = timezone ? 2 * 86_400_000 : 0;
-    if (untilInstant) {
-      // No occurrence can overlap this day once even the last possible end has
-      // passed. Keep a conservative floating UNTIL as well: an old series with
-      // a long overlapping duration must not enumerate to the queried year.
-      if (untilInstant.getTime() + duration <= dayStart.getTime()) return false;
-      options.until = new Date(untilInstant.getTime() + margin);
-    }
-    const recurrence = new RRule(options);
-    return recurrence
-      .between(new Date(dayStart.getTime() - duration - margin), new Date(dayEnd.getTime() + margin), true)
-      .some((floating) => {
-        const occurrence = timezone
-          ? zonedCompactLocalToDate(dateToIcalendarUtc(floating).slice(0, -1), timezone)
-          : floating;
-        return occurrence !== undefined &&
-          (!untilInstant || occurrence <= untilInstant) &&
-          occurrence < dayEnd &&
-          new Date(occurrence.getTime() + duration) > dayStart;
-      });
-  } catch {
-    const fallbackEnd = ruleEnd ?? new Date(ruleStart.getTime() + duration);
-    return intervalOccursOnDay(ruleStart, fallbackEnd, dayStart);
-  }
+const recurrenceRecords = (fields: Record<string, PimValue>, name: string): Record<string, string>[] => {
+  const value = fields[name];
+  return value?.type === "records" ? value.value : [];
 };
+
+const recurrenceTemporal = (record: Record<string, string>, prefix = ""): PimValue | undefined => {
+  const value = Object.fromEntries(Object.entries(record)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => [key.slice(prefix.length), value]));
+  return value.kind ? { type: "record", value } : undefined;
+};
+
+/** Read-only recurrence-set projection. Editing continues to target the series. */
+export const calendarOccurrencesOnDay = (
+  fields: Record<string, PimValue>, day: Date,
+): PimCalendarOccurrence[] => {
+  if (fields.recurrence_unsupported?.type === "text_list" && fields.recurrence_unsupported.value.length) return [];
+  const startsValue = fields.starts_at;
+  const endsValue = fields.ends_at;
+  const startsAt = temporalToDate(startsValue);
+  if (!startsAt) return [];
+  const dateOnly = startsValue?.type === "record" && startsValue.value.kind === "date";
+  // All-day arithmetic uses civil dates even across viewer DST transitions.
+  const axis = (value: PimValue | undefined): Date | undefined => {
+    const instant = temporalToDate(value);
+    return instant && value?.type === "record" && value.value.kind === "date"
+      ? new Date(Date.UTC(instant.getFullYear(), instant.getMonth(), instant.getDate())) : instant;
+  };
+  const displayDate = (value: Date, allDay: boolean) => allDay
+    ? new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()) : value;
+  const ruleStart = axis(startsValue)!;
+  const ruleEnd = axis(endsValue);
+  const duration = Math.max(1, (ruleEnd?.getTime() ?? (ruleStart.getTime() + (dateOnly ? 86_400_000 : 1))) - ruleStart.getTime());
+  const dayStart = dateOnly ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate())) : new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  const dayEnd = dateOnly ? new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate() + 1)) : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  const exclusions = new Set(recurrenceRecords(fields, "recurrence_exdates").map(value => axis(recurrenceTemporal(value))?.getTime()));
+  const overrides = recurrenceRecords(fields, "recurrence_overrides");
+  const replaced = new Set(overrides.map(value => axis(recurrenceTemporal(value, "recurrence_id_"))?.getTime()));
+  const candidates = new Map<number, Date>([[ruleStart.getTime(), ruleStart]]);
+  const recurrenceRule = fields.recurrence_rule?.type === "text" ? fields.recurrence_rule.value : "";
+  if (recurrenceRule) {
+    try {
+      const timezone = startsValue?.type === "record" && startsValue.value.kind === "zoned_datetime" ? startsValue.value.timezone : null;
+      const options = RRule.parseString(recurrenceRule);
+      options.dtstart = timezone && startsValue?.type === "record"
+        ? temporalToDate({ type: "text", value: `${startsValue.value.local}Z` }) ?? ruleStart : ruleStart;
+      options.tzid = "UTC";
+      const untilInstant = timezone ? options.until : undefined;
+      const margin = timezone ? 2 * 86_400_000 : 0;
+      if (untilInstant) options.until = new Date(untilInstant.getTime() + margin);
+      // Preserve bounded work for expired rules while allowing later RDATEs.
+      if (!untilInstant || untilInstant.getTime() + duration > dayStart.getTime()) {
+        for (const floating of new RRule(options).between(
+          new Date(dayStart.getTime() - duration - margin), new Date(dayEnd.getTime() + margin), true,
+        )) {
+          const occurrence = timezone ? zonedCompactLocalToDate(dateToIcalendarUtc(floating).slice(0, -1), timezone) : floating;
+          if (occurrence && (!untilInstant || occurrence <= untilInstant)) candidates.set(occurrence.getTime(), occurrence);
+        }
+      }
+    } catch {
+      // Keep the original visible for an unsupported rule, as before.
+    }
+  }
+  for (const record of recurrenceRecords(fields, "recurrence_rdates")) {
+    const occurrence = axis(recurrenceTemporal(record));
+    if (occurrence) candidates.set(occurrence.getTime(), occurrence);
+  }
+  const output: PimCalendarOccurrence[] = [];
+  const add = (start: Date, end: Date, allDay: boolean, identity: number, override?: Record<string, string>) => {
+    const displayedStart = displayDate(start, allDay);
+    const displayedEnd = displayDate(end, allDay);
+    if (intervalOccursOnDay(displayedStart, displayedEnd, day)) output.push({
+      recurrenceId: identity, startsAt: displayedStart, endsAt: displayedEnd, allDay,
+      title: override?.title, notes: override?.notes, location: override?.location,
+    });
+  };
+  for (const [identity, start] of candidates) {
+    if (!exclusions.has(identity) && !replaced.has(identity)) add(start, new Date(start.getTime() + duration), dateOnly, identity);
+  }
+  // An override is located by the original RECURRENCE-ID, even when moved
+  // outside the master rule's queried day or beyond its UNTIL/COUNT window.
+  const seenOverrides = new Set<number>();
+  for (const override of overrides) {
+    const identity = axis(recurrenceTemporal(override, "recurrence_id_"))?.getTime();
+    if (identity === undefined || seenOverrides.has(identity)) continue;
+    seenOverrides.add(identity);
+    if (override.cancelled === "true" || exclusions.has(identity)) continue;
+    const temporal = recurrenceTemporal(override, "starts_at_");
+    const start = axis(temporal);
+    if (!start) continue;
+    const end = axis(recurrenceTemporal(override, "ends_at_")) ?? new Date(start.getTime() + duration);
+    add(start, end, temporal?.type === "record" && temporal.value.kind === "date", identity, override);
+  }
+  return output.sort((left, right) => left.startsAt.getTime() - right.startsAt.getTime());
+};
+
+export const recurringIntervalOccursOnDay = (
+  startsValue: PimValue | undefined, endsValue: PimValue | undefined,
+  recurrenceRule: string, day: Date, recurrenceFields: Record<string, PimValue> = {},
+): boolean => calendarOccurrencesOnDay({
+  ...recurrenceFields,
+  ...(startsValue ? { starts_at: startsValue } : {}),
+  ...(endsValue ? { ends_at: endsValue } : {}),
+  recurrence_rule: { type: "text", value: recurrenceRule },
+}, day).length > 0;

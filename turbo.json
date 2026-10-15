@@ -75,6 +75,32 @@
         "$TURBO_ROOT$/tests/acceptance/specs/admin-ui.spec.ts",
         "$TURBO_ROOT$/tests/acceptance/fixtures/adminUi.js"
       ]
+    },
+    "crypto-core-lib#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**"
+      ]
+    },
+    "dav-bridge-mobile#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**"
+      ]
+    },
+    "web-frontend#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/pim-recurrence.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/calendarCorpus.js",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/taskEditor.bundle.mjs"
+      ]
     }
   }
 }
