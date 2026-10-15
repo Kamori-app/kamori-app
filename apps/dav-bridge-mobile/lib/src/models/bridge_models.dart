@@ -508,7 +508,10 @@ bool pimIntervalOccursOnDate(PimItem item, DateTime date) {
 }
 
 DateTime _floatingTemporal(PimTemporal value) {
-  final wall = value.toEditorDateTime() ?? value.toDateTime()!;
+  // UTC rules recur in UTC fields; the editor converts them to device time.
+  final wall = value.kind == 'utc'
+      ? value.toDateTime()!
+      : value.toEditorDateTime() ?? value.toDateTime()!;
   return DateTime.utc(
     wall.year,
     wall.month,

@@ -118,4 +118,41 @@ void main() {
     expect(pimIntervalOccursOnDate(recurring, DateTime(2026, 9, 5)), isFalse);
     expect(pimIntervalOccursOnDate(withoutEnd, DateTime(2026, 8, 28)), isTrue);
   });
+
+  PimItem weekly(PimTemporal start, PimTemporal end) => PimItem(
+        spaceId: 'space-1',
+        resourceId: 'weekly',
+        projectionId: 'weekly.ics',
+        headOperationId: 'op',
+        kind: PimItemKind.calendarEvent,
+        title: 'Weekly',
+        completed: false,
+        startsAt: start,
+        endsAt: end,
+        recurrenceRule: 'FREQ=WEEKLY',
+      );
+
+  test('UTC weekly recurrence anchors UTC fields in every device timezone', () {
+    final item = weekly(
+      const PimTemporal(kind: 'utc', utc: '20260828T180000Z'),
+      const PimTemporal(kind: 'utc', utc: '20260828T183000Z'),
+    );
+    expect(pimIntervalOccursOnDate(item, DateTime(2026, 9, 4)), isTrue);
+    expect(pimIntervalOccursOnDate(item, DateTime(2026, 9, 5)), isFalse);
+    expect(pimIntervalOccursOnDate(item, DateTime(2026, 9, 3)), isFalse);
+  });
+
+  test('zoned weekly recurrence retains DST wall time and actual instant', () {
+    final item = weekly(
+      PimTemporal.zoned(DateTime(2026, 10, 23, 19, 30), 'America/New_York'),
+      PimTemporal.zoned(DateTime(2026, 10, 23, 19, 45), 'America/New_York'),
+    );
+    // The viewer's calendar day follows the actual instant, not floating fields.
+    final before = DateTime.utc(2026, 10, 30, 23, 30).toLocal();
+    final after = DateTime.utc(2026, 11, 7, 0, 30).toLocal();
+    expect(pimIntervalOccursOnDate(item, before), isTrue);
+    expect(pimIntervalOccursOnDate(item, after), isTrue);
+    expect(pimIntervalOccursOnDate(item, after.add(const Duration(days: 1))),
+        isFalse);
+  });
 }

@@ -856,15 +856,30 @@ export const recurringIntervalOccursOnDay = (
       ? startsValue.value.timezone
       : null;
     const options = RRule.parseString(recurrenceRule);
-    options.dtstart = ruleStart;
-    if (timezone) options.tzid = timezone;
+    // rrule 2.8.1's TZID rezone returns host-relative pseudo-local Dates.
+    // Expand wall-clock fields in its UTC domain, then apply the authoritative
+    // temporal TZID to EACH occurrence ourselves (including DST transitions).
+    options.dtstart = timezone && startsValue?.type === "record"
+      ? temporalToDate({ type: "text", value: `${startsValue.value.local}Z` }) ?? ruleStart
+      : ruleStart;
+    options.tzid = "UTC";
+    const untilInstant = timezone ? options.until : undefined;
+    if (timezone) options.until = undefined;
     const recurrence = new RRule(options);
+    // A floating wall time and its instant can differ by a timezone offset.
+    // Two days cover all IANA offsets and date-line/DST changes at either bound.
+    const margin = timezone ? 2 * 86_400_000 : 0;
     return recurrence
-      .between(new Date(dayStart.getTime() - duration), dayEnd, true)
-      .some((occurrence) =>
-        occurrence < dayEnd &&
-        new Date(occurrence.getTime() + duration) > dayStart
-      );
+      .between(new Date(dayStart.getTime() - duration - margin), new Date(dayEnd.getTime() + margin), true)
+      .some((floating) => {
+        const occurrence = timezone
+          ? zonedCompactLocalToDate(dateToIcalendarUtc(floating).slice(0, -1), timezone)
+          : floating;
+        return occurrence !== undefined &&
+          (!untilInstant || occurrence <= untilInstant) &&
+          occurrence < dayEnd &&
+          new Date(occurrence.getTime() + duration) > dayStart;
+      });
   } catch {
     const fallbackEnd = ruleEnd ?? new Date(ruleStart.getTime() + duration);
     return intervalOccursOnDay(ruleStart, fallbackEnd, dayStart);
