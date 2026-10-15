@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Fix every confirmed defect S01–S05, C01–C05, U01–U07, I01–I02 from the repository audit, with regression evidence and independent reviews.
+**Goal:** Fix every confirmed defect S01–S07, C01–C05, U01–U08, I01–I02 and T01 from the repository audit, with regression evidence and independent reviews.
 
 **Architecture:** Keep existing feature/service/repository boundaries, encrypted oplog model, durable native credential/cache machinery and platform adapters. Repair violated invariants at their authoritative boundary; avoid unrelated rewrites or new product scope.
 
@@ -92,15 +92,15 @@
 
 ### Task 6: Restore offline sessions and reconcile background projections safely
 
-**Files:** web/lib/api/cloud.ts and auth/session-flow.js plus focused tests; mobile bridge_controller.dart/tests; services/background_sync_service.dart, system_projection_service.dart/interfaces/tests; ios/Runner/Info.plist, AppDelegate.swift and pinned-plugin setup as needed.
+**Files:** web/lib/api/cloud.ts and auth/session-flow.js plus focused tests; mobile bridge_controller.dart/tests; services/background_sync_service.dart, system_projection_service.dart/interfaces/tests; ios/Runner/Info.plist, AppDelegate.swift and pinned-plugin setup as needed; narrow shared Rust FRB session guard and committed generated bindings where required for cross-engine coordination.
 **Interfaces:** Uses existing secure runtime/vault/token/projection stores and real FRB release factory; scheduling id `kamori_background_sync_task`.
-**Requirements:** Resolve U04–U07. Coordinate refresh across tabs and same-tab callers, bootstrap current CSRF at the correct locked boundary and preserve durable generation-specific request ids/lost-response semantics. Genuine revocation 401 still clears auth. Pending old-session revocation failure must not stop a distinct matching current snapshot from restoring offline; keep revocation queued. Extract a testable production background runner with injected OS/storage/network boundaries. After encrypted sync, persist rotated credentials safely and reconcile current opted-in projections under the matching account. No new permission prompt, no disabled collection projection, and provider failure must not undo successful encrypted sync. Configure iOS permitted task identifiers/background mode and native plugin callback according to installed pinned Workmanager; document physical-device gate accurately.
+**Requirements:** Resolve U04–U07. Coordinate refresh across tabs and same-tab callers, bootstrap current CSRF at the correct locked boundary and preserve durable generation-specific request ids/lost-response semantics. Without Web Locks fail before network with a non-401 coordination error preserving local auth. Genuine revocation 401 still clears auth. Pending old-session revocation failure must not stop a distinct matching current snapshot from restoring offline; keep revocation queued. Extract a testable production background runner with injected OS/storage/network boundaries. After encrypted sync, persist rotated credentials safely and reconcile current opted-in projections under the matching account. No new permission prompt, no disabled collection projection, and provider failure must not undo successful encrypted sync. Serialize all foreground shared-runtime/session/token/opt-in mutations and complete background work with an existing-core process-global Rust/FRB opaque guard; retain native ownership through in-flight operations and commit generated bindings. Logout/disable may wait for an existing operation. Further unprotected snapshot rereads cannot replace this coordination. Configure iOS permitted task identifiers/background mode and native plugin callback according to installed pinned Workmanager; document physical-device gate accurately.
 
-- [ ] RED shared-cookie/tab CSRF rotation scenario, concurrent refresh callers, partial response/lost response and genuine revoked session.
-- [ ] RED controller restore with current vault/snapshot and queued other-session revocation throwing; assert local PIM available and queue retained.
-- [ ] RED background enabled create/update/delete projection, disabled skip, account mismatch and permission-free flow; assert token persistence survives independent provider failure.
-- [ ] Add configuration consistency check for Dart task id ↔ plist/native registration; do not claim physical scheduler delivery from this check.
-- [ ] Implement, run web check/tests/build and Flutter analyze/tests; verify iOS configuration syntactically and native compile if available. Commit and report exact limitations.
+- [x] RED shared-cookie/tab CSRF rotation scenario, concurrent refresh callers, partial response/lost response and genuine revoked session.
+- [x] RED controller restore with current vault/snapshot and queued other-session revocation throwing; assert local PIM available and queue retained.
+- [x] RED background enabled create/update/delete projection, disabled skip, account mismatch and permission-free flow; assert token persistence survives independent provider failure.
+- [x] Add configuration consistency check for Dart task id ↔ plist/native registration; do not claim physical scheduler delivery from this check.
+- [x] Implement, run web check/tests/build and Flutter analyze/tests; verify iOS configuration syntactically and native compile if available. Commit and report exact limitations.
 
 ### Task 7: Preserve sourced secrets and terminate failed backup jobs correctly
 

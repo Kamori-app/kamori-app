@@ -1,5 +1,5 @@
 {
-  "revision": "bbd35d9f3074aa6c72caa2dce9313ca7ad619714",
+  "revision": "dab0ba8d6353490d0b80828b96f0b59e852e4bf4",
   "toolchain": "Rust 1.97.1; cargo-llvm-cov 0.9.1",
   "scope": "workspace with crypto-core-lib/frb; PostgreSQL integration tests enabled",
   "excluded": "frb_generated|integration_tests|/tests/|build.rs",
@@ -12,19 +12,19 @@
       "percent": 0
     },
     "functions": {
-      "count": 2602,
-      "covered": 1241,
-      "percent": 47.694081475787854
+      "count": 2621,
+      "covered": 1260,
+      "percent": 48.07325448302175
     },
     "instantiations": {
-      "count": 4393,
-      "covered": 1643,
-      "percent": 37.400409742772595
+      "count": 4491,
+      "covered": 1666,
+      "percent": 37.09641505232688
     },
     "lines": {
-      "count": 26671,
-      "covered": 14721,
-      "percent": 55.19478084811218
+      "count": 26759,
+      "covered": 14806,
+      "percent": 55.33091670092305
     },
     "mcdc": {
       "count": 0,
@@ -33,10 +33,10 @@
       "percent": 0
     },
     "regions": {
-      "count": 37147,
-      "covered": 20499,
-      "notcovered": 16648,
-      "percent": 55.18346030635044
+      "count": 37307,
+      "covered": 20650,
+      "notcovered": 16657,
+      "percent": 55.35154260594527
     }
   },
   "files": [
@@ -4373,6 +4373,44 @@
       }
     },
     {
+      "path": "packages/crypto-core-lib/src/frb_api.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 19,
+          "covered": 18,
+          "percent": 94.73684210526316
+        },
+        "instantiations": {
+          "count": 98,
+          "covered": 22,
+          "percent": 22.448979591836736
+        },
+        "lines": {
+          "count": 88,
+          "covered": 84,
+          "percent": 95.45454545454545
+        },
+        "regions": {
+          "count": 160,
+          "covered": 150,
+          "notcovered": 10,
+          "percent": 93.75
+        }
+      }
+    },
+    {
       "path": "packages/crypto-core-lib/src/frb_api/auth.rs",
       "summary": {
         "branches": {
@@ -4389,24 +4427,24 @@
         },
         "functions": {
           "count": 34,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 1,
+          "percent": 2.941176470588235
         },
         "instantiations": {
           "count": 68,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 1,
+          "percent": 1.4705882352941175
         },
         "lines": {
           "count": 230,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 1,
+          "percent": 0.43478260869565216
         },
         "regions": {
           "count": 354,
-          "covered": 0,
-          "notcovered": 354,
-          "percent": 0.0
+          "covered": 1,
+          "notcovered": 353,
+          "percent": 0.2824858757062147
         }
       }
     },

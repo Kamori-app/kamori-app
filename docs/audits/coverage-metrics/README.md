@@ -9,3 +9,5 @@ cargo llvm-cov --workspace --features crypto-core-lib/frb --json --summary-only 
 ```
 
 Flutter: `flutter test --coverage`; web: Bun unit helper LCOV. `LF/LH` — всего/покрыто строк, `FNF/FNH` — всего/покрыто функций, если доступны. Отчёты охватывают попавшие в инструментирование файлы, а не все файлы приложения или UI. Сравнение процентов само по себе не доказывает проверку бизнес-сценария: существенные регрессии перечислены в основном аудите и журнале исправлений.
+
+Итоговые Rust/web/Flutter snapshots относятся к `dab0ba8`. Web denominator расширился с 10 до 13 файлов: добавлены cloud API, MessagePack transport и cookie CSRF; его aggregate процент не сравнивается как прежняя фиксированная выборка. Subprocess и browser cases не полностью отражаются в Bun LCOV. Go baseline измерен отдельно на CI Go 1.25.11 (первичный PATH Go 1.27.1 давал другой процент).
