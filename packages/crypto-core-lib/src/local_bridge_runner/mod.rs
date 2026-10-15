@@ -4,6 +4,8 @@ mod cache;
 mod cloud;
 #[cfg(feature = "local-bridge")]
 mod dav;
+#[cfg(test)]
+mod durability_tests;
 mod types;
 
 pub use types::{

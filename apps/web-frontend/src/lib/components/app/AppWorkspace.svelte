@@ -188,14 +188,23 @@
             release = resolve;
         });
         await previous;
+        const runWithCommittedState = async () => {
+            // Another tab may have committed while this tab waited for the lock.
+            // Rebase on its durable state before applying this user's operation.
+            const materialized = await loadMaterializedPimState();
+            pimItems = materialized.items;
+            operationStates = materialized.operations;
+            syncCursors = materialized.cursors;
+            return operation();
+        };
         try {
             if (navigator.locks) {
                 return await navigator.locks.request(
                     "kamori-web-data-plane-v1",
-                    operation,
+                    runWithCommittedState,
                 );
             }
-            return await operation();
+            return await runWithCommittedState();
         } finally {
             release();
         }
