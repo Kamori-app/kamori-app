@@ -1,0 +1,40 @@
+{
+  "removed_containers": [
+    "kamori-readiness-20261015-admin-1",
+    "kamori-readiness-20261015-web-1",
+    "kamori-readiness-20261015-cloud-1",
+    "kamori-readiness-20261015-migrate-1",
+    "kamori-readiness-20261015-minio-init-1",
+    "kamori-readiness-20261015-minio-1",
+    "kamori-readiness-20261015-valkey-1",
+    "kamori-readiness-20261015-postgres-1",
+    "kamori-readiness-20261015-postgres"
+  ],
+  "removed_volumes": [
+    "kamori-readiness-20261015_postgres-data",
+    "kamori-readiness-20261015_minio-data",
+    "kamori-readiness-20261015-postgres-data"
+  ],
+  "removed_networks": [
+    "kamori-readiness-20261015_default"
+  ],
+  "removed_runtime_files": [
+    "cloud.env",
+    "opaque-server-setup"
+  ],
+  "simulator": {
+    "uuid": "375D769C-958C-47A3-BB70-C0EF711B60DD",
+    "name": "Kamori-readiness-20261015",
+    "deleted": true
+  },
+  "images_caches_and_build_artifacts": "preserved",
+  "remaining_owned_resources": {
+    "containers": [],
+    "volumes": [],
+    "networks": [],
+    "restore_containers": [],
+    "restore_volumes": [],
+    "restore_networks": []
+  },
+  "result": "PASS"
+}

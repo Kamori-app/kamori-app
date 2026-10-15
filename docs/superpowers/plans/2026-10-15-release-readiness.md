@@ -120,7 +120,7 @@
 ## Controller final integration and completion
 
 - [x] Preserve separate per-task base/head commits, reports and spec+quality reviews. Scope rereviews to fix diffs; no duplicate full suites to confirm a report.
-- [ ] Run final pinned workspace Rust+FRB with supplied PostgreSQL, fmt/strict Clippy, web/admin/desktop checks/tests/builds, Flutter analyze/tests and real native builds affected by changed source. Run full fresh-image browser acceptance after source is frozen.
+- [x] Run final pinned workspace Rust+FRB with supplied PostgreSQL, fmt/strict Clippy, web/admin/desktop checks/tests/builds, Flutter analyze/tests and real native builds affected by changed source. Run full fresh-image browser acceptance after source is frozen.
 - [x] Record only freshly measured coverage or retain exact prior revision provenance; test-only lines/expanded populations cannot prove full business coverage.
-- [ ] Save new findings, actual RED/GREEN, benchmark/restore/native results and remaining physical/signing/legal gates in `docs/audits/2026-10-15-readiness.md`; update the existing business-test matrix without erasing historical baseline evidence.
-- [ ] Perform one final review of this continuation range, fix all confirmed findings, collect every new Ruling with its cost into permanent docs/final response, archive reports, and remove only this plan's scratch/resources after clean review. Keep `fix/audit-remediation` checked out; no merge/push or branch creation.
+- [x] Save new findings, actual RED/GREEN, benchmark/restore/native results and remaining physical/signing/legal gates in `docs/audits/2026-10-15-readiness.md`; update the existing business-test matrix without erasing historical baseline evidence.
+- [x] Perform one final review of this continuation range, fix all confirmed findings, collect every new Ruling with its cost into permanent docs/final response, archive reports, and remove only this plan's scratch/resources after clean review. Keep `fix/audit-remediation` checked out; no merge/push or branch creation.

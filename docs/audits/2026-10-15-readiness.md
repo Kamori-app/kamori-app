@@ -2,7 +2,7 @@
 
 Работа находится в видимой локальной ветке `fix/audit-remediation`, baseline продолжения — `dc13f19`. Исходные [30 исправлений](2026-10-15-kamori.md) сохранены. Пользователь разрешил продолжить аудит и исправления после принятия лицензии Xcode через subagent-driven flow. [План](../superpowers/plans/2026-10-15-release-readiness.md), [решения и цена ошибки](2026-10-15-readiness-decisions.md), [матрица бизнес-инвариантов](2026-10-15-business-tests.md).
 
-Статус: **все восемь задач реализованы и приняты независимыми review**. Итоговые package/native gates прошли. Первый full acceptance со свежими образами дал28 PASS/1 FAIL из-за smoke date-window assumption; итоговое review, исправление и успешный повтор полного прогона ещё ожидаются. Общий аудит пока не закрыт.
+Статус: **завершено**. Все восемь задач и подтверждённые находки R01–R16 закрыты; первоначальные30 исправлений сохранены. Whole-continuation review и последующие scoped re-review приняты, открытых Critical/Important/Minor нет. Application source — `e3c86d5`; итоговый fresh all-three-image acceptance: **45/45 PASS, без retries**. Изменения находятся в текущем checkout ветки `fix/audit-remediation`.
 
 ## Подтверждённые находки продолжения
 
@@ -23,6 +23,7 @@
 | R13 | Mobile formatter показывает UTC вместо viewer-local для typed TZID значения | Mounted interval RED и verbatim base model/formatter probe:NY20:30 показан01:30 следующего дня; recurrence-review1-base-viewer-probe.log | Исправлено в89b24e5/341d976; task review/scoped rereview и final native gates PASS |
 | R14 | Invite redemption после membership cleanup удаления аккаунта оставляет активное членство удалённого recipient | Реальные authorize_session/production delete/redeem, точные PG blockers:delete=true/redeem=Redeemed/deleted=true/active_memberships=1; contention/late-invite-red3.log | Исправлено в07d1721; оба admission порядка/ownership controls, server162/core97, independent review PASS |
 | R15 | Runbook требует write-only DR credential, но actual replication проверяет destination inventory и hashes | Local MinIO scoped write-only principal:403/failed heartbeat; list/get/put principal:unchanged script PASS/ok heartbeat | Runbook исправлен; encrypted PITR/DR и independent review/rereview PASS |
+| R16 | Начавшийся sync Alice после account switch сохраняет её данные под ключом Bob и перезаписывает его materialization | Actual held append acknowledgement → unmount/lock/unlock Bob с другим key → release: Bob sentinel space42 заменён Alice task space41/seq1; Bob outbox и Alice state/outbox неизменны, exact snapshot assertion RED | Исправлено b85f70c;23 durability/43 full PASS, independent ADDRESSED; critical regression @smoke |
 
 Каждый production fix опирается на настоящий RED→GREEN; уже проходившие новые сценарии учтены как покрытие. Ошибки fixtures, подготовка Flutter/SPM и первоначальная проверка символов в неверном бинарнике не считаются product-дефектами. R06 исправляет frontend guard: backend уже проверял typed confirmation. R14 закрывает запись членства после cleanup удаления: последующая авторизация удалённого аккаунта уже отвергалась.
 
@@ -39,13 +40,13 @@
 | 7. Contention и admission | `07d1721` | [Отчёт](readiness-reports/2026-10-15-task-7.md), [PASS](readiness-reports/2026-10-15-task-7-review.md), [измерения](../../tests/release-readiness/contention-baseline.json): R14, оба delete/redeem порядка, preserved ownership controls, 300 транзакций и real 20s native timeout |
 | 8. PITR и blob DR | `0b1cc7f..25f0bec` | [Отчёт](readiness-reports/2026-10-15-task-8.md), [первое review](readiness-reports/2026-10-15-task-8-review.md), [rereview PASS](readiness-reports/2026-10-15-task-8-review-round-1.md); [runner](../../tests/release-readiness/restore/README.md), [измерения](../../tests/release-readiness/restore/evidence-2026-10-15.json), R15 и5 actual-daemon controls |
 
-Task4 проверяет committed state внутри Web Lock и отклоняет queued/stale work после account switch/unlock/unmount; general in-flight cancellation этим не заявлялась. Конкретный путь уже начавшегося network await→persistence и доставка browser-durability regressions в CI переданы итоговому review как непроверенные кандидаты. Также передан literal aggregate marker в одном reverse-order тесте Task7. Ни один из этих кандидатов заранее не объявлен исправленным или product-дефектом.
+Task4 проверяет committed state внутри Web Lock и отклоняет queued/stale work после account switch/unlock/unmount; general in-flight cancellation этим не заявлялась. Итоговый review подтвердил in-flight R16 настоящим distinct-key held-response RED. Доставка9 старых durability cases только через full соответствует принятому smoke/full split; новая critical регрессия уже выбрана @smoke по решению20. Aggregate marker Task7 теперь имеет actual query/assert. [Исправления](readiness-reports/2026-10-15-final-fix.md), [scoped rereview](readiness-reports/2026-10-15-final-review-round-1.md). [Полное review](readiness-reports/2026-10-15-final-review.md), [решения по всем12 declined items](readiness-reports/2026-10-15-final-review-disposition.md).
 
 Импорт сохраняет исходные UID/href/stream, неизвестные свойства, alarms и exception components через partial edit и conditional DAV PUT. Derived read-only recurrence metadata не заменяет raw ICS. Web/mobile показывают actual instance interval/content с series identity; Agenda использует недельное окно. PERIOD/RANGE сохранены и явно unsupported. Pinned системный Calendar API поддерживает RRULE без exception sets: для неподдерживаемого набора projection явно отказывает, очищает только проверенную owned copy и продолжает независимые коллекции. Исходные provider/storage errors и stack сохраняются; одновременно возвращается одна ошибка. Advanced exception authoring не добавлен.
 
 ## Итоговые package/native gates
 
-Проверен application source `07d1721`; native production inputs — `341d976`, последующие native изменения только test-only. Поздние изменения build inputs проверяются перед закрытием.
+Основные package gates выполнены на application source `07d1721`; native production inputs — `341d976`. Изменённый web повторно проверен на `e3c86d5`. Сравнение до финального source подтвердило только cfg(test) изменения core/server и неизменность остальных native/server production inputs; подробная provenance приведена в итоговых gates.
 
 | Gate | Фактический результат | Логи в /private/tmp/kamori-readiness-20261015 |
 |---|---|---|
@@ -58,7 +59,7 @@ Task4 проверяет committed state внутри Web Lock и отклоня
 | iOS production lib/main.dart host | Simulator build и3 XCTest PASS | final-ios-production-host.log, final-ios-production-tests.log/.xcresult |
 | iOS unsigned arm64 device build | 47 703 013 bytes; actual arm64 Runner и linked Rust framework,10 matching FRB/lease symbols;81.8s Xcode | final-ios-device-release.log, native-artifacts/ios-341d976.json |
 | Android real-FRB release | 102 725 051 bytes; actual ELF armv7/arm64/x86_64;219.3s Gradle | final-android-release.log, native-artifacts/android-341d976.json |
-| Fresh-image full browser acceptance | Первый запуск28 PASS/1 FAIL (smoke Agenda date assumption); `KAMORI_ACCEPTANCE_SKIP_BUILD=false` | final-acceptance.log |
+| Fresh-image full browser acceptance | e3c86d5:45/45 PASS/без retries; исходный28/29 и промежуточный43/43 сохранены | final-acceptance-final.log |
 
 APK SHA256: `8d6ac52e90c87fdc7aae3fd54cdcf8ab02f07a2afa48df6034bd5e2caa45443f`; iOS linked Rust framework: `410f441069c95a22816f353b53cb496cffcc7e04a086bafd4b9b2dc964c7d7fc`. APK сохранён в native-artifacts; Runner.app — в локальном mobile build. Успех относится к real-FRB define и scoped `scripts/with-ios-toolchain.sh`: Dart hook удаляет DEVELOPER_DIR, wrapper сохраняет выбранный Xcode27/SDK27 без глобального xcode-select.
 
@@ -82,4 +83,16 @@ Task8 review выявил и закрыл в `25f0bec` два дефекта с�
 
 Нативные сборки и simulator не доказывают физический background delivery, аппаратный power loss, platform secure storage/data protection, Android device runtime, signing/TestFlight или полную совместимость внешних DAV clients. Remote S3/TLS/retention/object lock/provider failover и production RPO/RTO требуют отдельного deployment exercise. Удалённый GitHub Ubuntu job локально не запускался. PERIOD/RANGE и OS exception-set projection остаются явно неподдерживаемыми возможностями, advanced authoring — post-MVP.
 
-Вывод проверок не объявляется warning-free: disclosed XCTest toolchain diagnostics, CocoaPods future-SPM notice, codegen INFO, пустые adapter chunks и ожидаемый ERROR отрицательного quota test переданы final review. Последний отличается от0 внутренних ошибок нагрузочного сценария. Глобальные Xcode settings, реальные credentials/данные и production не менялись. Существующие caches/images/build artifacts пользователя сохраняются; окончательная очистка относится только к созданным этим прогоном ресурсам.
+Вывод проверок не объявляется warning-free: disclosed XCTest toolchain diagnostics, CocoaPods future-SPM notice, codegen INFO, пустые adapter chunks и ожидаемый ERROR отрицательного quota test оценены final review как не отражающие подтверждённый functional defect. Последний отличается от0 внутренних ошибок нагрузочного сценария. Глобальные Xcode settings, реальные credentials/данные и production не менялись. Существующие caches/images/build artifacts пользователя сохраняются; окончательная очистка затронула только созданные этим прогоном ресурсы.
+
+## Итоговое review и закрытие
+
+На `cdca230` общее review подтвердило R16: поздний ответ уже начавшегося sync записывал Alice materialization в vault Bob. Исправление `b85f70c` связывает admitted work с исходными lifetime/scope/key, проверяет async persistence/auth границы, сохраняет обычный ack и идемпотентный retry. Старые9 и новые14 durability cases прошли; отдельные snapshots проверяют оба аккаунта с разными ключами, reopen и повтор того же client operation ID. Новая critical регрессия включена в PR `@smoke`; остальные full-only cases явно обозначены.
+
+В том же wave исправлены дата/выбор недели deployed smoke и фактическое измерение active-membership aggregate. Current-source full gate дал43/43. Scoped review нашло Minor N1: три catch-обработчика ещё отправляли generic obsolete error в глобальные notifications. По требованию исправить всё выполнен bounded follow-up `e3c86d5`: реальный UI RED→GREEN, ordinary-error/editor-rejection control,25 durability cases. Последний scoped review закрыл N1 без новых замечаний; новый fresh full gate дал45/45.
+
+[Полное исходное review](readiness-reports/2026-10-15-final-review.md), [единый отчёт исправлений](readiness-reports/2026-10-15-final-fix.md), [первое scoped review](readiness-reports/2026-10-15-final-review-round-1.md), [закрывающее review](readiness-reports/2026-10-15-final-review-round-2.md), [решения по12 исключённым утверждениям](readiness-reports/2026-10-15-final-review-disposition.md), [immutable image/container manifest](readiness-reports/2026-10-15-final-acceptance.json).
+
+Итоговые45 cases состоят из9 deployed-stack сценариев и36 mounted production-component сценариев с synthetic peers:25durability+7UI+4recurrence. Это не45 отдельных full-stack sync tests. Исторический28/29 failure и промежуточный43/43 PASS сохранены с точными revisions.
+
+После финальных проверок удалены только свои9 контейнеров,3 volumes, Compose network, runtime synthetic credentials и собственный выключенный simulator `375D769C-958C-47A3-BB70-C0EF711B60DD`; ownership проверен до удаления, оставшиеся inventories пусты. Task8 ранее удалил свой отдельный restore namespace. [Cleanup evidence](readiness-reports/2026-10-15-cleanup.json). Images, пользовательские caches/builds и private artifacts сохранены в `/private/tmp/kamori-readiness-20261015`. Все21 решения с ценой ошибки доступны в архиве; source/delivery branch не менялась.

@@ -4,7 +4,7 @@ Continuation baseline `dc13f1909cc9acff3e13d8fe849a26943efe17ce`; branch `fix/au
 
 ## Completed parent gates
 
-All commands below exited0. Rust uses1.97.1 and the dedicated PostgreSQL18.6 database; Bun1.3.14, Flutter3.47/Dart3.13, Xcode27.0(27A266a)/SDK27, installed simulator runtime iOS26.2. No global xcode-select changes.
+Commands in this completed package/native table exited0. Rust uses1.97.1 and the dedicated PostgreSQL18.6 database; Bun1.3.14, Flutter3.47/Dart3.13, Xcode27.0(27A266a)/SDK27, installed simulator runtime iOS26.2. No global xcode-select changes.
 
 | Command / boundary | Actual result | Log |
 |---|---|---|
@@ -40,8 +40,32 @@ Failure: `tests/acceptance/specs/smoke.spec.ts:98` creates an event on2030-01-02
 
 The29 cases consist of9 deployed-stack scenarios and20 mounted production-component scenarios using synthetic IPC/HTTP/authenticator peers (Task4 nine,Task5 seven,Task6 four). They must not all be described as full-stack encrypted synchronization tests.
 
+## Fresh full acceptance after the combined correction
+
+Source `b85f70c7ae3b12a7512d8e9104ebfb8b5a4df573`: **exit0,43 passed (1.4min), no retries**, `KAMORI_ACCEPTANCE_SKIP_BUILD=false`, all three images built and own stack recreated. Log `final-acceptance-corrected.log`; snapshots/report preserved in `acceptance-b85f70c-artifacts`; immutable image/container IDs matched and saved in `acceptance-b85f70c-images.json`. Cloud image remained byte-identical to the earlier runtime; web changed to `b1dd4a8b2799ee13ec94ac4de76ef328ca5559815415f9ddf78597d7144c71d2`, admin to `d2b1f034f87bc1124914538aba00fe7a411fa70e56705f52948037e04a394150`.
+
+The43 cases are9 deployed-stack scenarios and34 mounted production-component cases with synthetic peers:23durability (old9 +14new),7desktop/admin/invite UI,4recurrence. The new critical case is @smoke; current PR smoke selects3cases, while the original9durability cases and helper/auth cases remain full-only.
+
+Scoped review accepted C1/R16, I1 and M1 with no new Critical/Important breakage. It found MinorN1: three stale UI catches bypass the guarded notice path; at that b85 stage the bounded follow-up remained pending per decision21. It is completed at e3c86d5 below, followed by the successful current-image full run. [Scoped report](2026-10-15-final-review-round-1.md), [combined fix evidence](2026-10-15-final-fix.md).
+
+## Final frozen-source acceptance and closure
+
+Source `e3c86d5f7f5a690c14d686bac0d045907d009917`: **exit0,45 passed (1.4min), retries0**, `KAMORI_ACCEPTANCE_SKIP_BUILD=false`. All three image builds ran; only the owned project was reset/recreated. Current immutable image IDs were matched to the actual running containers before cleanup and committed in [final-acceptance.json](2026-10-15-final-acceptance.json). Log `final-acceptance-final.log`, full artifacts `acceptance-e3c86d5-artifacts`.
+
+| Runtime image | Immutable ID |
+|---|---|
+|cloud|2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981|
+|web|98b74e6cb6e33f4f3c367564caf31b1374cc09a0167ee048afa89a02893ab9df|
+|admin|d1ab3cf0118c847ba50085a58d8601c7f8a38456b10341c3362153c2cd0051fa|
+
+Population:9 deployed scenarios and36 mounted component scenarios with synthetic peers (25durability/7UI/4recurrence). The new N1 late-notification test and current-error/editor-rejection control pass; C1's critical @smoke regression remains selected. [Final scoped review](2026-10-15-final-review-round-2.md) closes N1 with no new issue. All original final findings C1/I1/M1 were accepted in round1; no confirmed finding remains open.
+
+Final input comparison `341d976..e3c86d5` for mobile/core/native wrapper/Cargo/FRB configuration finds only `packages/crypto-core-lib/src/frb_api/credential_tests.rs`, an existing cfg(test)-only change. Server/admin/desktop comparison `07d1721..e3c86d5` finds only the cfg(test) readiness marker assertion. Native/server production inputs therefore retain the earlier parent-gate provenance; changed web inputs have current check/74units/25durability and final production image/full-runtime evidence. No unrelated native/Go/restore suite was repeated.
+
+[Cleanup](2026-10-15-cleanup.json): after ownership preflight, removed exact9 own containers/3 volumes/project network, synthetic runtime files and the dedicated shutdown simulator. Independent final inventories for parent and restore namespaces are empty. Existing images, user caches/build outputs and private reports are preserved. Branch stays `fix/audit-remediation`; protected original ref stays8124892. All21 ledger rulings are archived [verbatim](2026-10-15-rulings.md).
+
 ## Limits and final status
 
-Final whole-continuation review, any combined fix wave, affected verification and successful full browser rerun remain pending. Task8 actual encrypted PITR/DR evidence is separately committed in its harness evidence/report; it is not a remote-provider or application-sync certification. No fresh line/branch coverage measured; retain historical revision-qualified snapshots.
+Whole-continuation review, combined corrections, bounded N1 follow-up, both scoped reviews and final frozen-source full acceptance are complete; no confirmed finding remains open. Task8 actual encrypted PITR/DR evidence is separately committed in its harness evidence/report; it is not a remote-provider or application-sync certification. No fresh line/branch coverage measured; retain historical revision-qualified snapshots.
 
-Unsigned iOS packaging is not a signed IPA or physical execution. Android packaging is not Android device execution. Scheduler delivery, physical power loss, secure-store/data-protection behavior, external DAV-client matrix, signing/TestFlight, remote production DR/RPO/RTO remain external release exercises. Reported existing toolchain/dependency notices, codegen INFO and empty Svelte chunks are triaged in final review. User caches/build artifacts/images are retained; only this run's exact resources may be removed.
+Unsigned iOS packaging is not a signed IPA or physical execution. Android packaging is not Android device execution. Scheduler delivery, physical power loss, secure-store/data-protection behavior, external DAV-client matrix, signing/TestFlight, remote production DR/RPO/RTO remain external release exercises. Reported existing toolchain/dependency notices, codegen INFO and empty Svelte chunks are triaged in final review. User caches/build artifacts/images are retained; only this run's exact resources were removed.
