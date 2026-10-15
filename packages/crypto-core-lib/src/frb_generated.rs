@@ -370,6 +370,8 @@ fn wire__crate__frb_api__mobile_configure_sync_impl(
             let api_sqlite_key = <[u8; 32]>::sse_decode(&mut deserializer);
             let api_device =
                 <Option<crate::frb_api::types::MobileDeviceSecrets>>::sse_decode(&mut deserializer);
+            let api_username = <String>::sse_decode(&mut deserializer);
+            let api_fresh_session = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
@@ -381,6 +383,8 @@ fn wire__crate__frb_api__mobile_configure_sync_impl(
                             api_access_token,
                             api_sqlite_key,
                             api_device,
+                            api_username,
+                            api_fresh_session,
                         )
                         .await?;
                         std::result::Result::Ok(output_ok)
@@ -1653,11 +1657,13 @@ impl SseDecode for crate::frb_api::types::MobileRedeemedInvite {
 impl SseDecode for crate::frb_api::types::MobileSyncConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_username = <String>::sse_decode(deserializer);
         let mut var_cloudBaseUrl = <String>::sse_decode(deserializer);
         let mut var_sqlitePath = <String>::sse_decode(deserializer);
         let mut var_accessToken = <String>::sse_decode(deserializer);
         let mut var_sqliteKey = <[u8; 32]>::sse_decode(deserializer);
         return crate::frb_api::types::MobileSyncConfig {
+            username: var_username,
             cloud_base_url: var_cloudBaseUrl,
             sqlite_path: var_sqlitePath,
             access_token: var_accessToken,
@@ -2323,6 +2329,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileRedeemedInvi
 impl flutter_rust_bridge::IntoDart for crate::frb_api::types::MobileSyncConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.username.into_into_dart().into_dart(),
             self.cloud_base_url.into_into_dart().into_dart(),
             self.sqlite_path.into_into_dart().into_dart(),
             self.access_token.into_into_dart().into_dart(),
@@ -2677,6 +2684,7 @@ impl SseEncode for crate::frb_api::types::MobileRedeemedInvite {
 impl SseEncode for crate::frb_api::types::MobileSyncConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.username, serializer);
         <String>::sse_encode(self.cloud_base_url, serializer);
         <String>::sse_encode(self.sqlite_path, serializer);
         <String>::sse_encode(self.access_token, serializer);

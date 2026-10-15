@@ -43,6 +43,7 @@ void main() {
       final bridge = MockRustBridgeApi();
 
       await bridge.configureSync(
+        username: 'alice',
         cloudBaseUrl: 'http://127.0.0.1:3000',
         sqlitePath: '.kamori/mobile-cache.sqlite3',
         accessToken: 'session',

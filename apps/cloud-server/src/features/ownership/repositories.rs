@@ -342,7 +342,7 @@ pub(crate) async fn accept_offer(
                 JOIN users recipient ON recipient.id = target.user_id
                 WHERE space.id = $1 AND space.owner_user_id = $2 AND space.status = 'active'
                   AND recipient.deleted_at IS NULL AND recipient.suspended_at IS NULL
-                FOR UPDATE OF space, recipient
+                FOR UPDATE OF space
                 "#,
             )
             .bind(resource_id)
@@ -357,11 +357,25 @@ pub(crate) async fn accept_offer(
                 // Lock both account counters while the space owner row is
                 // locked. Operation appends cannot charge either side midway
                 // through a transfer.
-                sqlx::query("SELECT id FROM users WHERE id IN ($1, $2) ORDER BY id FOR UPDATE")
-                    .bind(current_owner_id)
-                    .bind(actor_id)
-                    .fetch_all(&mut *tx)
-                    .await?;
+                sqlx::query(
+                    "SELECT id FROM users WHERE id IN ($1, $2) ORDER BY id FOR NO KEY UPDATE",
+                )
+                .bind(current_owner_id)
+                .bind(actor_id)
+                .fetch_all(&mut *tx)
+                .await?;
+                // Eligibility was read before account locks; check again after
+                // waiting for suspension/deletion, retaining the row locks.
+                let eligible: bool = sqlx::query_scalar(
+                    "SELECT deleted_at IS NULL AND suspended_at IS NULL FROM users WHERE id = $1",
+                )
+                .bind(actor_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if !eligible {
+                    tx.rollback().await?;
+                    return Ok(AcceptOfferResult::NoLongerValid);
+                }
                 let target_bytes: i64 =
                     sqlx::query_scalar("SELECT blob_storage_bytes FROM users WHERE id = $1")
                         .bind(actor_id)

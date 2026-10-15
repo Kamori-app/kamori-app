@@ -167,6 +167,20 @@ pub(crate) async fn delete_user(
     use crate::features::common::internal_error;
     let user_id = binding.user_id;
     crate::features::auth::repositories::lock_account_security_mutation(tx, user_id).await?;
+    // Freeze creation/ownership eligibility before discovering the complete
+    // cascade set. Shared memberships are also mutated later in this operation.
+    sqlx::query(
+        "SELECT w.id FROM workspaces w WHERE w.owner_user_id = $1 OR EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id = w.id AND m.user_id = $1) ORDER BY w.id FOR UPDATE OF w",
+    ).bind(user_id).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    let locked_spaces: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT s.id FROM security_spaces s WHERE s.owner_user_id = $1 OR EXISTS (SELECT 1 FROM workspaces w WHERE w.id = s.workspace_id AND w.owner_user_id = $1) OR EXISTS (SELECT 1 FROM security_space_members m WHERE m.space_id = s.id AND m.user_id = $1) ORDER BY s.id FOR UPDATE OF s",
+    ).bind(user_id).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    // All space locks precede every per-row accounting trigger. Sort owner
+    // counters too: a workspace cascade can include multiple owners.
+    sqlx::query(
+        "SELECT u.id FROM users u WHERE u.id = $1 OR u.id IN (SELECT s.owner_user_id FROM security_spaces s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ANY($2) AND (s.owner_user_id = $1 OR w.owner_user_id = $1)) ORDER BY u.id FOR NO KEY UPDATE OF u",
+    ).bind(user_id).bind(&locked_spaces).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    // Re-evaluate blockers under the retained workspace and space locks.
     let blockers = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -235,7 +249,7 @@ pub(crate) async fn delete_user(
     sqlx::query(
         r#"
         DELETE FROM security_spaces space
-        WHERE space.owner_user_id = $1
+        WHERE space.id = ANY($2) AND space.owner_user_id = $1
           AND NOT EXISTS (
               SELECT 1 FROM security_space_members member
               WHERE member.space_id = space.id
@@ -244,6 +258,7 @@ pub(crate) async fn delete_user(
         "#,
     )
     .bind(user_id)
+    .bind(&locked_spaces)
     .execute(&mut **tx)
     .await
     .map_err(internal_error)?;

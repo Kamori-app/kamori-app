@@ -205,6 +205,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   }) async {
     await _ensureInitialized();
     await frb_api.mobileConfigureSync(
@@ -214,6 +216,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
       accessToken: accessToken,
       sqliteKey: _asFixed32Bytes('sqliteKey', sqliteKey),
       device: device == null ? null : _toFrbDevice(device),
+      username: username,
+      freshSession: freshSession,
     );
   }
 

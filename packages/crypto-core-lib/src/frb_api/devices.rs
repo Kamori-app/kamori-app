@@ -105,8 +105,25 @@ pub(super) async fn mobile_provision_device_and_spaces_impl(
         },
     )
     .map_err(|error| error.to_string())?;
+    // Restore/configure has already anchored the runtime to the account vault.
+    // A caller's persisted access token can lag the durable native generation.
+    let configured = super::state::MOBILE_BRIDGE_RUNTIME
+        .lock()
+        .await
+        .last_config
+        .clone();
+    let mut current_access_token = if let Some(config) = configured {
+        if config.cloud_base_url != cloud_base_url {
+            return Err("configured mobile endpoint does not match provisioning endpoint".into());
+        }
+        super::bridge::mobile_runner()
+            .await?
+            .current_access_token()
+            .await
+    } else {
+        access_token
+    };
     let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
-    let mut current_access_token = access_token;
     if let Some(enrollment_token) = device_enrollment_token {
         let register_body = encode_msgpack(&MobileRegisterDeviceRequest {
             enrollment_token,

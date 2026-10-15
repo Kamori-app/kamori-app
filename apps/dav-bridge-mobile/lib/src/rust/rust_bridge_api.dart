@@ -67,6 +67,8 @@ abstract class RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   });
 
   /// Triggers one explicit sync cycle and returns number of synced items.

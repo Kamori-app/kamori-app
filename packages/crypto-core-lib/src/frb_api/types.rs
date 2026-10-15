@@ -406,6 +406,7 @@ pub struct MobileRedeemedInvite {
 
 #[derive(Clone, Debug)]
 pub struct MobileSyncConfig {
+    pub username: String,
     pub cloud_base_url: String,
     pub sqlite_path: String,
     pub access_token: String,

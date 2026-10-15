@@ -156,6 +156,8 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   int unregisterCollectionKeyCalls = 0;
   int moveCollectionToTrashCalls = 0;
   int configureCalls = 0;
+  final List<bool> freshConfigurations = [];
+  Future<void> Function(String username, bool fresh)? beforeConfigure;
   int provisionCalls = 0;
   List<PimItem> materializedItems = [];
   Future<void> Function()? onSync;
@@ -250,10 +252,14 @@ class _FakeRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   }) async {
     if (sqliteKey.length != 32) {
       throw ArgumentError('invalid SQLite key');
     }
+    await beforeConfigure?.call(username, freshSession);
+    freshConfigurations.add(freshSession);
     configureCalls += 1;
     lastAccessToken = accessToken;
   }
@@ -762,7 +768,7 @@ void main() {
 
       final state = container.read(bridgeControllerProvider);
       expect(state.isAuthenticated, isTrue);
-      expect(bridge.configureCalls, 1);
+      expect(bridge.freshConfigurations, [true, false]);
       expect(bridge.lastAccessToken, 'session-1');
       expect(scheduleCalls, 1);
     });
@@ -1197,7 +1203,7 @@ void main() {
       await controller.handleLifecycleState(AppLifecycleState.paused);
       await controller.handleLifecycleState(AppLifecycleState.resumed);
 
-      expect(bridge.configureCalls, 2);
+      expect(bridge.freshConfigurations, [true, false, false]);
     });
 
     test('background sync toggle uses provided callbacks', () async {
@@ -1497,6 +1503,29 @@ void backgroundTests() {
           messages.join('\n'),
           contains(
               'background projection will retry: PlatformException(provider-unavailable'));
+    });
+
+    test('cold background imports the scoped credential before configure',
+        () async {
+      bridge.beforeConfigure = (username, fresh) async {
+        expect(username, 'alice');
+        expect(fresh, isFalse);
+        expect(await bridge.exportRefreshToken(), 'before');
+        expect(await bridge.exportRefreshRotationRequestId(), 'before-request');
+      };
+      expect(await run(), isTrue);
+      final stored = await tokens.readCredential(cloudBaseUrl: base);
+      expect(stored?.refreshToken, 'after');
+      expect(stored?.rotationRequestId, 'after-request');
+    });
+
+    test('missing background credential preserves other native session',
+        () async {
+      await tokens.delete(cloudBaseUrl: base);
+      expect(await run(), isFalse);
+      expect(bridge.configureCalls, 0);
+      expect(bridge.syncCalls, 0);
+      expect(osCalls, isEmpty);
     });
 
     test('rejects mismatching snapshot and vault before sync or projection',

@@ -842,6 +842,7 @@ class BridgeController extends Notifier<BridgeState> {
       accessToken: token,
       sqliteKey: await _localCacheKeyStorage.readOrCreate(),
       device: vault.device,
+      username: username,
     );
 
     for (final collection in state.collections) {
@@ -893,6 +894,15 @@ class BridgeController extends Notifier<BridgeState> {
         accountMasterKey: List<int>.from(accountMasterKey),
         device: device,
       ),
+    );
+    await _rustBridge.configureSync(
+      cloudBaseUrl: state.cloudBaseUrl,
+      sqlitePath: state.sqlitePath,
+      accessToken: accessToken,
+      sqliteKey: await _localCacheKeyStorage.readOrCreate(),
+      device: device,
+      username: username,
+      freshSession: true,
     );
     final workingMasterKey = List<int>.from(accountMasterKey);
     late final ProvisionResult provisioned;

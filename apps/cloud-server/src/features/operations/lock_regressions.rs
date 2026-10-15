@@ -1,0 +1,518 @@
+// Exercise complete production transactions, staged by observed PostgreSQL waits.
+use crate::features::{
+    auth::repositories::{
+        AccountRecoveryReset, AuthenticationBinding, apply_account_recovery_reset,
+        create_account_recovery_attempt,
+    },
+    cas::repositories::{StoreBlobResult, store_blob},
+    spaces::{
+        dto::{DeviceKeyPackage, MemberRecoveryKeyPackage},
+        repositories::{MemberRotation, RevokeMemberResult, revoke_member_and_rotate},
+    },
+};
+use std::time::Duration;
+
+async fn named_pool(label: &str) -> PgPool {
+    let url = std::env::var("KAMORI_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.application_name(label))
+        .await
+        .unwrap()
+}
+async fn waiting(pool: &PgPool, label: &str) {
+    tokio::time::timeout(Duration::from_secs(10),async {
+        loop {
+            let blocked:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND cardinality(pg_blocking_pids(pid))>0 AND EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=pg_stat_activity.pid AND NOT l.granted AND l.locktype IN ('transactionid','advisory','tuple')))").bind(label).fetch_one(pool).await.unwrap();
+            if blocked {break;}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap_or_else(|_| panic!("production transaction {label} must reach observed lock wait"));
+}
+async fn clean(pool: &PgPool, owner: Uuid) {
+    sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id=$1")
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn final_rotation_and_recovery_serialize_in_both_orders() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    for recovery_first in [true, false] {
+        let owner = Uuid::new_v4();
+        let (_, envelope) = operation_fixture(&pool, owner).await;
+        append_operation(&pool, owner, &envelope, 1_000_000, 1_000_000)
+            .await
+            .unwrap();
+        let token = *Uuid::new_v4().as_bytes();
+        let mut token_hash = [0; 32];
+        token_hash[..16].copy_from_slice(&token);
+        create_account_recovery_attempt(
+            &pool,
+            &token_hash,
+            owner,
+            0,
+            time::OffsetDateTime::now_utc() + time::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO refresh_tokens(id,user_id,token_hash,expires_at) VALUES($1,$2,$3,now()+interval '1 day')")
+            .bind(Uuid::new_v4()).bind(owner).bind(token_hash.as_slice()).execute(&pool).await.unwrap();
+        let space_id = envelope.space_id;
+        let rotate_label = format!("rotate-{owner}");
+        let recover_label = format!("recover-{owner}");
+        let rotate_pool = named_pool(&rotate_label).await;
+        let recover_pool = named_pool(&recover_label).await;
+        let mut gate = pool.begin().await.unwrap();
+        sqlx::query("SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE")
+            .bind(owner)
+            .execute(&mut *gate)
+            .await
+            .unwrap();
+        let rotate = async move {
+            let mut snapshot = envelope.clone();
+            snapshot.key_epoch = 2;
+            snapshot.envelope_kind = EnvelopeKind::Snapshot;
+            snapshot.client_op_id = Uuid::new_v4();
+            snapshot.sign(&SigningKey::from_bytes(&[17; 32]));
+            revoke_member_and_rotate(
+                &rotate_pool,
+                MemberRotation {
+                    actor_id: owner,
+                    space_id: envelope.space_id,
+                    target_user_id: None,
+                    expected_key_epoch: 1,
+                    new_key_epoch: 2,
+                    base_space_seq: 1,
+                    rotation_id: Uuid::new_v4(),
+                    new_encrypted_metadata: b"metadata",
+                    packages: &[DeviceKeyPackage {
+                        device_id: envelope.author_device_id,
+                        key_epoch: 2,
+                        encrypted_key_package: vec![1],
+                    }],
+                    recovery_packages: &[MemberRecoveryKeyPackage {
+                        user_id: owner,
+                        key_epoch: 2,
+                        encrypted_key_package: vec![2; 49],
+                    }],
+                    snapshots: &[snapshot],
+                    quarantined_streams: &[],
+                    request_hash: &[8; 32],
+                },
+            )
+            .await
+        };
+        let recover = async move {
+            apply_account_recovery_reset(
+                &recover_pool,
+                AccountRecoveryReset {
+                    user_id: owner,
+                    token_hash: &token_hash,
+                    request_hash: &[7; 32],
+                    opaque_record: &[3],
+                    encrypted_master_key: &[4; 49],
+                },
+            )
+            .await
+        };
+        let (rotation, recovery) = if recovery_first {
+            let recovery = tokio::spawn(recover);
+            waiting(&pool, &recover_label).await;
+            let rotation = tokio::spawn(rotate);
+            waiting(&pool, &rotate_label).await;
+            (rotation, recovery)
+        } else {
+            let rotation = tokio::spawn(rotate);
+            waiting(&pool, &rotate_label).await;
+            let recovery = tokio::spawn(recover);
+            waiting(&pool, &recover_label).await;
+            (rotation, recovery)
+        };
+        gate.commit().await.unwrap();
+        let (rotation, recovery) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(rotation, recovery)
+        })
+        .await
+        .unwrap();
+        let rotation = rotation.unwrap();
+        let recovery = recovery.unwrap();
+        let totals = usage(&pool, owner).await;
+        let generation: i64 = sqlx::query_scalar("SELECT auth_generation FROM users WHERE id=$1")
+            .bind(owner)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let active: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM devices WHERE user_id=$1 AND status='active'")
+                .bind(owner)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let epoch: i32 =
+            sqlx::query_scalar("SELECT current_key_epoch FROM security_spaces WHERE id=$1")
+                .bind(space_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let sessions: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM refresh_tokens WHERE user_id=$1 AND revoked_at IS NULL",
+        )
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        clean(&pool, owner).await;
+        recovery.expect("full recovery must not deadlock");
+        let rotation = rotation.expect("snapshot rotation must not deadlock");
+        if recovery_first {
+            assert!(matches!(
+                rotation,
+                RevokeMemberResult::PackageCoverageMismatch
+            ));
+            assert_eq!(epoch, 1);
+            assert_eq!(totals, (282, 282));
+        } else {
+            assert!(matches!(rotation, RevokeMemberResult::Revoked));
+            assert_eq!(epoch, 2);
+            assert_eq!(totals, (564, 564));
+        }
+        assert_eq!(sessions, 0);
+        assert_eq!(generation, 1);
+        assert_eq!(active, 0);
+    }
+}
+
+#[tokio::test]
+async fn final_blob_reservation_and_ownership_accept_serialize() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let old = Uuid::new_v4();
+    let recipient = Uuid::new_v4();
+    let (_, from) = operation_fixture(&pool, old).await;
+    let (_, to) = operation_fixture(&pool, recipient).await;
+    append_operation(&pool, old, &from, 1_000_000, 1_000_000)
+        .await
+        .unwrap();
+    store_blob(
+        &pool,
+        old,
+        from.space_id,
+        Uuid::new_v4(),
+        &[3; 32],
+        512,
+        1_000_000,
+    )
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO security_space_members(id,space_id,user_id,role,key_epoch) VALUES($1,$2,$3,'editor',1)").bind(Uuid::new_v4()).bind(from.space_id).bind(recipient).execute(&pool).await.unwrap();
+    let offer = match create_offer(
+        &pool,
+        old,
+        OwnershipResourceKind::SecuritySpace,
+        from.space_id,
+        recipient,
+    )
+    .await
+    .unwrap()
+    {
+        CreateOfferResult::Created(offer) => offer,
+        _ => panic!("offer"),
+    };
+    let blob_label = format!("blob-{old}");
+    let accept_label = format!("accept-{old}");
+    let blob_pool = named_pool(&blob_label).await;
+    let accept_pool = named_pool(&accept_label).await;
+    let mut gate = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,731))")
+        .bind(recipient.to_string())
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let blob = tokio::spawn(async move {
+        store_blob(
+            &blob_pool,
+            recipient,
+            to.space_id,
+            Uuid::new_v4(),
+            &[5; 32],
+            1024,
+            1_000_000,
+        )
+        .await
+    });
+    waiting(&pool, &blob_label).await;
+    let accept = tokio::spawn(async move {
+        accept_offer(
+            &accept_pool,
+            recipient,
+            offer.transfer_id,
+            1_000_000,
+            1_000_000,
+        )
+        .await
+    });
+    waiting(&pool, &accept_label).await;
+    gate.commit().await.unwrap();
+    let (blob, accept) = tokio::time::timeout(Duration::from_secs(15), async {
+        tokio::join!(blob, accept)
+    })
+    .await
+    .unwrap();
+    let old_usage = usage(&pool, old).await;
+    let new_usage = usage(&pool, recipient).await;
+    let blob_usage: i64 = sqlx::query_scalar("SELECT blob_storage_bytes FROM users WHERE id=$1")
+        .bind(recipient)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    clean(&pool, old).await;
+    clean(&pool, recipient).await;
+    assert!(matches!(
+        blob.unwrap().expect("blob must not deadlock"),
+        StoreBlobResult::NeedsUpload(_)
+    ));
+    assert!(matches!(
+        accept.unwrap().expect("accept must not deadlock"),
+        AcceptOfferResult::Accepted
+    ));
+    assert_eq!(old_usage, (0, 0));
+    assert_eq!(new_usage.0, new_usage.1);
+    assert!(new_usage.0 > 0);
+    assert_eq!(blob_usage, 1536);
+}
+
+#[tokio::test]
+async fn final_multispace_account_delete_and_append_serialize() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let (workspace, mut envelope) = operation_fixture(&pool, owner).await;
+    let second = Uuid::new_v4();
+    sqlx::query("INSERT INTO security_spaces(id,workspace_id,owner_user_id,created_by,encrypted_metadata) VALUES($1,$2,$3,$3,$4)").bind(second).bind(workspace).bind(owner).bind(vec![1_u8]).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO security_space_members(id,space_id,user_id,role,key_epoch) VALUES($1,$2,$3,'owner',1)").bind(Uuid::new_v4()).bind(second).bind(owner).execute(&pool).await.unwrap();
+    append_operation(&pool, owner, &envelope, 1_000_000, 1_000_000)
+        .await
+        .unwrap();
+    let first = envelope.space_id;
+    envelope.space_id = second;
+    envelope.client_op_id = Uuid::new_v4();
+    envelope.sign(&SigningKey::from_bytes(&[17; 32]));
+    let append_label = format!("append-delete-{owner}");
+    let delete_label = format!("delete-{owner}");
+    let append_pool = named_pool(&append_label).await;
+    let delete_pool = named_pool(&delete_label).await;
+    // Pause the actual first row deletion after its accounting BEFORE trigger.
+    // This test-only trigger makes the old row-at-a-time order deterministic.
+    let trigger = format!("zz_delete_gate_{}", owner.simple());
+    let gate_key = i64::from_be_bytes(owner.as_bytes()[..8].try_into().unwrap());
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.owner_user_id = '{}'::uuid THEN PERFORM pg_advisory_xact_lock(hashtextextended(OLD.id::text,919)); PERFORM pg_advisory_xact_lock({gate_key}); END IF; RETURN OLD; END; $$; CREATE TRIGGER {trigger} BEFORE DELETE ON security_spaces FOR EACH ROW EXECUTE FUNCTION {trigger}();",owner))).execute(&pool).await.unwrap();
+    // Gate the original first space; the appender targets the other space.
+    let mut gate = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(gate_key)
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let delete = tokio::spawn(async move {
+        let mut tx = delete_pool.begin().await.unwrap();
+        let result = crate::features::users::repositories::delete_user(
+            &mut tx,
+            AuthenticationBinding {
+                user_id: owner,
+                generation: 0,
+                session_id: None,
+            },
+        )
+        .await;
+        if result.is_ok() {
+            tx.commit().await.unwrap();
+        } else {
+            tx.rollback().await.unwrap();
+        }
+        result
+    });
+    waiting(&pool, &delete_label).await;
+    let mut probe = pool.begin().await.unwrap();
+    let first_not_deleting: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1,919))")
+            .bind(first.to_string())
+            .fetch_one(&mut *probe)
+            .await
+            .unwrap();
+    probe.rollback().await.unwrap();
+    envelope.space_id = if first_not_deleting { first } else { second };
+    envelope.sign(&SigningKey::from_bytes(&[17; 32]));
+    let append = tokio::spawn(async move {
+        append_operation(&append_pool, owner, &envelope, 1_000_000, 1_000_000).await
+    });
+    waiting(&pool, &append_label).await;
+    gate.commit().await.unwrap();
+    let (append, delete) = tokio::time::timeout(Duration::from_secs(15), async {
+        tokio::join!(append, delete)
+    })
+    .await
+    .unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP TRIGGER {trigger} ON security_spaces; DROP FUNCTION {trigger}();"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let totals = usage(&pool, owner).await;
+    let deleted: bool = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM users WHERE id=$1")
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    clean(&pool, owner).await;
+    assert!(
+        delete
+            .unwrap()
+            .expect("bulk account delete must not deadlock")
+    );
+    assert!(matches!(
+        append.unwrap().expect("append must not deadlock"),
+        AppendResult::Accepted(_) | AppendResult::AccessDeniedOrStaleEpoch
+    ));
+    assert!(deleted);
+    assert_eq!(totals, (0, 0));
+}
+
+#[tokio::test]
+async fn final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease() {
+    let Some(admin) = test_pool().await else {
+        return;
+    };
+    // Maintenance deliberately scans its entire database: isolate every row and
+    // queued object in a synthetic schema, never the controller's shared fixtures.
+    let schema = format!("maintenance_{}", Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let url = std::env::var("KAMORI_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let options = options.options([("search_path", schema.as_str())]);
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options.clone())
+        .await
+        .unwrap();
+    MIGRATOR.run(&pool).await.unwrap();
+    let a = Uuid::new_v4();
+    let b = Uuid::new_v4();
+    let (workspace, first) = operation_fixture(&pool, a).await;
+    let (_, second) = operation_fixture(&pool, b).await;
+    for (owner, envelope) in [(a, &first), (b, &second)] {
+        append_operation(&pool, owner, envelope, 1_000_000, 1_000_000)
+            .await
+            .unwrap();
+        store_blob(
+            &pool,
+            owner,
+            envelope.space_id,
+            Uuid::new_v4(),
+            &[4; 32],
+            512,
+            1_000_000,
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE security_spaces SET status='deleted',deleted_at=now()-interval '31 days' WHERE id=$1").bind(envelope.space_id).execute(&pool).await.unwrap();
+    }
+    let live = Uuid::new_v4();
+    let blob = Uuid::new_v4();
+    sqlx::query("INSERT INTO security_spaces(id,workspace_id,owner_user_id,created_by,encrypted_metadata) VALUES($1,$2,$3,$3,$4)").bind(live).bind(workspace).bind(a).bind(vec![1_u8]).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO security_space_members(id,space_id,user_id,role,key_epoch) VALUES($1,$2,$3,'owner',1)").bind(Uuid::new_v4()).bind(live).bind(a).execute(&pool).await.unwrap();
+    store_blob(&pool, a, live, blob, &[5; 32], 1024, 1_000_000)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE space_blobs SET created_at=now()-interval '25 hours',upload_lease_until=now()-interval '1 hour' WHERE id=$1").bind(blob).execute(&pool).await.unwrap();
+    let retry_label = format!("purge-retry-{a}");
+    let purge_label = format!("purge-{a}");
+    let retry_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.clone().application_name(&retry_label))
+        .await
+        .unwrap();
+    let purge_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.application_name(&purge_label))
+        .await
+        .unwrap();
+    let mut state = crate::platform::test_support::test_state();
+    state.pool = purge_pool.clone();
+    let mut gate = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,731))")
+        .bind(a.to_string())
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    // Upload retains the active space SHARE lock while waiting for quota731.
+    let retry = tokio::spawn(async move {
+        store_blob(&retry_pool, a, live, blob, &[5; 32], 1024, 1_000_000).await
+    });
+    waiting(&admin, &retry_label).await;
+    let purge =
+        tokio::spawn(async move { crate::platform::maintenance::prepare_deletions(&state).await });
+    waiting(&admin, &purge_label).await;
+    gate.commit().await.unwrap();
+    let (retry, purge) = tokio::time::timeout(Duration::from_secs(15), async {
+        tokio::join!(retry, purge)
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        retry.unwrap().unwrap(),
+        StoreBlobResult::NeedsUpload(_)
+    ));
+    purge
+        .unwrap()
+        .expect("mixed-owner cleanup and upload retry serialize");
+    assert_eq!(usage(&pool, a).await, (0, 0));
+    assert_eq!(usage(&pool, b).await, (0, 0));
+    let counters: Vec<i64> = sqlx::query_scalar(
+        "SELECT blob_storage_bytes FROM users WHERE id IN ($1,$2) ORDER BY blob_storage_bytes",
+    )
+    .bind(a)
+    .bind(b)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(counters, vec![0, 1024]);
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM object_deletion_queue")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(queued, 2);
+    let renewed: bool =
+        sqlx::query_scalar("SELECT upload_lease_until>now() FROM space_blobs WHERE id=$1")
+            .bind(blob)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(renewed);
+    purge_pool.close().await;
+    pool.close().await;
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&admin)
+        .await
+        .unwrap();
+}

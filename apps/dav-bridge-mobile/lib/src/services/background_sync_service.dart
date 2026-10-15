@@ -55,23 +55,25 @@ Future<bool> runBackgroundSync({
         (snapshot.username != null && vault.username != snapshot.username)) {
       return false;
     }
+    final refreshCredential = await tokenStorage.readCredential(
+      cloudBaseUrl: snapshot.cloudBaseUrl,
+    );
+    if (refreshCredential == null) {
+      return false;
+    }
+    final refreshToken = refreshCredential.refreshToken;
+    await bridge.importRefreshToken(
+      refreshToken: refreshCredential.refreshToken,
+      rotationRequestId: refreshCredential.rotationRequestId,
+    );
     await bridge.configureSync(
       cloudBaseUrl: snapshot.cloudBaseUrl,
       sqlitePath: snapshot.sqlitePath,
       accessToken: snapshot.accessToken,
       sqliteKey: await cacheKeyStorage.readOrCreate(),
       device: vault.device,
+      username: vault.username,
     );
-    final refreshCredential = await tokenStorage.readCredential(
-      cloudBaseUrl: snapshot.cloudBaseUrl,
-    );
-    final refreshToken = refreshCredential?.refreshToken;
-    if (refreshCredential != null) {
-      await bridge.importRefreshToken(
-        refreshToken: refreshCredential.refreshToken,
-        rotationRequestId: refreshCredential.rotationRequestId,
-      );
-    }
     for (final collection in snapshot.collections) {
       await bridge.registerCollectionKey(
         collectionId: collection.id,

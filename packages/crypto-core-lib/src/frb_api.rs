@@ -234,6 +234,7 @@ pub async fn mobile_redeem_invite_code(
 }
 
 #[flutter_rust_bridge::frb]
+#[allow(clippy::too_many_arguments)]
 pub async fn mobile_configure_sync(
     session: crate::frb_generated::RustOpaque<MobileSessionLease>,
     cloud_base_url: String,
@@ -241,6 +242,8 @@ pub async fn mobile_configure_sync(
     access_token: String,
     sqlite_key: [u8; 32],
     device: Option<MobileDeviceSecrets>,
+    username: String,
+    fresh_session: bool,
 ) -> Result<(), String> {
     with_mobile_session(
         session,
@@ -250,6 +253,8 @@ pub async fn mobile_configure_sync(
             access_token,
             sqlite_key,
             device,
+            username,
+            fresh_session,
         ),
     )
     .await?
@@ -448,4 +453,9 @@ mod session_lease_tests {
         waiting_native_call.await; // Returns unit, never an undeliverable new Arc.
         drop(acquire().await);
     }
+}
+
+#[cfg(test)]
+mod credential_tests {
+    include!("frb_api/credential_tests.rs");
 }

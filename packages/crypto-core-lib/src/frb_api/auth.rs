@@ -26,7 +26,10 @@ async fn execute_mobile_opaque_login_round(
     totp_code: Option<String>,
 ) -> Result<MobileLoginResult, String> {
     let http = mobile_http_client()?;
-    if let Some(code) = totp_code.as_deref().map(str::trim).filter(|code| !code.is_empty())
+    if let Some(code) = totp_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
         && let Some(pending) = MOBILE_PENDING_TOTP_LOGIN.lock().await.clone()
     {
         if pending.username != username {
@@ -113,12 +116,7 @@ async fn execute_mobile_opaque_login_round(
         });
     }
 
-    finish_mobile_login(
-        username,
-        response,
-        finish.export_key.as_slice().to_vec(),
-    )
-    .await
+    finish_mobile_login(username, response, finish.export_key.as_slice().to_vec()).await
 }
 
 async fn finish_mobile_login(
@@ -126,8 +124,6 @@ async fn finish_mobile_login(
     response: MobileSigninFinishResponse,
     export_key: Vec<u8>,
 ) -> Result<MobileLoginResult, String> {
-    set_mobile_refresh_token(response.refresh_token.clone()).await;
-
     let account_master_key = if response.access_token.is_some() {
         Some(
             account_keys::unwrap(&export_key, &response.encrypted_master_key)
@@ -138,14 +134,14 @@ async fn finish_mobile_login(
     };
 
     if response.access_token.is_some() {
+        super::state::MOBILE_RUNNER.lock().await.take();
+        super::state::MOBILE_BRIDGE_RUNTIME.lock().await.last_config = None;
+        set_mobile_refresh_token(response.refresh_token.clone()).await;
         *MOBILE_PENDING_TOTP_LOGIN.lock().await = None;
     }
 
     Ok(MobileLoginResult {
-        username: response
-            .access_token
-            .as_ref()
-            .map(|_| username.to_string()),
+        username: response.access_token.as_ref().map(|_| username.to_string()),
         access_token: response.access_token,
         totp_continuation_token: response.totp_continuation_token,
         device_enrollment_token: response.device_enrollment_token,
@@ -183,7 +179,17 @@ pub(super) async fn mobile_import_refresh_token_impl(
     }
     let rotation_request_id = uuid::Uuid::parse_str(rotation_request_id.trim())
         .map_err(|error| format!("invalid refresh rotation request id: {error}"))?;
+    let _lease = super::state::MOBILE_RUNTIME_LEASE.lock().await;
     import_mobile_refresh_credential(refresh_token, rotation_request_id).await;
+    super::state::MOBILE_RUNNER.lock().await.take();
+    if super::state::MOBILE_BRIDGE_RUNTIME
+        .lock()
+        .await
+        .last_config
+        .is_some()
+    {
+        super::bridge::mobile_runner().await?;
+    }
     Ok(())
 }
 
@@ -248,5 +254,7 @@ pub(super) async fn mobile_revoke_refresh_session_impl(
         .map_err(|error| error.to_string())?
         .error_for_status()
         .map_err(|error| error.to_string())?;
-    Ok(decode_msgpack::<MobileLogoutResponse>(response).await?.revoked)
+    Ok(decode_msgpack::<MobileLogoutResponse>(response)
+        .await?
+        .revoked)
 }

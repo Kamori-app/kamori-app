@@ -147,14 +147,18 @@ Future<void> mobileConfigureSync(
         required String sqlitePath,
         required String accessToken,
         required U8Array32 sqliteKey,
-        MobileDeviceSecrets? device}) =>
+        MobileDeviceSecrets? device,
+        required String username,
+        required bool freshSession}) =>
     RustLib.instance.api.crateFrbApiMobileConfigureSync(
         session: session,
         cloudBaseUrl: cloudBaseUrl,
         sqlitePath: sqlitePath,
         accessToken: accessToken,
         sqliteKey: sqliteKey,
-        device: device);
+        device: device,
+        username: username,
+        freshSession: freshSession);
 
 Future<BigInt> mobileSyncNow({required MobileSessionLease session}) =>
     RustLib.instance.api.crateFrbApiMobileSyncNow(session: session);

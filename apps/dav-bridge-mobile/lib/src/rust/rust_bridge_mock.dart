@@ -195,6 +195,8 @@ class MockRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   }) async {
     if (sqliteKey.length != 32) {
       throw ArgumentError('SQLite key must contain exactly 32 bytes');

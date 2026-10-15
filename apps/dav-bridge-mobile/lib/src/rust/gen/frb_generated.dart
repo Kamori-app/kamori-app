@@ -119,7 +119,9 @@ abstract class RustLibApi extends BaseApi {
       required String sqlitePath,
       required String accessToken,
       required U8Array32 sqliteKey,
-      MobileDeviceSecrets? device});
+      MobileDeviceSecrets? device,
+      required String username,
+      required bool freshSession});
 
   Future<MobileCollection> crateFrbApiMobileCreateCollection(
       {required MobileSessionLease session, required String name});
@@ -445,7 +447,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       required String sqlitePath,
       required String accessToken,
       required U8Array32 sqliteKey,
-      MobileDeviceSecrets? device}) {
+      MobileDeviceSecrets? device,
+      required String username,
+      required bool freshSession}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -455,6 +459,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(accessToken, serializer);
         sse_encode_u_8_array_32(sqliteKey, serializer);
         sse_encode_opt_box_autoadd_mobile_device_secrets(device, serializer);
+        sse_encode_String(username, serializer);
+        sse_encode_bool(freshSession, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 9, port: port_);
       },
@@ -469,7 +475,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sqlitePath,
         accessToken,
         sqliteKey,
-        device
+        device,
+        username,
+        freshSession
       ],
       apiImpl: this,
     ));
@@ -484,7 +492,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "sqlitePath",
           "accessToken",
           "sqliteKey",
-          "device"
+          "device",
+          "username",
+          "freshSession"
         ],
       );
 
@@ -1466,13 +1476,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MobileSyncConfig dco_decode_mobile_sync_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return MobileSyncConfig(
-      cloudBaseUrl: dco_decode_String(arr[0]),
-      sqlitePath: dco_decode_String(arr[1]),
-      accessToken: dco_decode_String(arr[2]),
-      sqliteKey: dco_decode_u_8_array_32(arr[3]),
+      username: dco_decode_String(arr[0]),
+      cloudBaseUrl: dco_decode_String(arr[1]),
+      sqlitePath: dco_decode_String(arr[2]),
+      accessToken: dco_decode_String(arr[3]),
+      sqliteKey: dco_decode_u_8_array_32(arr[4]),
     );
   }
 
@@ -2059,11 +2070,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   MobileSyncConfig sse_decode_mobile_sync_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_username = sse_decode_String(deserializer);
     var var_cloudBaseUrl = sse_decode_String(deserializer);
     var var_sqlitePath = sse_decode_String(deserializer);
     var var_accessToken = sse_decode_String(deserializer);
     var var_sqliteKey = sse_decode_u_8_array_32(deserializer);
     return MobileSyncConfig(
+        username: var_username,
         cloudBaseUrl: var_cloudBaseUrl,
         sqlitePath: var_sqlitePath,
         accessToken: var_accessToken,
@@ -2543,6 +2556,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_mobile_sync_config(
       MobileSyncConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.username, serializer);
     sse_encode_String(self.cloudBaseUrl, serializer);
     sse_encode_String(self.sqlitePath, serializer);
     sse_encode_String(self.accessToken, serializer);

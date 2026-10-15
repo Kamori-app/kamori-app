@@ -699,6 +699,12 @@ pub(crate) async fn revoke_member_and_rotate(
         tx.rollback().await?;
         return Ok(RevokeMemberResult::AccessDenied);
     }
+    // Snapshot insertion updates this account's operation counter. Match
+    // recovery and ordinary append: space, owning account, then author device.
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE")
+        .bind(owner_user_id)
+        .execute(&mut *tx)
+        .await?;
     let existing_rotation = sqlx::query(
         r#"
         SELECT space_id, key_epoch, status, created_by, target_user_id, request_hash

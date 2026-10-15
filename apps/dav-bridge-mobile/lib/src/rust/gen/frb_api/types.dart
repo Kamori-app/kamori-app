@@ -607,12 +607,14 @@ class MobileRedeemedInvite {
 }
 
 class MobileSyncConfig {
+  final String username;
   final String cloudBaseUrl;
   final String sqlitePath;
   final String accessToken;
   final U8Array32 sqliteKey;
 
   const MobileSyncConfig({
+    required this.username,
     required this.cloudBaseUrl,
     required this.sqlitePath,
     required this.accessToken,
@@ -621,6 +623,7 @@ class MobileSyncConfig {
 
   @override
   int get hashCode =>
+      username.hashCode ^
       cloudBaseUrl.hashCode ^
       sqlitePath.hashCode ^
       accessToken.hashCode ^
@@ -631,6 +634,7 @@ class MobileSyncConfig {
       identical(this, other) ||
       other is MobileSyncConfig &&
           runtimeType == other.runtimeType &&
+          username == other.username &&
           cloudBaseUrl == other.cloudBaseUrl &&
           sqlitePath == other.sqlitePath &&
           accessToken == other.accessToken &&

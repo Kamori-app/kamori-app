@@ -930,3 +930,8 @@ async fn operation_usage_migration_serializes_with_live_append_without_deadlock(
     assert_eq!(totals, (charge, charge));
     assert_eq!(space_totals, (charge, 1));
 }
+
+mod final_lock_regressions {
+    use super::*;
+    include!("lock_regressions.rs");
+}
