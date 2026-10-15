@@ -21,6 +21,7 @@
 | R11 | System Calendar projection молча теряет EXDATE/RDATE/override set и создаёт неверную RRULE-only OS-копию | Настоящий service + pinned native adapter:7 refusal/cleanup cases RED, обычный RRULE control PASS; recurrence-system-red.log | Исправлено в89b24e5/341d976; task review/scoped rereview PASS, packaged native gate ожидается |
 | R12 | Mobile recurrence с явным DTEND использует wall-clock delta вместо фактической длительности через DST | Focused RRULE test:expected next end2026-11-09T06:30Z, actual05:30Z; base уже имел25h вместо26h; recurrence-review1-exact-duration-red.log | Исправлено в89b24e5/341d976; task review/scoped rereview PASS, packaged native gate ожидается |
 | R13 | Mobile formatter показывает UTC вместо viewer-local для typed TZID значения | Mounted interval RED и verbatim base model/formatter probe:NY20:30 показан01:30 следующего дня; recurrence-review1-base-viewer-probe.log | Исправлено в89b24e5/341d976; task review/scoped rereview PASS, packaged native gate ожидается |
+| R14 | Invite redemption после membership cleanup удаления аккаунта оставляет активное членство удалённого recipient | Реальные authorize_session/production delete/redeem, точные PG blockers:delete=true/redeem=Redeemed/deleted=true/active_memberships=1; contention/late-invite-red3.log | Исправлено в07d1721; оба admission порядка/ownership controls, server162/core97, independent review PASS |
 
 R02 не выведен из ошибочного тестового ожидания get(id)==null: отдельно воспроизведён именно production-сервис. Первая ошибочная FRB fixture с не-UUID request ID также не считалась product-дефектом.
 
@@ -41,7 +42,7 @@ R02 не выведен из ошибочного тестового ожида�
 4. Task4 завершён: настоящие SQLCipher SIGKILL/reopen и9 browser cases; первоначальный R05 закрыт scoped rereview.
 5. Task5 завершён:7 mounted UI cases, CI Chromium и выбор внешних UI inputs; scoped rereview принято.
 6. Task6 завершён:96 core,95 Flutter,74web+4mounted; первоначальные review gaps и R12/R13 исправлены в341d976, scoped rereview принято. Packaged native builds — отдельный итоговый gate.
-7. Измерить ограниченный локальный concurrent workload и ожидания mobile guard.
+7. Task7 завершён:300tx/16workers, repair4000ops и real20s native timeout; R14 закрыт, independent review PASS. Minor evidence precision/noise переданы final review.
 8. Выполнить настоящий disposable encrypted pgBackRest PITR и blob restore.
 
 ## Границы доказательства
@@ -92,3 +93,13 @@ Core FRB:79 unit+15 DAV+2 corpus=96; web74units в UTC/Tbilisi/LA и4mounted ч�
 Review исправил introduced ordinary-DTEND regression и starvation остальных projection collections. Дополнительно actual RED подтвердил прежние R12 exact DTEND duration через DST и R13 raw-TZID formatter; исправлены actual instant/civil axis и viewer conversion, включая общий task-due formatter. Системная projection отказывает неподдерживаемым exception sets явно, проверяет ownership перед cleanup и продолжает независимые supported calendar/contact collections; original provider/storage error+stack имеет приоритет, одновременно показывается одна ошибка за run. PERIOD/RANGE byte-preserved и явно обозначены как unsupported, их неверная expansion подавлена. Advanced authoring, произвольная RFC совместимость, physical devices/signing и remote DR не сертифицированы.
 
 Plain whitespace check видит намеренные RFC CRLF; per-command cr-at-eol-aware check проходит без изменения Git settings. Существующие codegen INFO diagnostics сохраняются для final review и не объявляются compilation warnings.
+
+## Принятый Task7
+
+Коммит `07d1721`; [полный отчёт](readiness-reports/2026-10-15-task-7.md), [независимое review](readiness-reports/2026-10-15-task-7-review.md), [reusable runner](../../tests/release-readiness/run-contention.sh), [измерения](../../tests/release-readiness/contention-baseline.json). R14 закрыт существующим account913 admission и recheck deleted/suspended до space/invite locks; repository возвращает прежний InvalidOrExpired, новый HTTP401 mapping не заявляется. Post-delete authentication уже отвергала аккаунт: это устранение persistence cleanup race, не заявление об обходе последующей авторизации.
+
+Реальный delete-first RED оставлял1 active membership; GREEN оставляет0. Reverse admission доказывает redeemed membership revoked; aggregate count в одной строке лога пока literal, а не отдельный измеренный query — minor передан final review. Старый S10 ownership schedule использует настоящий pre-admitted redeem+offer и сохраняет оба accept/delete порядка/все assertions. Production изменение15строк; native Rust изменён только в test module.
+
+Без concurrent build load выполнены300 транзакций/16workers/12accounts/12spaces:64 accepted,64 duplicate,64 conflicting duplicate,64 blob reservations,4offers/4transfers/32admissions/4deletes;0deadlocks/internal errors, op18048bytes/blob16384bytes,4×seq1..16. Repair4000 real signed appends/17.504MB:34ms migration включая staging,23ms queued writer,14ms release-to-completion;4001 rows/17508376bytes final accounting. Это один небольшой локальный dataset, не production SLA. Native20s HTTP timeout20,004ms, foreground/background waits20,002ms, FIFO/no permit leak:1 sample; full-suite harness self-exec проверяет exact1 test+completion marker, не0-test success.
+
+Server162 и core80unit+15DAV+2corpus=97 прошли; affected Clippy/fmt PASS. Ранний parallel lease-test сбой был interference тестов одного process-global coordinator; изолирован только harness без изменения timeout/runtime. Full-suite output содержит прежний ожидаемый quota-rejection ERROR; он отличается от0 внутренних ошибок workload и не объявляется pristine. Parent дополнительно выполнил workspace262 named entries (включая defaultcore65 и desktop18), отдельный FRB97 и strict workspace Clippy/fmt; эти populations пересекаются и не суммируются как уникальные tests.

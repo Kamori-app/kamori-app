@@ -98,13 +98,13 @@
 
 ### Task 7: Measure contention and validate bounded production lock behavior
 
-**Files:** focused server concurrency workload tests or reusable `tests/release-readiness/` runner; existing operation/ownership/deletion/maintenance code only for reproduced defects; native lease tests and a concise benchmark result artifact.
+**Files:** focused server concurrency workload tests or reusable `tests/release-readiness/` runner; existing operation/invite-admission/ownership/deletion/maintenance code only for reproduced defects; native lease tests and a concise benchmark result artifact.
 **Interfaces:** Existing account gate913, quota731, sorted row prelocks, process-global mobile lease. Do not replace them with weaker synchronization or change deletion atomicity.
 
-- [ ] Run a finite, reproducible multi-account/multi-space workload of real append/blob/ownership/admission/delete paths at up to16 workers. Track transaction outcomes, exact final usage, unique monotonic sequences and zero deadlocks/internal errors; expected authorization/conflict outcomes must be explicit. Include a named late-invite-redemption versus recipient deletion schedule after membership cleanup, checking whether current production authorization/persistence can create an active membership for a successfully deleted account; classify only from the real contract and outcome.
-- [ ] Exercise a representative large-account operation-usage repair with existing migration locking; record dataset size, elapsed time and concurrent writer waiting. Do not impose a timing SLA without a product requirement or run against production.
-- [ ] Measure queued foreground/background lease behavior with a deliberately slow synthetic native/network boundary; verify bounded existing HTTP timeout behavior and no permit leak after failure/owner disposal. Record foreground waiting as an accepted cost, not a new per-session-runtime mandate.
-- [ ] If measurements expose deadlock, leak, incorrect quota or an actually unbounded path, add a deterministic regression before minimal fix. Run affected suites/Clippy/fmt; commit reusable tests and report environment/sample sizes/latency distribution and limits.
+- [x] Run a finite, reproducible multi-account/multi-space workload of real append/blob/ownership/admission/delete paths at up to16 workers. Track transaction outcomes, exact final usage, unique monotonic sequences and zero deadlocks/internal errors; expected authorization/conflict outcomes must be explicit. Include a named late-invite-redemption versus recipient deletion schedule after membership cleanup, checking whether current production authorization/persistence can create an active membership for a successfully deleted account; classify only from the real contract and outcome.
+- [x] Exercise a representative large-account operation-usage repair with existing migration locking; record dataset size, elapsed time and concurrent writer waiting. Do not impose a timing SLA without a product requirement or run against production.
+- [x] Measure queued foreground/background lease behavior with a deliberately slow synthetic native/network boundary; verify bounded existing HTTP timeout behavior and no permit leak after failure/owner disposal. Record foreground waiting as an accepted cost, not a new per-session-runtime mandate.
+- [x] If measurements expose deadlock, leak, incorrect quota or an actually unbounded path, add a deterministic regression before minimal fix. Run affected suites/Clippy/fmt; commit reusable tests and report environment/sample sizes/latency distribution and limits.
 
 ### Task 8: Execute disposable pgBackRest PITR and blob restore exercises
 
