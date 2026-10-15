@@ -54,7 +54,7 @@
 - [x] Cover explicit URL, fallback URL and absent/empty inputs through isolated subprocesses or a pure resolver; do not log credentials or modify global environment unsafely.
 - [x] Run no-DB regression plus full server suite against supplied dedicated PostgreSQL, strict Clippy/fmt and appropriate CI detector/shell checks if touched. Commit and report exact counts; no-DB failure must be intentional and documented.
 
-- [ ] Controller follow-up: make the documented root Turbo server-test path retain the required DB configuration in strict env and execute real DB tests instead of cached success; verify the actual one-test supplied-URL path, absent-URL failure, fallback and repeat-run behavior. Initial helper review is complete; this boundary was discovered during Task4 and is queued immediately afterward without parallel implementers.
+- [x] Controller follow-up: make the documented root Turbo server-test path retain the required DB configuration in strict env and execute real DB tests instead of cached success; verify the actual one-test supplied-URL path, absent-URL failure, fallback and repeat-run behavior. Initial helper review is complete; this boundary was discovered during Task4 and is queued immediately afterward without parallel implementers.
 
 ### Task 3: Prove reset versus refresh and deferred passkey commit ordering
 
