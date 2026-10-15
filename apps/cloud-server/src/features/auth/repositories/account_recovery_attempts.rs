@@ -16,20 +16,33 @@ pub(crate) async fn create_account_recovery_attempt(
     pool: &PgPool,
     token_hash: &[u8; 32],
     user_id: Uuid,
+    auth_generation: i64,
     expires_at: OffsetDateTime,
 ) -> Result<(), ApiError> {
+    let mut tx = pool.begin().await.map_err(internal_error)?;
+    // A start may have read the kit verifier before a reset committed. Admit
+    // it only if that same generation is still current under the reset lock.
+    super::AuthenticationBinding {
+        user_id,
+        generation: auth_generation,
+        session_id: None,
+    }
+    .lock(&mut tx)
+    .await?;
     sqlx::query(
         r#"
-        INSERT INTO account_recovery_attempts (token_hash, user_id, expires_at)
-        VALUES ($1, $2, $3)
+        INSERT INTO account_recovery_attempts (token_hash, user_id, expires_at, auth_generation)
+        VALUES ($1, $2, $3, $4)
         "#,
     )
     .bind(token_hash.as_slice())
     .bind(user_id)
     .bind(expires_at)
-    .execute(pool)
+    .bind(auth_generation)
+    .execute(&mut *tx)
     .await
     .map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(())
 }
 
@@ -69,15 +82,17 @@ pub(crate) async fn apply_account_recovery_reset(
 ) -> Result<AccountRecoveryResetOutcome, ApiError> {
     let now = OffsetDateTime::now_utc();
     let mut tx = pool.begin().await.map_err(internal_error)?;
+    super::lock_account_security_mutation(&mut tx, reset.user_id).await?;
     // Match authentication's account-before-session/credential lock order.
-    sqlx::query("SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE")
-        .bind(reset.user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(internal_error)?;
+    let current_generation: Option<i64> =
+        sqlx::query_scalar("SELECT auth_generation FROM users WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(reset.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(internal_error)?;
     let attempt = sqlx::query(
         r#"
-        SELECT user_id, request_hash, expires_at, completed_at
+        SELECT user_id, auth_generation, request_hash, expires_at, completed_at
         FROM account_recovery_attempts
         WHERE token_hash = $1
         FOR UPDATE
@@ -111,7 +126,8 @@ pub(crate) async fn apply_account_recovery_reset(
         tx.commit().await.map_err(internal_error)?;
         return Ok(AccountRecoveryResetOutcome::AlreadyApplied);
     }
-    if expires_at <= now {
+    let attempt_generation: i64 = attempt.try_get("auth_generation").map_err(internal_error)?;
+    if current_generation != Some(attempt_generation) || expires_at <= now {
         return Err(unauthenticated(
             "account recovery token was already used or expired",
         ));
@@ -165,6 +181,14 @@ pub(crate) async fn apply_account_recovery_reset(
         .map_err(internal_error)?;
     sqlx::query("DELETE FROM account_recovery_codes WHERE user_id = $1")
         .bind(reset.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal_error)?;
+    // Only the completed exact request remains retryable. Other outstanding
+    // one-time recovery capabilities must not reset the recovered account.
+    sqlx::query("DELETE FROM account_recovery_attempts WHERE user_id = $1 AND completed_at IS NULL AND token_hash <> $2")
+        .bind(reset.user_id)
+        .bind(reset.token_hash.as_slice())
         .execute(&mut *tx)
         .await
         .map_err(internal_error)?;

@@ -166,11 +166,7 @@ pub(crate) async fn delete_user(
 ) -> Result<bool, crate::features::common::ApiError> {
     use crate::features::common::internal_error;
     let user_id = binding.user_id;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 913))")
-        .bind(user_id.to_string())
-        .execute(&mut **tx)
-        .await
-        .map_err(internal_error)?;
+    crate::features::auth::repositories::lock_account_security_mutation(tx, user_id).await?;
     let blockers = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(

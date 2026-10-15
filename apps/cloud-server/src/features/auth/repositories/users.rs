@@ -241,10 +241,10 @@ pub(crate) async fn find_user_for_data_recovery(
     pool: &PgPool,
     username: &str,
     recovery_verifier_hash: &[u8],
-) -> Result<Option<Uuid>, ApiError> {
-    sqlx::query_scalar(
+) -> Result<Option<(Uuid, i64)>, ApiError> {
+    sqlx::query_as(
         r#"
-        SELECT id
+        SELECT id, auth_generation
         FROM users
         WHERE username = $1
           AND recovery_verifier_hash = $2

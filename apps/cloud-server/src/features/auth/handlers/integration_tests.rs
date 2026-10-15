@@ -1264,6 +1264,11 @@ async fn reset_deferred_account(app: &TestApp, username: &str, recovery: bool) {
             &app.state.pool,
             &token_hash,
             user_id,
+            sqlx::query_scalar("SELECT auth_generation FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_one(&app.state.pool)
+                .await
+                .unwrap(),
             time::OffsetDateTime::now_utc() + time::Duration::minutes(5),
         )
         .await
@@ -1772,5 +1777,286 @@ async fn login_final_validation_waits_for_concurrent_password_reset() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(active_session_count(&app, &username).await, 0);
     signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    app.shutdown().await;
+}
+
+async fn pending_recovery(
+    app: &TestApp,
+    username: &str,
+    password: &str,
+) -> AccountRecoveryFinishRequest {
+    let mut rng = OsRng;
+    let registration =
+        ClientRegistration::<DefaultOpaqueSuite>::start(&mut rng, password.as_bytes()).unwrap();
+    let response = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/start",
+        &AccountRecoveryStartRequest {
+            username: username.to_owned(),
+            recovery_verifier: vec![7; 32],
+            opaque_start_request: registration.message.serialize().to_vec(),
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, body) = split_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    let started: AccountRecoveryStartResponse = decode_msgpack(&body);
+    let finished = registration
+        .state
+        .finish(
+            &mut rng,
+            password.as_bytes(),
+            RegistrationResponse::<DefaultOpaqueSuite>::deserialize(&started.opaque_server_message)
+                .unwrap(),
+            ClientRegistrationFinishParameters::default(),
+        )
+        .unwrap();
+    AccountRecoveryFinishRequest {
+        recovery_token: started.recovery_token,
+        opaque_finish_request: finished.message.serialize().to_vec(),
+        encrypted_master_key: vec![13; 64],
+    }
+}
+
+#[tokio::test]
+async fn recovery_fix_invalidates_other_pending_attempts_but_preserves_exact_retry() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-recovery-other-{}", Uuid::new_v4());
+    register_user(&app, &username, "Old-P@ssword123!").await;
+    let first = pending_recovery(&app, &username, "New-P@ssword123!").await;
+    let stale = pending_recovery(&app, &username, "Stale-P@ssword123!").await;
+    let response = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/finish",
+        &first,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    let generation: i64 =
+        sqlx::query_scalar("SELECT auth_generation FROM users WHERE username = $1")
+            .bind(&username)
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    let response = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/finish",
+        &stale,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "pre-reset recovery token replaced the new credentials"
+    );
+    assert_eq!(active_session_count(&app, &username).await, 1);
+    let after: i64 = sqlx::query_scalar("SELECT auth_generation FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, generation);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/finish",
+        &first,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        active_session_count(&app, &username).await,
+        1,
+        "exact recovery retry revoked the recovered session"
+    );
+    let mut changed = first;
+    changed.encrypted_master_key = vec![14; 64];
+    let response = post_msgpack(
+        &app.app,
+        "/auth/account-recovery/finish",
+        &changed,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn recovery_fix_rejects_start_racing_credential_reset() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-recovery-admission-{}", Uuid::new_v4());
+    register_user(&app, &username, "Old-P@ssword123!").await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let registration =
+        prepare_signup_request(&app, &username, "New-P@ssword123!", Uuid::new_v4()).await;
+    let mut reset_tx = app.state.pool.begin().await.unwrap();
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *reset_tx)
+        .await
+        .unwrap();
+    crate::features::auth::repositories::update_user_password_file_and_revoke_refresh_sessions(
+        &mut reset_tx,
+        user_id,
+        &registration.opaque_finish_request,
+        &[13; 64],
+    )
+    .await
+    .unwrap();
+    let mut rng = OsRng;
+    let start =
+        ClientRegistration::<DefaultOpaqueSuite>::start(&mut rng, b"Stale-P@ssword123!").unwrap();
+    let request = AccountRecoveryStartRequest {
+        username: username.clone(),
+        recovery_verifier: vec![7; 32],
+        opaque_start_request: start.message.serialize().to_vec(),
+    };
+    let router = app.app.clone();
+    let starting = tokio::spawn(async move {
+        post_msgpack(
+            &router,
+            "/auth/account-recovery/start",
+            &request,
+            &HeaderMap::new(),
+        )
+        .await
+    });
+    // The initial read sees the pre-reset generation. A correct admission
+    // waits for the reset's row lock; the broken implementation returns early.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))").bind(blocker_pid).fetch_one(&app.state.pool).await.unwrap();
+            if blocked || starting.is_finished() { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("recovery start reaches durable admission");
+    reset_tx.commit().await.unwrap();
+    assert_eq!(
+        starting.await.unwrap().status(),
+        StatusCode::UNAUTHORIZED,
+        "stale recovery start was durably admitted"
+    );
+    let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM account_recovery_attempts WHERE user_id = $1 AND completed_at IS NULL AND expires_at > now()").bind(user_id).fetch_one(&app.state.pool).await.unwrap();
+    assert_eq!(pending, 0);
+    // A new kit proof read after reset can still begin recovery.
+    pending_recovery(&app, &username, "Fresh-P@ssword123!").await;
+    signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn recovery_fix_account_deletion_and_device_revocation_do_not_deadlock() {
+    use crate::features::auth::repositories::AuthenticationBinding;
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-delete-revoke-{}", Uuid::new_v4());
+    let owner_name = format!("it-delete-revoke-owner-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    register_user(&app, &owner_name, "P@ssword123!").await;
+    let signin = signin_user(&app, &username, "P@ssword123!", SigninTransport::Body).await;
+    let headers = enroll_signin(&app, &signin).await;
+    let proof = reauth_proof(
+        &app,
+        &headers,
+        "P@ssword123!",
+        crate::features::auth::dto::ReauthAction::SecuritySettings,
+    )
+    .await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let device_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM devices WHERE user_id = $1 AND status = 'active'")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    let (owner_id, workspace_id): (Uuid, Uuid) = sqlx::query_as("SELECT u.id, w.id FROM users u JOIN workspaces w ON w.owner_user_id = u.id WHERE u.username = $1 AND w.kind = 'personal'").bind(&owner_name).fetch_one(&app.state.pool).await.unwrap();
+    let space_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO security_spaces (id, workspace_id, owner_user_id, created_by, encrypted_metadata) VALUES ($1, $2, $3, $3, $4)").bind(space_id).bind(workspace_id).bind(owner_id).bind(vec![2_u8]).execute(&app.state.pool).await.unwrap();
+    sqlx::query("INSERT INTO security_space_members (id, space_id, user_id, role, key_epoch) VALUES ($1, $2, $3, 'reader', 1)").bind(Uuid::new_v4()).bind(space_id).bind(user_id).execute(&app.state.pool).await.unwrap();
+    sqlx::query("INSERT INTO security_space_device_keys (space_id, user_id, device_id, key_epoch, encrypted_key_package) VALUES ($1, $2, $3, 1, $4)").bind(space_id).bind(user_id).bind(device_id).bind(vec![6_u8; 49]).execute(&app.state.pool).await.unwrap();
+
+    let mut deletion_tx = app.state.pool.begin().await.unwrap();
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *deletion_tx)
+        .await
+        .unwrap();
+    // Stage the deletion transaction at its shared-key deletion boundary. Its
+    // empty personal workspace causes no quota trigger to lock the user first.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 913))")
+        .bind(user_id.to_string())
+        .execute(&mut *deletion_tx)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM security_space_device_keys WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *deletion_tx)
+        .await
+        .unwrap();
+    let router = app.app.clone();
+    let revoking = tokio::spawn(async move {
+        post_msgpack(
+            &router,
+            &format!("/devices/{device_id}/revoke"),
+            &crate::features::devices::dto::RevokeDeviceRequest {
+                reauth_token: proof,
+            },
+            &headers,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))").bind(blocker_pid).fetch_one(&app.state.pool).await.unwrap();
+            if blocked { break; }
+            assert!(!revoking.is_finished(), "revocation must reach the staged deletion");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("revocation reaches its conflicting lock");
+    let deletion = delete_user(
+        &mut deletion_tx,
+        AuthenticationBinding {
+            user_id,
+            generation: 0,
+            session_id: None,
+        },
+    )
+    .await;
+    assert!(
+        deletion.is_ok(),
+        "deletion hit the inverted lock order: {deletion:?}"
+    );
+    assert!(deletion.unwrap());
+    deletion_tx.commit().await.unwrap();
+    let response = revoking.await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "revocation must observe the deleted account, not deadlock"
+    );
+    let deleted: bool =
+        sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert!(deleted);
     app.shutdown().await;
 }

@@ -106,7 +106,7 @@ pub(crate) async fn account_recovery_start(
     .await?;
     let recovery_verifier_hash = hash_data_recovery_verifier(&payload.recovery_verifier)
         .map_err(|_| unauthenticated("invalid recovery credentials"))?;
-    let Some(user_id) =
+    let Some((user_id, auth_generation)) =
         find_user_for_data_recovery(&state.pool, &username, &recovery_verifier_hash).await?
     else {
         return Err(unauthenticated("invalid recovery credentials"));
@@ -125,6 +125,7 @@ pub(crate) async fn account_recovery_start(
         &state.pool,
         &token_hash,
         user_id,
+        auth_generation,
         OffsetDateTime::now_utc()
             + Duration::seconds(state.config.jwt_account_recovery_ttl_seconds.max(1)),
     )

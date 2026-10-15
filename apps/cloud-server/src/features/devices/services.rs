@@ -113,6 +113,7 @@ pub(crate) async fn revoke(
     .await?;
     let user_id = principal.user_id;
     let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    crate::features::auth::repositories::lock_account_security_mutation(&mut tx, user_id).await?;
     binding.lock(&mut tx).await?;
     let revoked = repositories::revoke_device(&mut tx, user_id, device_id)
         .await

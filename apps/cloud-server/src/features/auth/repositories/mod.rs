@@ -3,7 +3,9 @@
 //! SQL persistence helpers for auth flows.
 
 mod authentication;
-pub(crate) use authentication::{AuthenticationBinding, session_authentication_binding};
+pub(crate) use authentication::{
+    AuthenticationBinding, lock_account_security_mutation, session_authentication_binding,
+};
 mod account_recovery_attempts;
 mod account_recovery_codes;
 mod refresh_tokens;

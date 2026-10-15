@@ -51,3 +51,19 @@ pub(crate) async fn session_authentication_binding(
     tx.commit().await.map_err(internal_error)?;
     Ok(binding)
 }
+
+/// Serialize account deletion, device revocation and recovery before either
+/// space/key-package or account row locks. Deletion must retain its existing
+/// space-before-account quota order; this lock prevents security mutations from
+/// holding the account while waiting for a key package deletion already holds.
+pub(crate) async fn lock_account_security_mutation(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<(), ApiError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 913))")
+        .bind(user_id.to_string())
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
+    Ok(())
+}
