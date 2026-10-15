@@ -8,8 +8,11 @@ import { tokenStore } from "../../../apps/web-frontend/src/lib/auth/tokenStore";
 import { requestManualSync, resetSyncState, syncState } from "../../../apps/web-frontend/src/lib/stores/sync";
 import { notificationStore } from "../../../apps/web-frontend/src/lib/stores/notifications";
 let component;
+let sessionState;
+appState.subscribe(state => { sessionState = state; });
 window.durability = {
   cloudApi, vault, requestManualSync,
+  session: () => ({ username: sessionState.currentUsername, accessToken: sessionState.accessToken, token: tokenStore.getAccessToken() }),
   async start({ endpoint, account, space, keyByte = 7 }) {
     if (component) await unmount(component);
     vault.lockWebVault();

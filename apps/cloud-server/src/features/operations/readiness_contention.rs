@@ -317,8 +317,16 @@ async fn readiness_invite_admitted_first_is_revoked_by_account_deletion() {
     .await
     .unwrap();
     assert_eq!(status, "revoked");
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM security_space_members WHERE user_id=$1 AND status='active'",
+    )
+    .bind(recipient)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active, 0);
     println!(
-        "READINESS invite_first blockers={blockers:?} redeemed=true deleted=true member_status={status} active_memberships=0"
+        "READINESS invite_first blockers={blockers:?} redeemed=true deleted=true member_status={status} active_memberships={active}"
     );
     drop_admission_database(&admin, pool, &schema).await;
 }

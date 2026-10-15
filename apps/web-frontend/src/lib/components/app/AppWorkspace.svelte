@@ -190,6 +190,24 @@
             $appState.cloudBaseUrl === endpoint;
     };
 
+    // A mounted workspace belongs to one unlock lifetime, including work that
+    // has already entered the data-plane lock and is waiting on a response.
+    let isWorkspaceCurrent = () => false;
+    const requireWorkspaceCurrent = () => {
+        if (!isWorkspaceCurrent()) {
+            throw new Error("The workspace changed. Reopen the editor and try again.");
+        }
+    };
+    async function inWorkspace<T>(operation: Promise<T>): Promise<T> {
+        try {
+            return await operation;
+        } finally {
+            // Also replace a late 401/error, so retry/catch paths cannot adopt
+            // the next account or mistake stale work for recoverable input.
+            requireWorkspaceCurrent();
+        }
+    }
+
     async function runDataPlaneExclusive<T>(
         operation: () => Promise<T>,
     ): Promise<T> {
@@ -206,6 +224,7 @@
         });
         await previous;
         const runWithCommittedState = async () => {
+            requireWorkspaceCurrent();
             requireCurrent();
             // Another tab may have committed while this tab waited for the lock.
             // Rebase on its durable state before applying this user's operation.
@@ -231,6 +250,7 @@
     }
 
     const setNotice = (notice: string) => {
+        if (!isWorkspaceCurrent()) return;
         notify(notice, { source: localized("Web app", "Веб-приложение") });
     };
 
@@ -245,34 +265,34 @@
         if (!deviceAuthorizationCode) return;
         setLoading("device-authorization");
         try {
-            const challenge = await withAccessRetry((accessToken) =>
+            const challenge = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.inspectDeviceAuthorization(
                     $appState.cloudBaseUrl,
                     deviceAuthorizationCode,
                     accessToken,
                 ),
-            );
+            ));
             const recipientKey = normalizeByteArray(
                 challenge.hpke_public_key,
                 32,
                 "Desktop authorization public key",
             );
-            const encryptedMasterKeyPackage = await withActiveMasterKey(
+            const encryptedMasterKeyPackage = await inWorkspace(withActiveMasterKey(
                 (masterKey) =>
                     encryptAccountMasterKeyForDevice(
                         masterKey,
                         recipientKey,
                         challenge.flow_id,
                     ),
-            );
-            await withAccessRetry((accessToken) =>
+            ));
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.approveDeviceAuthorization(
                     $appState.cloudBaseUrl,
                     deviceAuthorizationCode,
                     encryptedMasterKeyPackage,
                     accessToken,
                 ),
-            );
+            ));
             setNotice(localized(
                 "Desktop sign-in approved. You may return to Kamori Desktop.",
                 "Вход на компьютере подтверждён. Вернитесь в Kamori Desktop.",
@@ -295,6 +315,7 @@
     };
 
     const persistRotatedAccessToken = (accessToken: string) => {
+        requireWorkspaceCurrent();
         tokenStore.setAccessToken(accessToken);
         appState.update((state) => ({
             ...state,
@@ -305,12 +326,17 @@
     async function withAccessRetry<T>(
         operation: (accessToken: string) => Promise<T>,
     ): Promise<T> {
+        requireWorkspaceCurrent();
         return runWithAccessRefreshRetry({
             getAccessToken: withAccessToken,
-            operation,
-            refresh: () => cloudApi.refresh($appState.cloudBaseUrl),
+            operation: (accessToken: string) => inWorkspace(operation(accessToken)),
+            refresh: () => {
+                requireWorkspaceCurrent();
+                return inWorkspace(cloudApi.refresh($appState.cloudBaseUrl));
+            },
             onAccessTokenRotated: persistRotatedAccessToken,
             onRefreshUnauthorized: () => {
+                requireWorkspaceCurrent();
                 tokenStore.clear();
                 appState.update((state) => ({
                     ...state,
@@ -341,20 +367,20 @@
             const spaceKey = randomBytes(32);
             const device = getActiveWebDevice();
             const encryptedKeyPackage = encode(
-                await wrapSpaceKeyForDevice(
+                await inWorkspace(wrapSpaceKeyForDevice(
                     spaceKey,
                     device.identity.hpke_public_key,
-                ),
+                )),
             );
-            const encryptedMetadata = await encryptVaultBytes(
+            const encryptedMetadata = await inWorkspace(encryptVaultBytes(
                 spaceKey,
                 encode({ version: 1, kind: "pim", name }),
-            );
-            const encryptedRecoveryKeyPackage = await withActiveMasterKey(
+            ));
+            const encryptedRecoveryKeyPackage = await inWorkspace(withActiveMasterKey(
                 async (masterKey) =>
-                    encode(await wrapSpaceKeyForAccountRecovery(masterKey, spaceKey)),
-            );
-            await withAccessRetry((accessToken) =>
+                    encode(await inWorkspace(wrapSpaceKeyForAccountRecovery(masterKey, spaceKey))),
+            ));
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.createSpace(
                     $appState.cloudBaseUrl,
                     {
@@ -372,8 +398,8 @@
                     },
                     accessToken,
                 ),
-            );
-            await storeSpaceKey(spaceId, 1, spaceKey);
+            ));
+            await inWorkspace(storeSpaceKey(spaceId, 1, spaceKey));
             const entry: SpaceEntry = {
                 id: spaceId,
                 name,
@@ -420,14 +446,14 @@
                 state.logicalResourceId === logicalResourceId &&
                 state.kind === kind,
         );
-        const assignments = await assignPimBranchGraph(
+        const assignments = await inWorkspace(assignPimBranchGraph(
             logicalResourceId,
             streamStates.map((state) => ({
                 operation_id: state.clientOpId,
                 parent_operation_id: state.parentOperationId ?? null,
                 seed_projection_resource_id: state.seedProjectionId ?? null,
             })),
-        );
+        ));
         const byId = new Map(
             assignments.map((assignment) => [assignment.operation_id, assignment]),
         );
@@ -532,17 +558,17 @@
                     materializedProjection: "",
                 },
             ];
-            await reconcilePimStream(
+            await inWorkspace(reconcilePimStream(
                 spaceId,
                 operation.resource_id,
                 operation.resource_kind,
-            );
+            ));
             return;
         }
-        const materializedProjection = await materializePimOperation(
+        const materializedProjection = await inWorkspace(materializePimOperation(
             operation,
             parent?.materializedProjection || undefined,
-        );
+        ));
         const titleValue = operation.fields.title;
         const completedValue = operation.fields.completed;
         const projectedFields = projectionFields(
@@ -585,11 +611,11 @@
                 materializedProjection,
             },
         ];
-        await reconcilePimStream(
+        await inWorkspace(reconcilePimStream(
             spaceId,
             operation.resource_id,
             operation.resource_kind,
-        );
+        ));
     };
 
     const applyPimSnapshot = async (
@@ -671,11 +697,11 @@
                 },
             ];
         }
-        await reconcilePimStream(
+        await inWorkspace(reconcilePimStream(
             spaceId,
             snapshot.resource_id,
             snapshot.resource_kind,
-        );
+        ));
     };
 
     const retryUnresolvedPimOperations = async (
@@ -684,7 +710,7 @@
     ): Promise<number> => {
         let applied = 0;
         while (true) {
-            const pending = (await listQuarantinedOperationRecords(spaceId))
+            const pending = (await inWorkspace(listQuarantinedOperationRecords(spaceId)))
                 .filter((record) => record.reason_code === "unresolved_pim_graph")
                 .sort((left, right) => left.space_seq - right.space_seq);
             if (pending.length === 0) return applied;
@@ -692,30 +718,31 @@
             for (const record of pending) {
                 const envelope = record.envelope;
                 const signingKey = signingKeys.get(envelope.author_device_id);
-                const operationKey = await loadSpaceKey(spaceId, envelope.key_epoch);
+                const operationKey = await inWorkspace(loadSpaceKey(spaceId, envelope.key_epoch));
                 if (!signingKey || !operationKey || envelope.envelope_kind !== "operation") {
                     continue;
                 }
                 try {
-                    await verifyOperationEnvelope(envelope, signingKey);
+                    await inWorkspace(verifyOperationEnvelope(envelope, signingKey));
                     const operation = decodePimOperation(
-                        await openOperationEnvelope(envelope, operationKey),
+                        await inWorkspace(openOperationEnvelope(envelope, operationKey)),
                     );
                     if (operation.resource_id !== envelope.stream_id) continue;
-                    await applyPimOperation(
+                    await inWorkspace(applyPimOperation(
                         spaceId,
                         envelope.stream_id,
                         envelope.client_op_id,
                         operation,
                         record.space_seq,
-                    );
-                    await removeQuarantinedOperationEnvelope(
+                    ));
+                    await inWorkspace(removeQuarantinedOperationEnvelope(
                         spaceId,
                         envelope.client_op_id,
-                    );
+                    ));
                     applied += 1;
                     madeProgress = true;
                 } catch {
+                    requireWorkspaceCurrent();
                     // The graph may still be incomplete. A future page or sync
                     // retries the encrypted, authenticated envelope.
                 }
@@ -730,13 +757,13 @@
     ): Promise<Map<string, Uint8Array>> => {
         const cached = signingKeysBySpace.get(spaceId);
         if (cached && !refresh) return cached;
-        const directory = await withAccessRetry((accessToken) =>
+        const directory = await inWorkspace(withAccessRetry((accessToken) =>
             cloudApi.listSpaceDevices(
                 $appState.cloudBaseUrl,
                 spaceId,
                 accessToken,
             ),
-        );
+        ));
         const signingKeys = new Map(
             directory.devices.map((item) => [
                 item.device_id,
@@ -753,28 +780,28 @@
         minimumCursor = 0,
         refreshSigningKeys = false,
     ): Promise<number> => {
-        let signingKeys = await loadSigningKeys(spaceId, refreshSigningKeys);
-        await retryUnresolvedPimOperations(spaceId, signingKeys);
+        let signingKeys = await inWorkspace(loadSigningKeys(spaceId, refreshSigningKeys));
+        await inWorkspace(retryUnresolvedPimOperations(spaceId, signingKeys));
         let cursor = Math.max(syncCursors[spaceId] ?? 0, minimumCursor);
         if ((syncCursors[spaceId] ?? 0) < cursor) {
             syncCursors = { ...syncCursors, [spaceId]: cursor };
         }
         let synced = 0;
         while (true) {
-            const page = await withAccessRetry((accessToken) =>
+            const page = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.listOperations(
                     $appState.cloudBaseUrl,
                     spaceId,
                     cursor,
                     accessToken,
                 ),
-            );
+            ));
             for (const stored of page.operations) {
                 let signingKey = signingKeys.get(
                     stored.envelope.author_device_id,
                 );
                 if (!signingKey) {
-                    signingKeys = await loadSigningKeys(spaceId, true);
+                    signingKeys = await inWorkspace(loadSigningKeys(spaceId, true));
                     signingKey = signingKeys.get(stored.envelope.author_device_id);
                     if (!signingKey) {
                         throw new Error(
@@ -782,11 +809,11 @@
                         );
                     }
                 }
-                await verifyOperationEnvelope(stored.envelope, signingKey);
-                const operationKey = await loadSpaceKey(
+                await inWorkspace(verifyOperationEnvelope(stored.envelope, signingKey));
+                const operationKey = await inWorkspace(loadSpaceKey(
                     spaceId,
                     stored.envelope.key_epoch,
-                );
+                ));
                 if (!operationKey) {
                     throw new Error(
                         `Missing key epoch ${stored.envelope.key_epoch} for operation ${stored.envelope.client_op_id}`,
@@ -794,16 +821,17 @@
                 }
                 let plaintext: Uint8Array;
                 try {
-                    plaintext = await openOperationEnvelope(
+                    plaintext = await inWorkspace(openOperationEnvelope(
                         stored.envelope,
                         operationKey,
-                    );
+                    ));
                 } catch {
-                    await quarantineOperationEnvelope(
+                    requireWorkspaceCurrent();
+                    await inWorkspace(quarantineOperationEnvelope(
                         stored.envelope,
                         stored.space_seq,
                         "invalid_ciphertext",
-                    );
+                    ));
                     continue;
                 }
                 if (stored.envelope.envelope_kind === "operation") {
@@ -814,27 +842,29 @@
                             throw new Error("stream mismatch");
                         }
                     } catch {
-                        await quarantineOperationEnvelope(
+                        requireWorkspaceCurrent();
+                        await inWorkspace(quarantineOperationEnvelope(
                             stored.envelope,
                             stored.space_seq,
                             "invalid_operation",
-                        );
+                        ));
                         continue;
                     }
                     try {
-                        await applyPimOperation(
+                        await inWorkspace(applyPimOperation(
                             spaceId,
                             stored.envelope.stream_id,
                             stored.envelope.client_op_id,
                             operation,
                             stored.space_seq,
-                        );
+                        ));
                     } catch {
-                        await quarantineOperationEnvelope(
+                        requireWorkspaceCurrent();
+                        await inWorkspace(quarantineOperationEnvelope(
                             stored.envelope,
                             stored.space_seq,
                             "unresolved_pim_graph",
-                        );
+                        ));
                         continue;
                     }
                 } else if (stored.envelope.envelope_kind === "snapshot") {
@@ -848,50 +878,51 @@
                             throw new Error("snapshot context mismatch");
                         }
                     } catch {
-                        await quarantineOperationEnvelope(
+                        requireWorkspaceCurrent();
+                        await inWorkspace(quarantineOperationEnvelope(
                             stored.envelope,
                             stored.space_seq,
                             "invalid_snapshot",
-                        );
+                        ));
                         continue;
                     }
-                    await applyPimSnapshot(
+                    await inWorkspace(applyPimSnapshot(
                         spaceId,
                         stored.envelope.stream_id,
                         snapshot,
                         stored.space_seq,
-                    );
+                    ));
                 } else {
                     throw new Error("Unsupported mandatory key-control envelope.");
                 }
             }
-            await retryUnresolvedPimOperations(spaceId, signingKeys);
+            await inWorkspace(retryUnresolvedPimOperations(spaceId, signingKeys));
             synced += page.operations.length;
             if (page.next_cursor <= cursor) break;
             cursor = page.next_cursor;
             syncCursors = { ...syncCursors, [spaceId]: cursor };
-            await storeMaterializedPimState(
+            await inWorkspace(storeMaterializedPimState(
                 pimItems,
                 operationStates,
                 syncCursors,
-            );
+            ));
             if (page.operations.length === 0) break;
         }
         return synced;
     };
 
     const flushOutbox = async (): Promise<number> => {
-        const queued = await listQueuedOperationEnvelopes();
+        const queued = await inWorkspace(listQueuedOperationEnvelopes());
         let flushed = 0;
         for (const envelope of queued) {
             try {
-                const appended = await withAccessRetry((accessToken) =>
+                const appended = await inWorkspace(withAccessRetry((accessToken) =>
                     cloudApi.appendOperation(
                         $appState.cloudBaseUrl,
                         envelope,
                         accessToken,
                     ),
-                );
+                ));
                 operationStates = operationStates.map((state) =>
                     state.spaceId === envelope.space_id &&
                     state.clientOpId === envelope.client_op_id
@@ -904,17 +935,18 @@
                           }
                         : state,
                 );
-                await storeMaterializedPimState(
+                await inWorkspace(storeMaterializedPimState(
                     pimItems,
                     operationStates,
                     syncCursors,
-                );
-                await removeQueuedOperationEnvelope(
+                ));
+                await inWorkspace(removeQueuedOperationEnvelope(
                     envelope.space_id,
                     envelope.client_op_id,
-                );
+                ));
                 flushed += 1;
             } catch {
+                requireWorkspaceCurrent();
                 break;
             }
         }
@@ -936,7 +968,7 @@
                 "Доступ только для чтения не разрешает изменения.",
             ));
         }
-        const spaceKey = await loadSpaceKey(collection.id, collection.keyEpoch);
+        const spaceKey = await inWorkspace(loadSpaceKey(collection.id, collection.keyEpoch));
         if (!spaceKey) {
             throw new Error(
                 "This device has no key for the selected collection.",
@@ -956,13 +988,13 @@
             if (operation.dependencies.length > 0 && !parent) {
                 throw new Error("PIM operation dependency is missing.");
             }
-            await materializePimOperation(
+            await inWorkspace(materializePimOperation(
                 operation,
                 parent?.materializedProjection || undefined,
-            );
+            ));
         }
         const clientOpId = crypto.randomUUID();
-        const envelope = await sealOperationEnvelope({
+        const envelope = await inWorkspace(sealOperationEnvelope({
             spaceId: collection.id,
             streamId: operation.resource_id,
             clientOpId,
@@ -972,29 +1004,29 @@
             plaintext: encodePimOperation(operation),
             spaceKey,
             signingPrivateKey: device.identity.signing_private_key,
-        });
+        }));
         const previousItems = pimItems;
         const previousOperations = operationStates;
         try {
-            await applyPimOperation(
+            await inWorkspace(applyPimOperation(
                 collection.id,
                 operation.resource_id,
                 clientOpId,
                 operation,
-            );
-            await commitLocalPimOperation(
+            ));
+            await inWorkspace(commitLocalPimOperation(
                 envelope,
                 pimItems,
                 operationStates,
                 syncCursors,
-            );
+            ));
         } catch (error) {
             pimItems = previousItems;
             operationStates = previousOperations;
             throw error;
         }
-        const flushed = (await flushOutbox()) > 0;
-        const pending = (await listQueuedOperationEnvelopes()).length;
+        const flushed = (await inWorkspace(flushOutbox())) > 0;
+        const pending = (await inWorkspace(listQueuedOperationEnvelopes())).length;
         setPendingOperations(pending);
         autoSync.request("local-change");
         return flushed;
@@ -1058,14 +1090,14 @@
                     value: dateToIcalendarUtc(new Date()),
                 };
             }
-            const flushed = await commitPimOperation(
+            const flushed = await inWorkspace(commitPimOperation(
                 makeUpsert(
                     kind,
                     item?.resourceId ?? crypto.randomUUID(),
                     fields,
                     item ? [item.headOperationId] : [],
                 ),
-            );
+            ));
             setNotice(flushed
                 ? localized("Changes encrypted and synced.", "Изменения зашифрованы и синхронизированы.")
                 : localized("Changes saved to the encrypted offline outbox.", "Изменения сохранены в зашифрованной офлайн-очереди."));
@@ -1085,7 +1117,7 @@
         selectedCollectionId = item.spaceId;
         setLoading(`task-${item.resourceId}`);
         try {
-            await commitPimOperation(
+            await inWorkspace(commitPimOperation(
                 makeUpsert(
                     "task",
                     item.resourceId,
@@ -1098,7 +1130,7 @@
                     },
                     [item.headOperationId],
                 ),
-            );
+            ));
             setNotice(completed
                 ? localized("Task completed.", "Задача выполнена.")
                 : localized("Task reopened.", "Задача снова открыта."));
@@ -1114,14 +1146,14 @@
         selectedCollectionId = item.spaceId;
         setLoading(`delete-${item.resourceId}`);
         try {
-            await commitPimOperation({
+            await inWorkspace(commitPimOperation({
                 operation: "delete",
                 schema_version: CURRENT_PIM_SCHEMA_VERSION,
                 resource_kind: item.kind,
                 resource_id: item.resourceId,
                 dependencies: [item.headOperationId],
                 projection_resource_id: null,
-            });
+            }));
             setNotice(localized(
                 "Item moved to Trash. You can restore it from the Trash section.",
                 "Элемент перемещён в корзину. Его можно восстановить в разделе «Корзина».",
@@ -1138,7 +1170,7 @@
         selectedCollectionId = item.spaceId;
         setLoading(`restore-${item.tombstoneOperationId}`);
         try {
-            await commitPimOperation(buildRestorePimOperation(item));
+            await inWorkspace(commitPimOperation(buildRestorePimOperation(item)));
             notify(
                 localized(
                     "Item restored from Trash.",
@@ -1176,13 +1208,13 @@
         const collectionId = pendingDeleteCollectionId;
         setLoading("space-delete");
         try {
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.moveSpaceToTrash(
                     $appState.cloudBaseUrl,
                     collectionId,
                     accessToken,
                 ),
-            );
+            ));
             const removed = $appState.collections.find(
                 (item) => item.id === collectionId,
             );
@@ -1210,11 +1242,11 @@
             delete remainingCursors[collectionId];
             syncCursors = remainingCursors;
             signingKeysBySpace.delete(collectionId);
-            await storeMaterializedPimState(
+            await inWorkspace(storeMaterializedPimState(
                 pimItems,
                 operationStates,
                 syncCursors,
-            );
+            ));
             if (selectedCollectionId === collectionId) {
                 selectedCollectionId = "";
             }
@@ -1231,13 +1263,13 @@
     const restoreCollection = async (collectionId: string) => {
         setLoading(`space-restore-${collectionId}`);
         try {
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.restoreSpace(
                     $appState.cloudBaseUrl,
                     collectionId,
                     accessToken,
                 ),
-            );
+            ));
             trashedCollections = trashedCollections.filter(
                 (item) => item.id !== collectionId,
             );
@@ -1245,7 +1277,7 @@
                 "Space restored. Syncing its encrypted history...",
                 "Пространство восстановлено. Синхронизируем зашифрованную историю…",
             ));
-            await syncNow();
+            await inWorkspace(syncNow());
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             setNotice(`${localized("Space restore failed", "Не удалось восстановить пространство")}: ${message}`);
@@ -1270,27 +1302,27 @@
         if (options.showLoading) setLoading("sync-now");
         markSyncing();
         try {
-            const response = await withAccessRetry((accessToken) =>
+            const response = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.listSpaces($appState.cloudBaseUrl, accessToken),
-            );
-            const recoveryResponse = await withAccessRetry((accessToken) =>
+            ));
+            const recoveryResponse = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.listRecoveryKeyPackages(
                     $appState.cloudBaseUrl,
                     accessToken,
                 ),
-            );
+            ));
             const recoveryPackages = new Map(
                 recoveryResponse.packages.map((item) => [
                     `${item.space_id}:${item.key_epoch}`,
                     item.encrypted_key_package,
                 ]),
             );
-            const trashResponse = await withAccessRetry((accessToken) =>
+            const trashResponse = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.listTrashedSpaces(
                     $appState.cloudBaseUrl,
                     accessToken,
                 ),
-            );
+            ));
             const device = getActiveWebDevice();
             const collections: SpaceEntry[] = [];
             const nextSpaceMembers: Record<string, SpaceMemberSummary[]> = {};
@@ -1311,33 +1343,33 @@
             );
             for (const space of response.spaces) {
                 if (space.role === "owner") {
-                    const memberDirectory = await withAccessRetry((accessToken) =>
+                    const memberDirectory = await inWorkspace(withAccessRetry((accessToken) =>
                         cloudApi.listSpaceMembers(
                             $appState.cloudBaseUrl,
                             space.space_id,
                             accessToken,
                         ),
-                    );
+                    ));
                     nextSpaceMembers[space.space_id] = memberDirectory.members;
                 }
-                let key = await loadSpaceKey(space.space_id, space.key_epoch);
+                let key = await inWorkspace(loadSpaceKey(space.space_id, space.key_epoch));
                 if (!key) {
                     const recoveryPackage = recoveryPackages.get(
                         `${space.space_id}:${space.key_epoch}`,
                     );
                     if (recoveryPackage) {
-                        key = await withActiveMasterKey((masterKey) =>
+                        key = await inWorkspace(withActiveMasterKey((masterKey) =>
                             unwrapSpaceKeyFromAccountRecovery(
                                 masterKey,
                                 decode(recoveryPackage),
                             ),
-                        );
+                        ));
                         if (key.length !== 32) {
                             throw new Error(
                                 `Invalid recovery key package for space ${space.space_id}`,
                             );
                         }
-                        await storeSpaceKey(space.space_id, space.key_epoch, key);
+                        await inWorkspace(storeSpaceKey(space.space_id, space.key_epoch, key));
                     }
                 }
                 if (!key) {
@@ -1347,11 +1379,11 @@
                             item.key_epoch === space.key_epoch,
                     );
                     if (packageForDevice) {
-                        key = await unwrapSpaceKeyForDevice(
+                        key = await inWorkspace(unwrapSpaceKeyForDevice(
                             decode(packageForDevice.encrypted_key_package),
                             device.identity.hpke_private_key,
-                        );
-                        await storeSpaceKey(space.space_id, space.key_epoch, key);
+                        ));
+                        await inWorkspace(storeSpaceKey(space.space_id, space.key_epoch, key));
                     }
                 }
                 const packageForThisDevice = space.device_key_packages.find(
@@ -1361,12 +1393,12 @@
                 );
                 if (key && !packageForThisDevice) {
                     const encryptedDevicePackage = encode(
-                        await wrapSpaceKeyForDevice(
+                        await inWorkspace(wrapSpaceKeyForDevice(
                             key,
                             device.identity.hpke_public_key,
-                        ),
+                        )),
                     );
-                    await withAccessRetry((accessToken) =>
+                    await inWorkspace(withAccessRetry((accessToken) =>
                         cloudApi.putDeviceKeyPackage(
                             $appState.cloudBaseUrl,
                             space.space_id,
@@ -1377,17 +1409,17 @@
                             },
                             accessToken,
                         ),
-                    );
+                    ));
                 }
                 if (
                     key &&
                     !recoveryPackages.has(`${space.space_id}:${space.key_epoch}`)
                 ) {
-                    const recoveryPackage = await withActiveMasterKey(
+                    const recoveryPackage = await inWorkspace(withActiveMasterKey(
                         async (masterKey) =>
-                            encode(await wrapSpaceKeyForAccountRecovery(masterKey, key)),
-                    );
-                    await withAccessRetry((accessToken) =>
+                            encode(await inWorkspace(wrapSpaceKeyForAccountRecovery(masterKey, key))),
+                    ));
+                    await inWorkspace(withAccessRetry((accessToken) =>
                         cloudApi.putRecoveryKeyPackage(
                             $appState.cloudBaseUrl,
                             space.space_id,
@@ -1395,16 +1427,17 @@
                             recoveryPackage,
                             accessToken,
                         ),
-                    );
+                    ));
                 }
                 let name = `Space ${space.space_id.slice(0, 8)}`;
                 if (key) {
                     try {
                         const metadata = decode(
-                            await decryptVaultBytes(key, space.encrypted_metadata),
+                            await inWorkspace(decryptVaultBytes(key, space.encrypted_metadata)),
                         ) as { name?: string };
                         name = metadata.name?.trim() || name;
                     } catch {
+                        requireWorkspaceCurrent();
                         // Preserve an opaque fallback name for corrupt/old metadata.
                     }
                 }
@@ -1417,55 +1450,56 @@
                     syncedItems: 0,
                 });
                 if (key) {
-                    syncedOperationCount += await syncSpaceOperations(
+                    syncedOperationCount += await inWorkspace(syncSpaceOperations(
                         space.space_id,
                         Math.max(
                             space.history_start_seq,
                             space.current_state_start_seq,
                         ),
                         true,
-                    );
+                    ));
                 }
             }
 
-            const queued = await listQueuedOperationEnvelopes();
+            const queued = await inWorkspace(listQueuedOperationEnvelopes());
             for (const envelope of queued) {
-                const key = await loadSpaceKey(envelope.space_id, envelope.key_epoch);
+                const key = await inWorkspace(loadSpaceKey(envelope.space_id, envelope.key_epoch));
                 if (!key) continue;
-                const plaintext = await openOperationEnvelope(envelope, key);
+                const plaintext = await inWorkspace(openOperationEnvelope(envelope, key));
                 if (envelope.envelope_kind === "operation") {
-                    await applyPimOperation(
+                    await inWorkspace(applyPimOperation(
                         envelope.space_id,
                         envelope.stream_id,
                         envelope.client_op_id,
                         decodePimOperation(plaintext),
-                    );
+                    ));
                 } else if (envelope.envelope_kind === "snapshot") {
-                    await applyPimSnapshot(
+                    await inWorkspace(applyPimSnapshot(
                         envelope.space_id,
                         envelope.stream_id,
                         decodePimSnapshot(plaintext),
-                    );
+                    ));
                 }
             }
-            const flushed = await flushOutbox();
-            await storeMaterializedPimState(
+            const flushed = await inWorkspace(flushOutbox());
+            await inWorkspace(storeMaterializedPimState(
                 pimItems,
                 operationStates,
                 syncCursors,
-            );
+            ));
 
             const trash: SpaceEntry[] = [];
             for (const space of trashResponse.spaces) {
-                const key = await loadSpaceKey(space.space_id, space.key_epoch);
+                const key = await inWorkspace(loadSpaceKey(space.space_id, space.key_epoch));
                 let name = `Space ${space.space_id.slice(0, 8)}`;
                 if (key) {
                     try {
                         const metadata = decode(
-                            await decryptVaultBytes(key, space.encrypted_metadata),
+                            await inWorkspace(decryptVaultBytes(key, space.encrypted_metadata)),
                         ) as { name?: string };
                         name = metadata.name?.trim() || name;
                     } catch {
+                        requireWorkspaceCurrent();
                         // Keep opaque fallback when local key or metadata is stale.
                     }
                 }
@@ -1492,7 +1526,7 @@
                 syncedItemsTotal: operationStates.length,
                 lastSyncedSeq: Math.max(0, ...Object.values(syncCursors)),
             }));
-            const pending = (await listQueuedOperationEnvelopes()).length;
+            const pending = (await inWorkspace(listQueuedOperationEnvelopes())).length;
             markSyncSuccess(pending);
             lastMetadataSyncAt = Date.now();
             if (options.announce) {
@@ -1506,6 +1540,7 @@
             }
             return true;
         } catch (error) {
+            if (!isWorkspaceCurrent()) return false;
             const message =
                 error instanceof Error ? error.message : String(error);
             markSyncFailure(message, !navigator.onLine);
@@ -1530,17 +1565,17 @@
         }
         markSyncing();
         try {
-            const flushed = await flushOutbox();
+            const flushed = await inWorkspace(flushOutbox());
             for (const collection of $appState.collections) {
                 if (!collection.keyAvailable) continue;
-                await syncSpaceOperations(collection.id);
+                await inWorkspace(syncSpaceOperations(collection.id));
             }
-            await storeMaterializedPimState(
+            await inWorkspace(storeMaterializedPimState(
                 pimItems,
                 operationStates,
                 syncCursors,
-            );
-            const pending = (await listQueuedOperationEnvelopes()).length;
+            ));
+            const pending = (await inWorkspace(listQueuedOperationEnvelopes())).length;
             appState.update((state) => ({
                 ...state,
                 collections: state.collections.map((collection) => ({
@@ -1556,6 +1591,7 @@
             if (flushed > 0) setPendingOperations(pending);
             return true;
         } catch (error) {
+            if (!isWorkspaceCurrent()) return false;
             const message = error instanceof Error ? error.message : String(error);
             markSyncFailure(message, !navigator.onLine);
             return false;
@@ -1694,7 +1730,7 @@
         target?: SpaceMemberSummary,
     ): Promise<{ keyEpoch: number; rotationId: string; spaceKey: Uint8Array }> =>
     runDataPlaneExclusive(async () => {
-        if (!(await syncNowUnlocked())) {
+        if (!(await inWorkspace(syncNowUnlocked()))) {
             throw new Error("A complete sync is required before key rotation.");
         }
         const refreshedCollection = $appState.collections.find(
@@ -1703,14 +1739,14 @@
         if (!refreshedCollection || refreshedCollection.role !== "owner") {
             throw new Error("Only the current space owner can rotate membership keys.");
         }
-        const queued = (await listQueuedOperationEnvelopes()).filter(
+        const queued = (await inWorkspace(listQueuedOperationEnvelopes())).filter(
             (envelope) => envelope.space_id === collection.id,
         );
         if (queued.length > 0) {
             throw new Error("The encrypted outbox must be empty before key rotation.");
         }
         const baseSpaceSeq = syncCursors[collection.id] ?? 0;
-        const [membersResponse, devicesResponse] = await Promise.all([
+        const [membersResponse, devicesResponse] = await inWorkspace(Promise.all([
             withAccessRetry((accessToken) =>
                 cloudApi.listSpaceMembers(
                     $appState.cloudBaseUrl,
@@ -1725,7 +1761,7 @@
                     accessToken,
                 ),
             ),
-        ]);
+        ]));
         if (
             target &&
             !membersResponse.members.some(
@@ -1744,42 +1780,42 @@
             (device) =>
                 device.active && (!target || device.user_id !== target.user_id),
         );
-        const remainingDevicePackages = await Promise.all(
+        const remainingDevicePackages = await inWorkspace(Promise.all(
             remainingDevices.map(async (device) => ({
                 device_id: device.device_id,
                 key_epoch: newKeyEpoch,
                 encrypted_key_package: encode(
-                    await wrapSpaceKeyForDevice(
+                    await inWorkspace(wrapSpaceKeyForDevice(
                         newSpaceKey,
                         device.hpke_public_key,
-                    ),
+                    )),
                 ),
             })),
-        );
-        const remainingRecoveryPackages = await Promise.all(
+        ));
+        const remainingRecoveryPackages = await inWorkspace(Promise.all(
             remainingMembers.map(async (member) => ({
                 user_id: member.user_id,
                 key_epoch: newKeyEpoch,
                 encrypted_key_package: encode(
-                    await wrapSpaceKeyForDevice(
+                    await inWorkspace(wrapSpaceKeyForDevice(
                         newSpaceKey,
                         accountRecoveryPublicKey(member),
-                    ),
+                    )),
                 ),
             })),
-        );
-        const snapshots = await buildRotationSnapshots(
+        ));
+        const snapshots = await inWorkspace(buildRotationSnapshots(
             collection.id,
             newKeyEpoch,
             newSpaceKey,
             baseSpaceSeq,
-        );
+        ));
         const snapshotStreams = new Set(
             snapshots.map((snapshot) => snapshot.stream_id),
         );
         const quarantinedStreams = [
             ...new Set(
-                (await listQuarantinedOperationRecords(collection.id))
+                (await inWorkspace(listQuarantinedOperationRecords(collection.id)))
                     .filter((record) => record.space_seq <= baseSpaceSeq)
                     .map((record) => record.envelope.stream_id)
                     .filter((streamId) => !snapshotStreams.has(streamId)),
@@ -1791,17 +1827,17 @@
             expected_key_epoch: refreshedCollection.keyEpoch,
             new_key_epoch: newKeyEpoch,
             base_space_seq: baseSpaceSeq,
-            new_encrypted_metadata: await encryptVaultBytes(
+            new_encrypted_metadata: await inWorkspace(encryptVaultBytes(
                 newSpaceKey,
                 encode({ name: refreshedCollection.name }),
-            ),
+            )),
             remaining_device_packages: remainingDevicePackages,
             remaining_recovery_packages: remainingRecoveryPackages,
             snapshots,
             quarantined_streams: quarantinedStreams,
         };
         if (target) {
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.revokeSpaceMember(
                     $appState.cloudBaseUrl,
                     collection.id,
@@ -1809,19 +1845,19 @@
                     payload,
                     accessToken,
                 ),
-            );
+            ));
         } else {
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.rotateSpaceKey(
                     $appState.cloudBaseUrl,
                     collection.id,
                     payload,
                     accessToken,
                 ),
-            );
+            ));
         }
-        await storeSpaceKey(collection.id, newKeyEpoch, newSpaceKey);
-        if (!(await syncNowUnlocked())) {
+        await inWorkspace(storeSpaceKey(collection.id, newKeyEpoch, newSpaceKey));
+        if (!(await inWorkspace(syncNowUnlocked()))) {
             throw new Error(
                 "The key rotated successfully, but refreshing local state failed. Sync again to recover it.",
             );
@@ -1845,7 +1881,7 @@
         }
         setLoading(`member-revoke-${collection.id}-${target.user_id}`);
         try {
-            await rotateSpaceKeyForMembershipChange(collection, target);
+            await inWorkspace(rotateSpaceKeyForMembershipChange(collection, target));
             setNotice(
                 localized(
                     `${target.username} was removed and the space key was rotated.`,
@@ -1893,21 +1929,21 @@
         try {
             inviteRedeemedNote = "";
             const inviteCode = generateInviteCode();
-            const rotated = await rotateSpaceKeyForMembershipChange(collection);
+            const rotated = await inWorkspace(rotateSpaceKeyForMembershipChange(collection));
             setLoading("invite-generate");
-            const encryptedGroupKey = await wrapCollectionKeyWithInviteCode(
+            const encryptedGroupKey = await inWorkspace(wrapCollectionKeyWithInviteCode(
                 rotated.spaceKey,
                 inviteCode,
-            );
+            ));
             const encryptedNote = inviteNotePlaintext.trim()
-                ? await wrapBytesWithInviteCode(
+                ? await inWorkspace(wrapBytesWithInviteCode(
                       textEncoder.encode(inviteNotePlaintext.trim()),
                       inviteCode,
-                  )
+                  ))
                 : undefined;
-            const inviteCodeHash = await hashInviteCode(inviteCode);
+            const inviteCodeHash = await inWorkspace(hashInviteCode(inviteCode));
 
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.createInviteCode(
                     $appState.cloudBaseUrl,
                     {
@@ -1921,7 +1957,7 @@
                     },
                     accessToken,
                 ),
-            );
+            ));
 
             inviteCodeIssued = inviteCode;
             inviteNotePlaintext = "";
@@ -1948,27 +1984,27 @@
         setLoading("invite-redeem");
         try {
             inviteRedeemedNote = "";
-            const inviteCodeHash = await hashInviteCode(code);
-            const redeemed = await withAccessRetry((accessToken) =>
+            const inviteCodeHash = await inWorkspace(hashInviteCode(code));
+            const redeemed = await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.redeemInviteCode(
                     $appState.cloudBaseUrl,
                     inviteCodeHash,
                     accessToken,
                 ),
-            );
-            const collectionKey = await unwrapCollectionKeyWithInviteCode(
+            ));
+            const collectionKey = await inWorkspace(unwrapCollectionKeyWithInviteCode(
                 redeemed.encrypted_key_package,
                 code,
-            );
-            await storeSpaceKey(redeemed.space_id, redeemed.key_epoch, collectionKey);
+            ));
+            await inWorkspace(storeSpaceKey(redeemed.space_id, redeemed.key_epoch, collectionKey));
             const device = getActiveWebDevice();
             const devicePackage = encode(
-                await wrapSpaceKeyForDevice(
+                await inWorkspace(wrapSpaceKeyForDevice(
                     collectionKey,
                     device.identity.hpke_public_key,
-                ),
+                )),
             );
-            await withAccessRetry((accessToken) =>
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.putDeviceKeyPackage(
                     $appState.cloudBaseUrl,
                     redeemed.space_id,
@@ -1979,17 +2015,17 @@
                     },
                     accessToken,
                 ),
-            );
-            const recoveryPackage = await withActiveMasterKey(
+            ));
+            const recoveryPackage = await inWorkspace(withActiveMasterKey(
                 async (masterKey) =>
                     encode(
-                        await wrapSpaceKeyForAccountRecovery(
+                        await inWorkspace(wrapSpaceKeyForAccountRecovery(
                             masterKey,
                             collectionKey,
-                        ),
+                        )),
                     ),
-            );
-            await withAccessRetry((accessToken) =>
+            ));
+            await inWorkspace(withAccessRetry((accessToken) =>
                 cloudApi.putRecoveryKeyPackage(
                     $appState.cloudBaseUrl,
                     redeemed.space_id,
@@ -1997,13 +2033,13 @@
                     recoveryPackage,
                     accessToken,
                 ),
-            );
+            ));
             let decryptedInviteNote = "";
             if (redeemed.encrypted_note && redeemed.encrypted_note.length > 0) {
-                const decryptedBytes = await unwrapBytesWithInviteCode(
+                const decryptedBytes = await inWorkspace(unwrapBytesWithInviteCode(
                     redeemed.encrypted_note,
                     code,
-                );
+                ));
                 decryptedInviteNote = textDecoder.decode(decryptedBytes);
             }
 
@@ -2090,6 +2126,7 @@
 
     onMount(() => {
         const isCurrent = captureWorkspaceLifetime();
+        isWorkspaceCurrent = isCurrent;
         deviceAuthorizationCode =
             new URLSearchParams(window.location.search)
                 .get("device_code")

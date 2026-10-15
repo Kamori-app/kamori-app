@@ -129,22 +129,26 @@ const openDatabase = (): Promise<IDBDatabase> => {
   });
 };
 
-const readValue = async <T>(storeName: string, key: string): Promise<T | undefined> => {
+const readValue = async <T>(storeName: string, key: string, requireCurrent = () => {}): Promise<T | undefined> => {
   const database = await openDatabase();
   try {
-    return await new Promise<T | undefined>((resolve, reject) => {
+    requireCurrent();
+    const value = await new Promise<T | undefined>((resolve, reject) => {
       const request = database.transaction(storeName, "readonly").objectStore(storeName).get(key);
       request.onsuccess = () => resolve(request.result as T | undefined);
       request.onerror = () => reject(request.error ?? new Error("Encrypted storage read failed."));
     });
+    requireCurrent();
+    return value;
   } finally {
     database.close();
   }
 };
 
-const writeValue = async (storeName: string, key: string, value: unknown): Promise<void> => {
+const writeValue = async (storeName: string, key: string, value: unknown, requireCurrent = () => {}): Promise<void> => {
   const database = await openDatabase();
   try {
+    requireCurrent();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(storeName, "readwrite");
       transaction.objectStore(storeName).put(value, key);
@@ -152,14 +156,16 @@ const writeValue = async (storeName: string, key: string, value: unknown): Promi
       transaction.onerror = () => reject(transaction.error ?? new Error("Encrypted storage write failed."));
       transaction.onabort = () => reject(transaction.error ?? new Error("Encrypted storage write aborted."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
 };
 
-const deleteValue = async (storeName: string, key: string): Promise<void> => {
+const deleteValue = async (storeName: string, key: string, requireCurrent = () => {}): Promise<void> => {
   const database = await openDatabase();
   try {
+    requireCurrent();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(storeName, "readwrite");
       transaction.objectStore(storeName).delete(key);
@@ -167,6 +173,7 @@ const deleteValue = async (storeName: string, key: string): Promise<void> => {
       transaction.onerror = () => reject(transaction.error ?? new Error("Encrypted storage delete failed."));
       transaction.onabort = () => reject(transaction.error ?? new Error("Encrypted storage delete aborted."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
@@ -259,6 +266,17 @@ export const captureWebVaultLifetime = (): (() => boolean) => {
   return () => activeMasterKey === masterKey && activeAccountScope === scope;
 };
 
+/** Keep lookup scope and key paired across encryption and database awaits. */
+const captureVaultAccess = () => {
+  const masterKey = requireMasterKey();
+  const scope = activeAccountScope;
+  const isCurrent = captureWebVaultLifetime();
+  const requireCurrent = () => {
+    if (!isCurrent()) throw new Error("The encrypted vault changed. Unlock it and try again.");
+  };
+  return { masterKey, scope, requireCurrent };
+};
+
 const normalizeIdentity = (value: unknown): WebDeviceIdentity => {
   const identity = value as WebDeviceIdentity;
   for (const field of [
@@ -344,9 +362,12 @@ export const getActiveWebDevice = (): { deviceId: string; identity: WebDeviceIde
 export const withActiveMasterKey = async <T>(
   operation: (masterKey: Uint8Array) => Promise<T> | T,
 ): Promise<T> => {
+  const { requireCurrent } = captureVaultAccess();
   const masterKey = new Uint8Array(requireMasterKey());
   try {
-    return await operation(masterKey);
+    const result = await operation(masterKey);
+    requireCurrent();
+    return result;
   } finally {
     masterKey.fill(0);
   }
@@ -442,17 +463,20 @@ export const storeSpaceKey = async (
   keyEpoch: number,
   key: Uint8Array,
 ): Promise<void> => {
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   if (key.length !== 32) {
     throw new Error("Space key must be 32 bytes.");
   }
   if (!Number.isSafeInteger(keyEpoch) || keyEpoch <= 0) {
     throw new Error("Space key epoch must be positive.");
   }
-  const encrypted = await encryptVaultBytes(requireMasterKey(), key);
+  const encrypted = await encryptVaultBytes(masterKey, key);
+  requireCurrent();
   await writeValue(
     SPACE_KEY_STORE,
-    `${activeAccountScope}:${spaceId}:${keyEpoch}`,
+    `${scope}:${spaceId}:${keyEpoch}`,
     encrypted,
+    requireCurrent,
   );
 };
 
@@ -460,19 +484,24 @@ export const loadSpaceKey = async (
   spaceId: string,
   keyEpoch: number,
 ): Promise<Uint8Array | null> => {
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   const encrypted = await readValue<Uint8Array>(
     SPACE_KEY_STORE,
-    `${activeAccountScope}:${spaceId}:${keyEpoch}`,
+    `${scope}:${spaceId}:${keyEpoch}`,
+    requireCurrent,
   );
-  return encrypted ? decryptVaultBytes(requireMasterKey(), encrypted) : null;
+  const key = encrypted ? await decryptVaultBytes(masterKey, encrypted) : null;
+  requireCurrent();
+  return key;
 };
 
 export const queueOperationEnvelope = async (
   envelope: OperationEnvelopeV1,
 ): Promise<void> => {
-  requireMasterKey();
+  const { scope, requireCurrent } = captureVaultAccess();
   const database = await openDatabase();
   try {
+    requireCurrent();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(
         [OUTBOX_STORE, META_STORE],
@@ -480,13 +509,15 @@ export const queueOperationEnvelope = async (
       );
       const outbox = transaction.objectStore(OUTBOX_STORE);
       const meta = transaction.objectStore(META_STORE);
-      const counterKey = `outbox-order:${activeAccountScope}`;
-      const outboxKey = `${activeAccountScope}:${envelope.space_id}:${envelope.client_op_id}`;
+      const counterKey = `outbox-order:${scope}`;
+      const outboxKey = `${scope}:${envelope.space_id}:${envelope.client_op_id}`;
       const counterRequest = meta.get(counterKey);
       counterRequest.onsuccess = () => {
+        try { requireCurrent(); } catch { transaction.abort(); return; }
         const current = counterRequest.result;
         const existingRequest = outbox.get(outboxKey);
         existingRequest.onsuccess = () => {
+          try { requireCurrent(); } catch { transaction.abort(); return; }
           const existing = existingRequest.result as
             | QueuedEnvelopeRecord
             | undefined;
@@ -514,7 +545,7 @@ export const queueOperationEnvelope = async (
           );
           // Remove the pre-space-scoping key after the replacement is queued in
           // the same transaction. This upgrades existing offline outboxes safely.
-          outbox.delete(`${activeAccountScope}:${envelope.client_op_id}`);
+          outbox.delete(`${scope}:${envelope.client_op_id}`);
         };
         existingRequest.onerror = () => transaction.abort();
       };
@@ -525,6 +556,7 @@ export const queueOperationEnvelope = async (
       transaction.onabort = () =>
         reject(transaction.error ?? new Error("Outbox write aborted."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
@@ -537,11 +569,12 @@ export const commitLocalPimOperation = async (
   operations: MaterializedOperationState[],
   cursors: Record<string, number>,
 ): Promise<void> => {
-  const masterKey = requireMasterKey();
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   const state: MaterializedPimState = { version: 5, items, operations, cursors };
   const encryptedState = await encryptVaultBytes(masterKey, encode(state));
   const database = await openDatabase();
   try {
+    requireCurrent();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(
         [OUTBOX_STORE, META_STORE, PIM_STATE_STORE],
@@ -549,13 +582,15 @@ export const commitLocalPimOperation = async (
       );
       const outbox = transaction.objectStore(OUTBOX_STORE);
       const meta = transaction.objectStore(META_STORE);
-      const counterKey = `outbox-order:${activeAccountScope}`;
-      const outboxKey = `${activeAccountScope}:${envelope.space_id}:${envelope.client_op_id}`;
+      const counterKey = `outbox-order:${scope}`;
+      const outboxKey = `${scope}:${envelope.space_id}:${envelope.client_op_id}`;
       const counterRequest = meta.get(counterKey);
       counterRequest.onsuccess = () => {
+        try { requireCurrent(); } catch { transaction.abort(); return; }
         const current = counterRequest.result;
         const existingRequest = outbox.get(outboxKey);
         existingRequest.onsuccess = () => {
+          try { requireCurrent(); } catch { transaction.abort(); return; }
           const existing = existingRequest.result as QueuedEnvelopeRecord | undefined;
           const existingOrder = existing?.queueOrder;
           const queueOrder =
@@ -577,8 +612,8 @@ export const commitLocalPimOperation = async (
             { envelope, queueOrder } satisfies QueuedEnvelopeRecord,
             outboxKey,
           );
-          outbox.delete(`${activeAccountScope}:${envelope.client_op_id}`);
-          transaction.objectStore(PIM_STATE_STORE).put(encryptedState, activeAccountScope);
+          outbox.delete(`${scope}:${envelope.client_op_id}`);
+          transaction.objectStore(PIM_STATE_STORE).put(encryptedState, scope);
         };
         existingRequest.onerror = () => transaction.abort();
       };
@@ -589,16 +624,18 @@ export const commitLocalPimOperation = async (
       transaction.onabort = () =>
         reject(transaction.error ?? new Error("Local PIM commit aborted."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
 };
 
 export const listQueuedOperationEnvelopes = async (): Promise<OperationEnvelopeV1[]> => {
-  requireMasterKey();
+  const { scope, requireCurrent } = captureVaultAccess();
   const database = await openDatabase();
   try {
-    return await new Promise<OperationEnvelopeV1[]>((resolve, reject) => {
+    requireCurrent();
+    const result = await new Promise<OperationEnvelopeV1[]>((resolve, reject) => {
       const request = database
         .transaction(OUTBOX_STORE, "readonly")
         .objectStore(OUTBOX_STORE)
@@ -621,7 +658,7 @@ export const listQueuedOperationEnvelopes = async (): Promise<OperationEnvelopeV
         }
         if (
           typeof cursor.key === "string" &&
-          cursor.key.startsWith(`${activeAccountScope}:`)
+          cursor.key.startsWith(`${scope}:`)
         ) {
           const value = cursor.value as
             | QueuedEnvelopeRecord
@@ -643,6 +680,8 @@ export const listQueuedOperationEnvelopes = async (): Promise<OperationEnvelopeV
       };
       request.onerror = () => reject(request.error ?? new Error("Outbox read failed."));
     });
+    requireCurrent();
+    return result;
   } finally {
     database.close();
   }
@@ -652,18 +691,20 @@ export const removeQueuedOperationEnvelope = async (
   spaceId: string,
   clientOpId: string,
 ): Promise<void> => {
-  requireMasterKey();
+  const { scope, requireCurrent } = captureVaultAccess();
   const database = await openDatabase();
   try {
+    requireCurrent();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(OUTBOX_STORE, "readwrite");
       const store = transaction.objectStore(OUTBOX_STORE);
-      store.delete(`${activeAccountScope}:${spaceId}:${clientOpId}`);
+      store.delete(`${scope}:${spaceId}:${clientOpId}`);
       // A queued operation written by version 2 used the unscoped key.
-      store.delete(`${activeAccountScope}:${clientOpId}`);
+      store.delete(`${scope}:${clientOpId}`);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error ?? new Error("Outbox delete failed."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
@@ -679,14 +720,17 @@ export const quarantineOperationEnvelope = async (
   spaceSeq: number,
   reasonCode: string,
 ): Promise<void> => {
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   const encrypted = await encryptVaultBytes(
-    requireMasterKey(),
+    masterKey,
     encode({ version: 1, envelope, space_seq: spaceSeq, reason_code: reasonCode }),
   );
+  requireCurrent();
   await writeValue(
     QUARANTINE_STORE,
-    `${activeAccountScope}:${envelope.space_id}:${envelope.client_op_id}`,
+    `${scope}:${envelope.space_id}:${envelope.client_op_id}`,
     encrypted,
+    requireCurrent,
   );
 };
 
@@ -700,17 +744,18 @@ export interface QuarantinedOperationRecord {
 export const listQuarantinedOperationRecords = async (
   spaceId: string,
 ): Promise<QuarantinedOperationRecord[]> => {
-  const masterKey = requireMasterKey();
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   const database = await openDatabase();
   let encryptedRecords: Uint8Array[];
   try {
+    requireCurrent();
     encryptedRecords = await new Promise<Uint8Array[]>((resolve, reject) => {
       const records: Uint8Array[] = [];
       const request = database
         .transaction(QUARANTINE_STORE, "readonly")
         .objectStore(QUARANTINE_STORE)
         .openCursor();
-      const prefix = `${activeAccountScope}:${spaceId}:`;
+      const prefix = `${scope}:${spaceId}:`;
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) {
@@ -725,6 +770,7 @@ export const listQuarantinedOperationRecords = async (
       request.onerror = () =>
         reject(request.error ?? new Error("Quarantine read failed."));
     });
+    requireCurrent();
   } finally {
     database.close();
   }
@@ -736,6 +782,7 @@ export const listQuarantinedOperationRecords = async (
       space_seq?: number;
       reason_code?: string;
     };
+    requireCurrent();
     if (
       decoded.version !== 1 ||
       !decoded.envelope ||
@@ -757,10 +804,11 @@ export const removeQuarantinedOperationEnvelope = async (
   spaceId: string,
   clientOpId: string,
 ): Promise<void> => {
-  requireMasterKey();
+  const { scope, requireCurrent } = captureVaultAccess();
   await deleteValue(
     QUARANTINE_STORE,
-    `${activeAccountScope}:${spaceId}:${clientOpId}`,
+    `${scope}:${spaceId}:${clientOpId}`,
+    requireCurrent,
   );
 };
 
@@ -770,18 +818,22 @@ export const storeMaterializedPimState = async (
   operations: MaterializedOperationState[],
   cursors: Record<string, number>,
 ): Promise<void> => {
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
   const state: MaterializedPimState = { version: 5, items, operations, cursors };
-  const encrypted = await encryptVaultBytes(requireMasterKey(), encode(state));
-  await writeValue(PIM_STATE_STORE, activeAccountScope, encrypted);
+  const encrypted = await encryptVaultBytes(masterKey, encode(state));
+  requireCurrent();
+  await writeValue(PIM_STATE_STORE, scope, encrypted, requireCurrent);
 };
 
 /** Restores the encrypted PIM projection for the active account. */
 export const loadMaterializedPimState = async (): Promise<MaterializedPimState> => {
-  const encrypted = await readValue<Uint8Array>(PIM_STATE_STORE, activeAccountScope);
+  const { masterKey, scope, requireCurrent } = captureVaultAccess();
+  const encrypted = await readValue<Uint8Array>(PIM_STATE_STORE, scope, requireCurrent);
   if (!encrypted) {
     return { version: 5, items: [], operations: [], cursors: {} };
   }
-  const decoded = decode(await decryptVaultBytes(requireMasterKey(), encrypted));
+  const decoded = decode(await decryptVaultBytes(masterKey, encrypted));
+  requireCurrent();
   if (Array.isArray(decoded)) {
     return {
       version: 5,

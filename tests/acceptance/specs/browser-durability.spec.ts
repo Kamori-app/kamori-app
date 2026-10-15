@@ -15,10 +15,13 @@ let refreshes: { session: string; cookie: string; csrf: string; id: string }[];
 let bootstraps: { session: string; cookie: string }[];
 let rotations: Map<string, string>;
 let failure: "none" | "lost" | "partial";
+let holdAppend: (() => Promise<void>) | undefined;
 let holdRefresh: (() => Promise<void>) | undefined;
 let online: boolean;
 let loseAppend: boolean;
 let appends: string[];
+let appendAuthorizations: string[];
+let appendStatus: number;
 let operations: Map<string, { envelope: any; space_seq: number }>;
 let devices: { device_id: string; signing_public_key: Uint8Array }[];
 const reply = (response: ServerResponse, body: unknown, status = 200) => {
@@ -75,6 +78,7 @@ test.beforeAll(async () => {
       if (url.pathname === "/pim/operations" && request.method === "POST") {
         const { envelope } = await body(request);
         appends.push(envelope.client_op_id);
+        appendAuthorizations.push(request.headers.authorization ?? "");
         const duplicate = operations.has(envelope.client_op_id);
         const stored = operations.get(envelope.client_op_id) ?? { envelope, space_seq: operations.size + 1 };
         operations.set(envelope.client_op_id, stored);
@@ -83,6 +87,8 @@ test.beforeAll(async () => {
           response.writeHead(200, { "content-type": "application/msgpack", "content-length": 100, connection: "close" });
           response.end(new Uint8Array([0x81])); return;
         }
+        if (holdAppend) await holdAppend();
+        if (appendStatus !== 200) { reply(response, { message: "Synthetic expired access" }, appendStatus); return; }
         reply(response, { accepted: true, duplicate, space_seq: stored.space_seq }); return;
       }
       if (url.pathname === "/pim/operations") {
@@ -114,12 +120,12 @@ test.afterAll(async () => {
 });
 test.afterEach(async ({}, info) => {
   const path = info.outputPath("durability-boundaries.json");
-  writeFileSync(path, JSON.stringify({ refreshes, bootstraps, appends, distinctRotations: rotations?.size, distinctOperations: operations?.size }, null, 2));
+  writeFileSync(path, JSON.stringify({ refreshes, bootstraps, appends, appendAuthorizations, distinctRotations: rotations?.size, distinctOperations: operations?.size }, null, 2));
   await info.attach("durability-boundaries", { path, contentType: "application/json" });
 });
 test.beforeEach(() => {
   refreshes = []; bootstraps = []; rotations = new Map(); failure = "none"; holdRefresh = undefined;
-  online = false; loseAppend = false; appends = []; operations = new Map(); devices = [];
+  holdAppend = undefined; online = false; loseAppend = false; appends = []; appendAuthorizations = []; appendStatus = 200; operations = new Map(); devices = [];
 });
 async function open(page: Page) {
   await page.goto(origin);
@@ -194,8 +200,8 @@ for (const outcome of ["lost", "partial"] as const) {
   });
 }
 
-async function start(page: Page, account = "alice", endpoint = `${origin}/pim`) {
-  const device = await page.evaluate(args => (window as any).durability.start(args), { endpoint, account, space });
+async function start(page: Page, account = "alice", endpoint = `${origin}/pim`, keyByte = 7) {
+  const device = await page.evaluate(args => (window as any).durability.start(args), { endpoint, account, space, keyByte });
   if (!devices.some(item => item.device_id === device.deviceId)) {
     devices.push({ device_id: device.deviceId, signing_public_key: new Uint8Array(device.signingPublicKey) });
   }
@@ -357,4 +363,193 @@ test("lost sync acknowledgement is retried idempotently through the production c
   await expect.poll(() => page.evaluate(() => (window as any).durability.sync.lastSuccessAt)).toBeGreaterThan(previousSync);
   expect((await snapshot(page)).state).toEqual(synced.state);
   expect(appends).toHaveLength(2);
+});
+
+
+test("@smoke an admitted Alice acknowledgement cannot overwrite Bob after a distinct-key account switch", async ({ page }, info) => {
+  await open(page); await start(page, "bob", `${origin}/pim`, 8);
+  await save(page, "Bob durable sentinel");
+  const bobBefore = await snapshot(page);
+  await start(page); await save(page, "Alice private task");
+  const aliceBefore = await snapshot(page);
+  expect(bobBefore.queue).toHaveLength(1);
+  expect(aliceBefore.queue).toHaveLength(1);
+  expect(bobBefore.state.cursors).toEqual({});
+  expect(aliceBefore.state.cursors).toEqual({});
+  expect(aliceBefore.state.operations[0].spaceSeq).toBe(0);
+  // Remove automatic work left by save. The next admitted operation is manual sync.
+  await open(page); await start(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  holdAppend = () => gate; online = true;
+  await page.evaluate(() => (window as any).durability.requestManualSync());
+  await expect.poll(() => appends.length).toBe(1);
+  expect(appends).toEqual([aliceBefore.queue[0].client_op_id]);
+  expect(appendAuthorizations).toEqual(["Bearer synthetic-alice"]);
+  expect(operations.get(appends[0])?.envelope).toEqual(aliceBefore.queue[0]);
+  online = false;
+  await page.evaluate(args => (window as any).durability.start(args), {
+    endpoint: `${origin}/pim`, account: "bob", space, keyByte: 8,
+  });
+  await expect(page.getByText("Bob durable sentinel", { exact: true })).toBeVisible();
+  const bobWhileHeld = await snapshot(page);
+  expect(bobWhileHeld).toEqual(bobBefore);
+  release(); holdAppend = undefined;
+  await expect.poll(() => page.evaluate(async () => {
+    const locks = await navigator.locks.query();
+    return [...(locks.held ?? []), ...(locks.pending ?? [])]
+      .filter(lock => lock.name === "kamori-web-data-plane-v1").length;
+  })).toBe(0);
+  const bobAfter = await snapshot(page);
+  await start(page);
+  const aliceAfter = await snapshot(page);
+  const evidence = { heldOperation: appends[0], authorization: appendAuthorizations[0],
+    aliceBefore, bobBefore, bobWhileHeld, aliceAfter, bobAfter };
+  const evidencePath = info.outputPath("held-ack-snapshots.json");
+  writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+  await info.attach("held-ack-snapshots", { path: evidencePath, contentType: "application/json" });
+  expect(bobAfter).toEqual(bobBefore);
+  expect(aliceAfter).toEqual(aliceBefore);
+  await open(page); await start(page, "bob", `${origin}/pim`, 8);
+  const bobReopened = await snapshot(page);
+  expect(bobReopened).toEqual(bobBefore);
+  await open(page); await start(page);
+  const aliceReopened = await snapshot(page);
+  expect(aliceReopened).toEqual(aliceBefore);
+  // The remote acknowledgement succeeded, but the stale client kept its edit.
+  // Reopening Alice retries exactly that operation and consumes the duplicate ack.
+  online = true;
+  await page.evaluate(() => (window as any).durability.requestManualSync());
+  await expect.poll(async () => (await snapshot(page)).queue.length).toBe(0);
+  expect(appends).toEqual([aliceBefore.queue[0].client_op_id, aliceBefore.queue[0].client_op_id]);
+  expect(operations.size).toBe(1);
+  const retried = await snapshot(page);
+  expect(retried.state.items).toEqual(aliceBefore.state.items);
+  expect(retried.state.operations).toEqual(aliceBefore.state.operations.map((op: any) => ({ ...op, spaceSeq: 1 })));
+  expect(retried.state.cursors).toEqual({ [space]: 1 });
+  online = false;
+  await open(page); await start(page, "bob", `${origin}/pim`, 8);
+  const bobAfterAliceRetry = await snapshot(page);
+  expect(bobAfterAliceRetry).toEqual(bobBefore);
+  const retryPath = info.outputPath("held-ack-reopen-retry.json");
+  writeFileSync(retryPath, JSON.stringify({ ...evidence, bobReopened, aliceReopened, retried,
+    bobAfterAliceRetry, appends, distinctOperations: operations.size }, null, 2));
+  await info.attach("held-ack-reopen-retry", { path: retryPath, contentType: "application/json" });
+});
+
+
+for (const helper of ["storeMaterializedPimState", "commitLocalPimOperation", "removeQueuedOperationEnvelope",
+  "listQueuedOperationEnvelopes", "queueOperationEnvelope", "loadMaterializedPimState", "storeSpaceKey", "quarantineOperationEnvelope",
+  "listQuarantinedOperationRecords", "removeQuarantinedOperationEnvelope", "loadSpaceKey"] as const) {
+  test(`vault helper ${helper} rejects a switch while its real database open is held`, async ({ page }) => {
+    await open(page); await start(page, "bob", `${origin}/pim`, 8); await save(page, "Bob helper sentinel");
+    const bob = await snapshot(page);
+    await start(page); await save(page, "Alice helper sentinel");
+    const alice = await snapshot(page);
+    await page.evaluate(async ({ helper, alice, space }) => {
+      const w = window as any;
+      const vault = w.durability.vault;
+      const envelope = alice.queue[0];
+      await vault.quarantineOperationEnvelope(envelope, 1, "unresolved_pim_graph");
+      const realOpen = indexedDB.open.bind(indexedDB);
+      w.databaseHeld = false;
+      indexedDB.open = (...args: Parameters<IDBFactory["open"]>) => {
+        indexedDB.open = realOpen;
+        const request = realOpen(...args);
+        Object.defineProperty(request, "onsuccess", { set(callback) {
+          request.addEventListener("success", event => {
+            w.databaseHeld = true;
+            w.releaseDatabase = () => callback.call(request, event);
+          });
+        } });
+        return request;
+      };
+      const calls: Record<string, () => Promise<unknown>> = {
+        storeMaterializedPimState: () => vault.storeMaterializedPimState([], [], { [space]: 99 }),
+        commitLocalPimOperation: () => vault.commitLocalPimOperation(envelope, [], [], { [space]: 99 }),
+        removeQueuedOperationEnvelope: () => vault.removeQueuedOperationEnvelope(space, envelope.client_op_id),
+        listQueuedOperationEnvelopes: () => vault.listQueuedOperationEnvelopes(),
+        queueOperationEnvelope: () => vault.queueOperationEnvelope({ ...envelope, client_op_id: crypto.randomUUID() }),
+        loadMaterializedPimState: () => vault.loadMaterializedPimState(),
+        storeSpaceKey: () => vault.storeSpaceKey(space, 1, new Uint8Array(32).fill(33)),
+        quarantineOperationEnvelope: () => vault.quarantineOperationEnvelope(envelope, 2, "invalid_ciphertext"),
+        listQuarantinedOperationRecords: () => vault.listQuarantinedOperationRecords(space),
+        removeQuarantinedOperationEnvelope: () => vault.removeQuarantinedOperationEnvelope(space, envelope.client_op_id),
+        loadSpaceKey: () => vault.loadSpaceKey(space, 1),
+      };
+      w.helperResult = calls[helper]().then(() => "resolved", (error: Error) => error.message);
+    }, { helper, alice, space });
+    await expect.poll(() => page.evaluate(() => (window as any).databaseHeld)).toBe(true);
+    await start(page, "bob", `${origin}/pim`, 8);
+    await page.evaluate(() => (window as any).releaseDatabase());
+    expect(await page.evaluate(() => (window as any).helperResult)).toContain("vault changed");
+    expect(await snapshot(page)).toEqual(bob);
+    expect(await page.evaluate(async space => ({
+      key: Array.from(await (window as any).durability.vault.loadSpaceKey(space, 1)),
+      quarantined: await (window as any).durability.vault.listQuarantinedOperationRecords(space),
+    }), space)).toEqual({ key: Array(32).fill(9), quarantined: [] });
+    // Unlock directly so the fixture does not re-seed and conceal a key write.
+    await page.evaluate(async endpoint => {
+      const vault = (window as any).durability.vault;
+      vault.lockWebVault();
+      await vault.unlockOrCreateWebVault(endpoint, "alice", new Uint8Array(32).fill(7));
+    }, `${origin}/pim`);
+    expect(await snapshot(page)).toEqual(alice);
+    const extra = await page.evaluate(async space => ({
+      key: Array.from(await (window as any).durability.vault.loadSpaceKey(space, 1)),
+      quarantined: await (window as any).durability.vault.listQuarantinedOperationRecords(space),
+    }), space);
+    expect(extra.key).toEqual(Array(32).fill(9));
+    expect(extra.quarantined).toEqual([{ version: 1, envelope: alice.queue[0], space_seq: 1, reason_code: "unresolved_pim_graph" }]);
+  });
+}
+
+
+test("a stale unauthorized append cannot refresh or clear the replacement account", async ({ page }) => {
+  await open(page); await start(page, "bob", `${origin}/pim`, 8); await save(page, "Bob auth sentinel");
+  const bob = await snapshot(page);
+  await start(page); await save(page, "Alice auth sentinel");
+  const alice = await snapshot(page);
+  await open(page); await start(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  holdAppend = () => gate; appendStatus = 401; online = true;
+  await page.evaluate(() => (window as any).durability.requestManualSync());
+  await expect.poll(() => appends.length).toBe(1);
+  expect(appends).toEqual([alice.queue[0].client_op_id]);
+  online = false;
+  await page.evaluate(args => (window as any).durability.start(args), {
+    endpoint: `${origin}/pim`, account: "bob", space, keyByte: 8,
+  });
+  await expect(page.getByText("Bob auth sentinel", { exact: true })).toBeVisible();
+  release(); holdAppend = undefined;
+  await expect.poll(() => page.evaluate(async () => {
+    const locks = await navigator.locks.query();
+    return [...(locks.held ?? []), ...(locks.pending ?? [])]
+      .filter(lock => lock.name === "kamori-web-data-plane-v1").length;
+  })).toBe(0);
+  expect(refreshes).toEqual([]);
+  expect(bootstraps).toEqual([]);
+  expect(await page.evaluate(() => (window as any).durability.session())).toEqual({
+    username: "bob", token: "synthetic-bob", accessToken: "synthetic-bob",
+  });
+  expect(await snapshot(page)).toEqual(bob);
+  await start(page); expect(await snapshot(page)).toEqual(alice);
+});
+
+test("master-key callbacks reject a replaced lifetime and erase their temporary key", async ({ page }) => {
+  await open(page); await start(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.keyResult = w.durability.vault.withActiveMasterKey(async (key: Uint8Array) => {
+      w.temporaryKey = key;
+      await new Promise<void>(resolve => { w.releaseKey = resolve; });
+      return "obsolete result";
+    }).then(() => "resolved", (error: Error) => error.message);
+  });
+  await start(page, "bob", `${origin}/pim`, 8);
+  await page.evaluate(() => (window as any).releaseKey());
+  expect(await page.evaluate(() => (window as any).keyResult)).toContain("vault changed");
+  expect(await page.evaluate(() => Array.from((window as any).temporaryKey))).toEqual(Array(32).fill(0));
+  expect(await page.evaluate(() => (window as any).durability.vault.withActiveMasterKey((key: Uint8Array) => key[0]))).toBe(8);
 });
