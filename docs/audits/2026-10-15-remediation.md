@@ -32,3 +32,13 @@ rustup run 1.97.1 cargo clippy -p cloud-server --all-targets -- -D warnings
 RED воспроизвёл неидемпотентный retry, двойной учёт удалённых данных, deadlock двух разных операций и deadlock миграции с append. GREEN: **142 passed**, fmt/strict Clippy чистые; SQLx проверяет чистую установку и обновление с уже применённой `003`; миграционные тесты используют изолированные схемы/реальные ledger и locks. Browser sharing acceptance: **1 passed, 26,4 s**, проверены editor/reader и расшифровка note точного повтора. Независимое ревью и повторное ревью миграции пройдены.
 
 Проверочная БД после исправления ещё не выпущенной `002`: `kamori_audit_fix1`. Старый тестовый ledger не переписывался. Перед финальным acceptance требуется обновить только disposable БД проекта `kamori-audit-20261015`, поскольку старый контейнерный запуск содержит предыдущий checksum этой новой миграции. Production не затрагивался.
+
+## DAV и native HTTPS
+
+Коммиты `6470410`, `ec2ab13`; закрыты C01 и C05. DAV сохраняет stream/parent выбранной ветки, тип задачи и tombstone ancestry; новый href получает v5 только при отсутствии существующего ресурса. Полный graph preflight переиспользует validator reconciliation до постановки операции в outbox. Шесть регрессий ревью воспроизвели mutation при HTTP-отказе; теперь malformed sibling/seed не меняет outbox, operation states, projections или journal. Подпись проверена изменением каждого публичного поля отдельно.
+
+Реальные HTTP-проверки покрывают task/event/contact, conflict copy, ETag retry, удаление и повторное создание tombstoned href. Итог: **62 unit +14 DAV passed**, fmt/strict Clippy чистые; отдельный FRB graph: **51 passed**. Независимое и повторное ревью пройдены.
+
+Оба native reqwest manifest явно включают TLS. Общий production builder применяется в FRB auth и sync runtime; синтетический HTTPS-сервер проверяет trusted CA success, untrusted CA и неверный hostname. Android использует Mozilla public roots без отсутствующего JVM verifier initialization; desktop/iOS сохраняют platform trust. Android **не** использует private/user CA или custom network-security-config roots; root bundle обновляется с клиентом. Системный trust store не менялся.
+
+Изолированные normal dependency gates для desktop/FRB/Android пройдены; `aarch64-linux-android` FRB `--lib` и desktop `--lib` компилируются. Android check потребовал NDK `llvm-ar/llvm-ranlib` и `aarch64-linux-android24-clang`. Полная native упаковка и физические устройства остаются отдельными gates; compile/host TLS не выдаются за проверку device runtime.
