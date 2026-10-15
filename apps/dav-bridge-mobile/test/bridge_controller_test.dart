@@ -1,3 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dav_bridge_mobile/src/services/background_sync_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -145,7 +151,11 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   int moveCollectionToTrashCalls = 0;
   int configureCalls = 0;
   int provisionCalls = 0;
+  List<PimItem> materializedItems = [];
+  Future<void> Function()? onSync;
+  int syncCalls = 0;
   int revokeCalls = 0;
+  bool failRevocation = false;
   int createCollectionCalls = 0;
   bool failProvisioning = false;
   Future<void> Function()? beforeProvision;
@@ -222,6 +232,7 @@ class _FakeRustBridgeApi implements RustBridgeApi {
     required String refreshToken,
   }) async {
     revokeCalls += 1;
+    if (failRevocation) throw StateError('offline');
     return true;
   }
 
@@ -241,10 +252,14 @@ class _FakeRustBridgeApi implements RustBridgeApi {
   }
 
   @override
-  Future<int> syncNow() async => syncResult;
+  Future<int> syncNow() async {
+    syncCalls += 1;
+    await onSync?.call();
+    return syncResult;
+  }
 
   @override
-  Future<List<PimItem>> listPimItems() async => const <PimItem>[];
+  Future<List<PimItem>> listPimItems() async => materializedItems;
 
   @override
   Future<PimItem> upsertPimItem({required PimDraft draft}) async {
@@ -486,6 +501,8 @@ class _FakeSystemProjectionService implements SystemProjectionService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  backgroundTests();
   ProviderContainer createContainer({
     required _FakeRustBridgeApi bridge,
     _FakeRefreshTokenStorage? refreshTokenStorage,
@@ -735,6 +752,72 @@ void main() {
       expect(bridge.provisionCalls, 1);
     });
 
+    test(
+        'queued other-session revocation failure preserves current offline PIM',
+        () async {
+      final bridge = _FakeRustBridgeApi()
+        ..failRevocation = true
+        ..failProvisioning = true
+        ..provisionedCollections = [
+          CollectionEntry(
+              id: 'offline-space', name: 'Offline', cmk: List.filled(32, 7))
+        ];
+      final tokens = _FakeRefreshTokenStorage();
+      await tokens.queueRevocation(
+          cloudBaseUrl: 'https://old.example', refreshToken: 'old-session');
+      bridge.materializedItems = [
+        await bridge.upsertPimItem(
+            draft: const PimDraft(
+          spaceId: 'offline-space',
+          kind: PimItemKind.task,
+          title: 'Offline task',
+        ))
+      ];
+      final runtime = _FakeSyncRuntimeStorage()
+        ..snapshot = MobileSyncRuntimeSnapshot(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'alice',
+          sqlitePath: '.kamori/mobile-cache.sqlite3',
+          accessToken: 'persisted-access',
+          collections: bridge.provisionedCollections,
+          backgroundSyncEnabled: false,
+        );
+      final vault = _FakeDeviceVaultStorage()
+        ..vault = MobileDeviceVault(
+          cloudBaseUrl: 'https://api.kamori.app',
+          username: 'alice',
+          accountMasterKey: List<int>.filled(32, 1),
+          device: DeviceSecrets(
+            deviceId: '00000000-0000-4000-8000-000000000001',
+            signingPrivateKey: List<int>.filled(32, 2),
+            hpkePrivateKey: List<int>.filled(32, 3),
+            hpkePublicKey: List<int>.filled(32, 4),
+          ),
+        );
+      var scheduleCalls = 0;
+      final container = createContainer(
+        bridge: bridge,
+        refreshTokenStorage: tokens,
+        syncRuntimeStorage: runtime,
+        deviceVaultStorage: vault,
+        schedulePeriodicSync: () async => scheduleCalls += 1,
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .restorePersistedSession();
+
+      final state = container.read(bridgeControllerProvider);
+      expect(state.isAuthenticated, isTrue);
+      expect(state.backgroundSyncEnabled, isFalse);
+      expect(scheduleCalls, 0);
+      expect(state.pimItems.single.title, 'Offline task');
+      expect(
+          (await tokens.readQueuedRevocation())?.refreshToken, 'old-session');
+      expect(state.error, contains('revocation'));
+    });
+
     test('password login surfaces totp required message', () async {
       final bridge = _FakeRustBridgeApi()
         ..passwordLoginResult = const LoginResult(
@@ -972,6 +1055,50 @@ void main() {
       expect(state.backgroundSyncEnabled, isTrue);
     });
 
+    test(
+        'failed background admission does not roll back an authenticated login',
+        () async {
+      final runtime = _FakeSyncRuntimeStorage();
+      final container = createContainer(
+        bridge: _FakeRustBridgeApi(),
+        syncRuntimeStorage: runtime,
+        schedulePeriodicSync: () async {
+          throw StateError('not admitted');
+        },
+      );
+      addTearDown(container.dispose);
+      await container
+          .read(bridgeControllerProvider.notifier)
+          .loginWithPassword(username: 'alice', password: 'secret');
+      expect(container.read(bridgeControllerProvider).isAuthenticated, isTrue);
+      expect(container.read(bridgeControllerProvider).backgroundSyncEnabled,
+          isFalse);
+      expect(runtime.snapshot?.backgroundSyncEnabled, isFalse);
+    });
+
+    test('failed background admission disables persisted preference', () async {
+      final runtime = _FakeSyncRuntimeStorage();
+      var fail = false;
+      final container = createContainer(
+        bridge: _FakeRustBridgeApi(),
+        syncRuntimeStorage: runtime,
+        schedulePeriodicSync: () async {
+          if (fail) throw StateError('not admitted');
+        },
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(bridgeControllerProvider.notifier);
+      await controller.loginWithPassword(username: 'alice', password: 'secret');
+      await controller.setBackgroundSyncEnabled(false);
+      fail = true;
+      await controller.setBackgroundSyncEnabled(true);
+      expect(container.read(bridgeControllerProvider).backgroundSyncEnabled,
+          isFalse);
+      expect(container.read(bridgeControllerProvider).error,
+          contains('not admitted'));
+      expect(runtime.snapshot?.backgroundSyncEnabled, isFalse);
+    });
+
     test('logout clears session and cancels periodic sync', () async {
       final bridge = _FakeRustBridgeApi();
       var cancelCalls = 0;
@@ -1037,5 +1164,209 @@ void main() {
       expect(state.collections.first.id, 'collection-shared-1');
       expect(state.collections.first.cmk, hasLength(32));
     });
+  });
+}
+
+void backgroundTests() {
+  const base = 'https://api.kamori.app';
+  MobileSyncRuntimeSnapshot snapshot(
+          {String username = 'alice', bool enabled = true}) =>
+      MobileSyncRuntimeSnapshot(
+        cloudBaseUrl: base,
+        username: username,
+        sqlitePath: '.kamori/mobile-cache.sqlite3',
+        accessToken: 'access',
+        collections: const [],
+        backgroundSyncEnabled: enabled,
+      );
+  MobileDeviceVault vault() => MobileDeviceVault(
+        cloudBaseUrl: base,
+        username: 'alice',
+        accountMasterKey: List.filled(32, 1),
+        device: DeviceSecrets(
+            deviceId: 'device',
+            signingPrivateKey: List.filled(32, 2),
+            hpkePrivateKey: List.filled(32, 3),
+            hpkePublicKey: List.filled(32, 4)),
+      );
+
+  group('background runner', () {
+    late _FakeRustBridgeApi bridge;
+    late _FakeSyncRuntimeStorage runtime;
+    late _FakeDeviceVaultStorage vaults;
+    late _FakeRefreshTokenStorage tokens;
+    late NativeSystemProjectionService projection;
+    late Map<String, Map<String, dynamic>> osContacts;
+    late List<String> osCalls;
+    late bool providerFails;
+    final scope = sha256.convert(utf8.encode('$base\nalice')).toString();
+    const channel = MethodChannel('flutter_contacts');
+    Future<bool> run() => runBackgroundSync(
+          bridge: bridge,
+          runtimeStorage: runtime,
+          vaultStorage: vaults,
+          cacheKeyStorage: _FakeLocalCacheKeyStorage(),
+          tokenStorage: tokens,
+          projection: projection,
+        );
+    Future<PimItem> contact(String title,
+            {String space = 'enabled', String? id}) =>
+        bridge.upsertPimItem(
+          draft: PimDraft(
+              spaceId: space,
+              kind: PimItemKind.contact,
+              title: title,
+              projectionId: id),
+        );
+    setUp(() async {
+      bridge = _FakeRustBridgeApi();
+      runtime = _FakeSyncRuntimeStorage()..snapshot = snapshot();
+      vaults = _FakeDeviceVaultStorage()..vault = vault();
+      tokens = _FakeRefreshTokenStorage();
+      await tokens.write(
+          cloudBaseUrl: base,
+          refreshToken: 'before',
+          rotationRequestId: 'before-request');
+      bridge.onSync = () async {
+        await bridge.importRefreshToken(
+            refreshToken: 'after', rotationRequestId: 'after-request');
+      };
+      FlutterSecureStorage.setMockInitialValues({
+        'kamori.projection.contacts.collections.v2.$scope': '["enabled"]',
+      });
+      projection = NativeSystemProjectionService();
+      osContacts = {};
+      osCalls = [];
+      providerFails = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        osCalls.add(call.method);
+        if (providerFails) {
+          throw PlatformException(code: 'provider-unavailable');
+        }
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        switch (call.method) {
+          case 'crud.create':
+            final id = 'native-${osContacts.length}';
+            osContacts[id] = Map<String, dynamic>.from(args['contact'] as Map)
+              ..['id'] = id;
+            return id;
+          case 'crud.get':
+            return osContacts[args['id']];
+          case 'crud.update':
+            final value = Map<String, dynamic>.from(args['contact'] as Map);
+            osContacts[value['id'] as String] = value;
+            return null;
+          case 'crud.delete':
+            osContacts.remove(args['id']);
+            return null;
+          default:
+            throw StateError(
+                'Unexpected OS call (permission prompts forbidden): ${call.method}');
+        }
+      });
+    });
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    test('reconciles opted-in create update delete without permission prompts',
+        () async {
+      final item = await contact('Alice');
+      bridge.materializedItems = [
+        item,
+        await contact('Private', space: 'disabled')
+      ];
+      expect(await run(), isTrue);
+      expect(osContacts, hasLength(1));
+      expect(osContacts.values.single['name']['first'], 'Alice');
+      bridge.materializedItems = [
+        await contact('Alicia', id: item.projectionId)
+      ];
+      expect(await run(), isTrue);
+      expect(osContacts.values.single['name']['first'], 'Alicia');
+      bridge.materializedItems = [];
+      expect(await run(), isTrue);
+      expect(osContacts, isEmpty);
+      expect(
+          osCalls, containsAll(['crud.create', 'crud.update', 'crud.delete']));
+      expect(osCalls.where((method) => method.contains('permission')), isEmpty);
+    });
+
+    test('reads current opt-ins after sync and skips disabled collection',
+        () async {
+      bridge.materializedItems = [await contact('Private')];
+      bridge.onSync = () async {
+        await const FlutterSecureStorage().write(
+            key: 'kamori.projection.contacts.collections.v2.$scope',
+            value: '[]');
+      };
+      expect(await run(), isTrue);
+      expect(osContacts, isEmpty);
+      expect(osCalls, isEmpty);
+    });
+
+    test('persists rotated credential before independent provider failure',
+        () async {
+      bridge.materializedItems = [await contact('Alice')];
+      providerFails = true;
+      expect(await run(), isTrue);
+      expect(osCalls, contains('crud.create'));
+      final stored = await tokens.readCredential(cloudBaseUrl: base);
+      expect(stored?.refreshToken, 'after');
+      expect(stored?.rotationRequestId, 'after-request');
+    });
+
+    test('rejects mismatching snapshot and vault before sync or projection',
+        () async {
+      runtime.snapshot = snapshot(username: 'bob');
+      expect(await run(), isFalse);
+      expect(bridge.configureCalls, 0);
+      expect(bridge.syncCalls, 0);
+      expect(osCalls, isEmpty);
+    });
+
+    test('disabled background preference skips a previously scheduled job',
+        () async {
+      runtime.snapshot = snapshot(enabled: false);
+      expect(await run(), isTrue);
+      expect(bridge.syncCalls, 0);
+      expect(osCalls, isEmpty);
+    });
+
+    test('account changed during sync skips old projection and token overwrite',
+        () async {
+      bridge.materializedItems = [await contact('Alice')];
+      bridge.onSync = () async {
+        await bridge.importRefreshToken(
+            refreshToken: 'after', rotationRequestId: 'after-request');
+        runtime.snapshot = snapshot(username: 'bob');
+        await tokens.write(
+            cloudBaseUrl: base,
+            refreshToken: 'bob-token',
+            rotationRequestId: 'bob-request');
+      };
+      expect(await run(), isTrue);
+      expect(osCalls, isEmpty);
+      expect(await tokens.read(cloudBaseUrl: base), 'bob-token');
+    });
+  });
+
+  test('iOS admits and registers the Dart periodic refresh identifier', () {
+    final plist = File('ios/Runner/Info.plist').readAsStringSync();
+    final native = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    final permitted = RegExp(
+            r'<key>BGTaskSchedulerPermittedIdentifiers</key>\s*<array>([\s\S]*?)</array>')
+        .firstMatch(plist)
+        ?.group(1);
+    final modes =
+        RegExp(r'<key>UIBackgroundModes</key>\s*<array>([\s\S]*?)</array>')
+            .firstMatch(plist)
+            ?.group(1);
+    expect(permitted, contains('<string>$kKamoriBackgroundSyncTask</string>'));
+    expect(modes, contains('<string>fetch</string>'));
+    expect(native, contains('withIdentifier: "$kKamoriBackgroundSyncTask"'));
+    expect(native, contains('WorkmanagerPlugin.setPluginRegistrantCallback'));
   });
 }

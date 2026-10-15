@@ -80,7 +80,15 @@ class BridgeController extends Notifier<BridgeState> {
 
   Future<void> restorePersistedSession() async {
     try {
-      await _retryPendingRevocation();
+      try {
+        await _retryPendingRevocation();
+      } catch (error) {
+        // A queued logout belongs to an earlier session. Keep it queued without
+        // making the current account's offline cache depend on network access.
+        state = state.copyWith(
+          error: 'Server session revocation will retry when online: $error',
+        );
+      }
       final snapshot = await _syncRuntimeStorage.read();
       if (snapshot == null) {
         return;
@@ -114,15 +122,17 @@ class BridgeController extends Notifier<BridgeState> {
         // Keep the decrypted offline cache available when the server cannot be
         // reached. The next manual/background sync retries reconciliation.
         state = state.copyWith(
-          error:
-              'Offline data is available; account reconciliation will retry: $error',
+          error: [
+            if (state.error != null) state.error,
+            'Offline data is available; account reconciliation will retry: $error',
+          ].join('\n'),
         );
       }
       await _reloadPimItems();
       await _loadProjectionSettings();
       await _projectSystemCopies(state.pimItems);
       if (state.backgroundSyncEnabled) {
-        await _schedulePeriodicSync();
+        await _scheduleBackgroundSync();
       }
     } catch (error) {
       state = state.copyWith(
@@ -196,7 +206,7 @@ class BridgeController extends Notifier<BridgeState> {
       await _configureSyncForActiveSession();
       await _loadProjectionSettings();
       if (state.backgroundSyncEnabled) {
-        await _schedulePeriodicSync();
+        await _scheduleBackgroundSync();
       }
       await _persistSyncRuntime();
       state = state.copyWith(isBusy: false);
@@ -577,6 +587,26 @@ class BridgeController extends Notifier<BridgeState> {
     }
   }
 
+  Future<void> _scheduleBackgroundSync() async {
+    try {
+      await _schedulePeriodicSync();
+    } catch (error) {
+      // Scheduling is independent of authentication and offline cache access.
+      state = state.copyWith(
+        backgroundSyncEnabled: false,
+        error: 'Failed to schedule background sync: $error',
+      );
+      try {
+        await _persistSyncRuntime();
+      } catch (storageError) {
+        state = state.copyWith(
+          error:
+              '${state.error}. Failed to save background preference: $storageError',
+        );
+      }
+    }
+  }
+
   /// Enables/disables periodic background sync scheduling.
   Future<void> setBackgroundSyncEnabled(bool enabled) async {
     state = state.copyWith(backgroundSyncEnabled: enabled, clearError: true);
@@ -587,7 +617,7 @@ class BridgeController extends Notifier<BridgeState> {
     try {
       await _persistSyncRuntime();
       if (enabled) {
-        await _schedulePeriodicSync();
+        await _scheduleBackgroundSync();
       } else {
         await _cancelPeriodicSync();
       }
