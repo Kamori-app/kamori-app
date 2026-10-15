@@ -17,10 +17,15 @@ NAMESPACE = 'kamori-readiness-restore-20261015'
 IMAGE = 'localhost/kamori-readiness-restore:20261015'
 MIGRATOR = os.environ.get('RESTORE_MIGRATOR_IMAGE', '2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981')
 MINIO = 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
-ENGINE = os.environ.get('RESTORE_ENGINE', '/Users/yujin/.local/bin/docker')
-# Refuse remote engines: this harness never targets a production service.
+# This environment's docker wrapper delegates to Podman, which ignores DOCKER_HOST.
+# Use the known backend directly and bind every invocation with its own --url flag.
+ENGINE = '/opt/podman/bin/podman'
+if os.environ.get('RESTORE_ENGINE', ENGINE) != ENGINE:
+    raise RuntimeError('unsupported RESTORE_ENGINE; only /opt/podman/bin/podman is supported')
 SOCKET = 'unix:///private/tmp/podman/podman-machine-default-api.sock'
-ENV = dict(os.environ, DOCKER_HOST=SOCKET)
+ENDPOINT_SELECTORS = {'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'CONTAINER_SSHKEY',
+                      'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH'}
+ENV = {key: value for key, value in os.environ.items() if key not in ENDPOINT_SELECTORS}
 LABELS = {'kamori.readiness': '20261015', 'kamori.readiness.task': 'restore'}
 ROLES = ('pg-source', 'pg-recovered', 'blob-primary', 'blob-dr', 'tools')
 VOLUMES = ('pg-source-data', 'pg-recovered-data', 'pgbackrest-repo', 'blob-primary-data', 'blob-dr-data')
@@ -51,7 +56,7 @@ def command(args, *, data=None, expected=0, timeout=600):
 
 
 def docker(*args, **kwargs):
-    return command([ENGINE, *args], **kwargs)
+    return command([ENGINE, '--url', SOCKET, *args], **kwargs)
 
 
 def owned(kind, name):
@@ -93,8 +98,10 @@ def start(role, image=IMAGE, mounts=(), env=None, args=()):
         opts += ['-v', f'{NAMESPACE}-{volume}:{target}']
     if env:
         opts += ['--env-file', str(env)]
-    docker(*opts, image, *args)
+    # A failed/interrupted run can still allocate a container. Track the attempt
+    # before dispatch, then reconcile its existence and labels during cleanup.
     created.append(('container', name))
+    docker(*opts, image, *args)
     owned('container', name)
 
 
@@ -102,6 +109,10 @@ def cleanup():
     errors = []
     for kind, name in reversed(created):
         try:
+            if kind == 'container':
+                names = docker('container', 'ls', '-a', '--format', '{{.Names}}').stdout.splitlines()
+                if name not in names:
+                    continue  # The attempt failed before allocating a container.
             owned(kind, name)
             if kind == 'container':
                 result = docker('logs', name, expected=None)

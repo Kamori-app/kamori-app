@@ -182,5 +182,26 @@
     "local MinIO policy analog, not actual B2/Hetzner credential scope or network",
     "synthetic byte canaries, not signed valid app envelopes or app-level restore",
     "no systemd/provisioning or production SLA certification"
-  ]
+  ],
+  "orchestration_fix_round_1": {
+    "base_sha": "0b1cc7fd6960e01241f8ab7ea5ed66fd86238b5d",
+    "command": "python3 -B tests/release-readiness/restore/test_controls.py",
+    "result": "5 tests PASS in 1.301s; endpoint test includes four selector combinations",
+    "red_artifacts": "/private/tmp/kamori-readiness-20261015/restore/controls-a07685hd",
+    "green_artifacts": "/private/tmp/kamori-readiness-20261015/restore/controls-xmbfp44h",
+    "endpoint_red": "inherited nonexistent local CONTAINER_HOST/CONTAINER_CONNECTION redirects/fails version exit125; arbitrary RESTORE_ENGINE accepted",
+    "endpoint_green": "absolute /opt/podman/bin/podman --url reserved Unix socket; seven inherited Podman/Docker endpoint selectors removed; alternate backend rejected before execution",
+    "failed_start_red": "real run exit127 from nonexistent executable leaves owned tools container Status=created; old cleanup omits container and network removal fails in-use",
+    "failed_start_green": "same run exit127 propagates; attempt tracked before dispatch; container presence and labels reconciled, then removed; empty cleanup inventories",
+    "additional_controls": [
+      "failure before allocation exit125 leaves clean inventory",
+      "ownership mismatch refuses removal, preserves failure inventory; restored contract permits scoped cleanup"
+    ],
+    "cleanup": {
+      "container": [],
+      "volume": [],
+      "network": []
+    },
+    "scope": "Only reserved labeled tools container/network; no volumes, image builds, shared stack changes or remote services. Full restore/Go/native tests not repeated; original evidence retains its source provenance."
+  }
 }
