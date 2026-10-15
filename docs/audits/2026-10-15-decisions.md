@@ -41,3 +41,5 @@
 | D13: hardware WebAuthn/admin lifecycle | Внешний/coverage gate: server binding tests не заменяют физический authenticator и все admin ceremonies |
 | D14: прочие server/store/egress matrix gaps | Не подтверждённые дефекты: нет полного fault-injection набора. Конкретные соседние lock failures S08–S10 вошли в обязательные исправления |
 | D15: production deploy/PITR/DR/external review | Вне локального audit execution: deployment не запрошен, реальные сервисы/секреты не используются. Shell/Compose tests не объявляются DR certification |
+
+Позднейшее продолжение: D02 compile/link gate закрыт после принятия лицензии пользователем и Task1 native builds/tests; физические/signing gates сохраняются. [Результаты](2026-10-15-readiness.md) и [новые решения](2026-10-15-readiness-decisions.md) не изменяют исторические revisions прежних заключений.

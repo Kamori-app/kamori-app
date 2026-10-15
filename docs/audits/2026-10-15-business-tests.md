@@ -39,3 +39,5 @@
 Все пять исходных ошибок показали настоящий RED до production-исправлений; ошибки подготовки fixtures не считались RED. GREEN на 69820cd: 151 server +75 core/FRB +14 DAV +18 desktop =258; Flutter 70; Android real FRB три ABI; browser acceptance 9/9. U09/U10/S08/S09 прошли scoped re-review; остаточное S10 review также принято, spec и quality PASS. [Заключения](reviews/README.md).
 
 Native harness один раз выявил нестабильность собственных accepted TCP sockets. Отдельный std-only probe подтвердил immediate WouldBlock; явный blocking mode исправил harness без ослабления assertions. Матрица 6 тестов прошла пять раз подряд, затем полный core/workspace. Пять повторов выполнялись из-за конкретного сбоя, не вместо выяснения причины.
+
+Продолжение native-валидации: Task1 `ac0c51e` добавил настоящий iOS arm64 build, 6 installed-plugin integration и 3 XCTest; 72 Flutter tests/analyze pass. Проверены реальные Contacts/Calendar CRUD и восстановление после внешнего удаления контакта. [Доказательства](2026-10-15-readiness.md). Физический scheduler, data protection и Android runtime этим не сертифицируются.
