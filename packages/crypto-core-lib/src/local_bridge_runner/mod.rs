@@ -83,6 +83,86 @@ pub struct LocalBridgeRunner {
     lifecycle: Arc<Mutex<ServerLifecycle>>,
 }
 
+/// Durable refresh state shared by desktop startup and the active sync runtime.
+/// The supplied token must come from the configured endpoint/account's trusted
+/// credential store. Exact token anchoring is required to adopt legacy rows.
+pub struct RefreshCredentialStore {
+    cache: LocalCache,
+}
+
+impl RefreshCredentialStore {
+    pub fn open(
+        path: impl Into<std::path::PathBuf>,
+        key: String,
+        endpoint: &str,
+        trusted_token: &str,
+        account: &str,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            !key.trim().is_empty() && !trusted_token.trim().is_empty(),
+            "encrypted cache key and trusted refresh token are required"
+        );
+        let cache = LocalCache::new(path.into(), Some(key))?;
+        anyhow::ensure!(
+            !account.trim().is_empty(),
+            "stored account identity is required"
+        );
+        cache.bind_refresh_scope(
+            &normalize_cloud_base_url(endpoint)?,
+            trusted_token,
+            Some(account),
+        )?;
+        Ok(Self { cache })
+    }
+
+    /// Establish new provenance only after a successful signin/enrollment.
+    /// PIM data and sync cursors are retained; credential replacement is atomic.
+    pub fn start_session(
+        path: impl Into<std::path::PathBuf>,
+        key: String,
+        endpoint: &str,
+        account: &str,
+        access: &str,
+        refresh: &str,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            !key.trim().is_empty()
+                && !account.trim().is_empty()
+                && !access.trim().is_empty()
+                && !refresh.trim().is_empty(),
+            "fresh session credentials and encrypted cache key are required"
+        );
+        let cache = LocalCache::new(path.into(), Some(key))?;
+        cache.start_refresh_session(
+            &normalize_cloud_base_url(endpoint)?,
+            account,
+            access,
+            refresh,
+        )?;
+        Ok(Self { cache })
+    }
+
+    pub fn recover(&self, token: &str) -> Result<Option<(String, String)>> {
+        self.cache.recover_rotated_credentials(Some(token))
+    }
+
+    pub fn begin(&self, token: &str) -> Result<Uuid> {
+        self.cache.begin_refresh_rotation(token)
+    }
+
+    /// Resume a cached attempt, or durably adopt an endpoint/account keychain
+    /// attempt when no matching cache generation exists.
+    pub fn begin_with_fallback(&self, token: &str, fallback: Uuid) -> Result<Uuid> {
+        self.cache
+            .begin_refresh_rotation_with_fallback(token, fallback)
+    }
+
+    pub fn commit(&self, previous: &str, access: &str, refresh: &str) -> Result<()> {
+        self.cache
+            .store_rotated_credentials(previous, access, refresh)
+    }
+}
+
 impl LocalBridgeRunner {
     pub fn new(config: LocalBridgeConfig) -> Result<Self> {
         if config.cloud_base_url.trim().is_empty() || config.access_token.trim().is_empty() {
@@ -103,6 +183,9 @@ impl LocalBridgeRunner {
         let _ = (bind_addr, dav_username, dav_password);
         let cloud_base_url = normalize_cloud_base_url(&cloud_base_url)?;
         let cache = LocalCache::new(sqlite_path, sqlite_key)?;
+        if let Some(token) = refresh_token.as_deref() {
+            cache.bind_refresh_scope(&cloud_base_url, token, None)?;
+        }
         let (access_token, refresh_token) = cache
             .recover_rotated_credentials(refresh_token.as_deref())?
             .unwrap_or((access_token, refresh_token.unwrap_or_default()));

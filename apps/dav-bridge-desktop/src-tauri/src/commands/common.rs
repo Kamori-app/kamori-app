@@ -120,8 +120,23 @@ pub(super) async fn decode_msgpack<T: DeserializeOwned>(
     response: reqwest::Response,
 ) -> Result<T, String> {
     let bytes = response.bytes().await.map_err(to_ui_error)?;
-    let mut deserializer = rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
+    decode_msgpack_bytes(&bytes)
+}
+
+pub(super) fn decode_msgpack_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
+    let mut deserializer = rmp_serde::Deserializer::new(bytes).with_human_readable();
     T::deserialize(&mut deserializer).map_err(to_ui_error)
+}
+
+pub(super) fn wrap_recovery_space_key(
+    master_key: &[u8; 32],
+    space_key: &[u8; 32],
+) -> Result<Vec<u8>, String> {
+    let recovery = crypto_core_lib::CryptoEngine::derive_account_recovery_keypair(master_key);
+    let package =
+        crypto_core_lib::CryptoEngine::encrypt_group_key_for_peer(space_key, &recovery.public_key)
+            .map_err(to_ui_error)?;
+    rmp_serde::to_vec_named(&package).map_err(to_ui_error)
 }
 
 /// Revokes a body-transport refresh session without depending on a live access token.
@@ -402,9 +417,17 @@ pub(super) fn store_refresh_token_secure(cloud_base_url: &str, token: &str) -> R
     if token.is_empty() {
         return Err("refresh token must not be empty".to_string());
     }
+    store_refresh_credential_secure(cloud_base_url, token, Uuid::new_v4())
+}
+
+pub(super) fn store_refresh_credential_secure(
+    cloud_base_url: &str,
+    token: &str,
+    rotation_request_id: Uuid,
+) -> Result<(), String> {
     let entry = refresh_token_entry(cloud_base_url)?;
     entry
-        .set_password(&encode_refresh_credential(token, Uuid::new_v4())?)
+        .set_password(&encode_refresh_credential(token, rotation_request_id)?)
         .map_err(|error| format!("failed to store refresh credential in keychain: {error}"))
 }
 

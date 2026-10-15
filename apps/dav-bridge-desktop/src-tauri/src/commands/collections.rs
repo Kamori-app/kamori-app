@@ -12,7 +12,7 @@ use crate::{
 
 use super::common::{
     MSGPACK_CONTENT_TYPE, encode_msgpack, endpoint, load_account_master_key_secure,
-    load_or_create_device_secrets, to_ui_error,
+    load_or_create_device_secrets, to_ui_error, wrap_recovery_space_key,
 };
 
 #[derive(Serialize)]
@@ -75,8 +75,7 @@ pub async fn create_collection(
             .map_err(to_ui_error)?;
     let encrypted_key_package = rmp_serde::to_vec_named(&encrypted_key).map_err(to_ui_error)?;
     let master_key = load_account_master_key_secure(&base, &username)?;
-    let encrypted_recovery_key_package =
-        secret_vault::encrypt(&master_key, &space_key).map_err(to_ui_error)?;
+    let encrypted_recovery_key_package = wrap_recovery_space_key(&master_key, &space_key)?;
     let body = encode_msgpack(&CreateSpaceRequest {
         space_id,
         encrypted_metadata,
@@ -129,4 +128,28 @@ pub async fn list_collections(
     state: State<'_, DesktopState>,
 ) -> Result<Vec<CollectionSummary>, String> {
     Ok(state.list_collections().await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_recovery_package_unwraps_on_second_device_with_account_identity_only() {
+        let master_key = [31; 32];
+        let space_key = [57; 32];
+        let package = wrap_recovery_space_key(&master_key, &space_key).unwrap();
+        let encrypted: crypto_core_lib::EncryptedGroupKey =
+            rmp_serde::from_slice(&package).expect("HPKE recovery package schema");
+        assert_eq!(encrypted.version, 1);
+        assert_eq!(encrypted.encapsulated_key.len(), 32);
+        assert!(!encrypted.ciphertext.is_empty());
+        let recovery = CryptoEngine::derive_account_recovery_keypair(&master_key);
+        assert_eq!(
+            CryptoEngine::decrypt_group_key_from_peer(&encrypted, &recovery.private_key).unwrap(),
+            space_key
+        );
+        let other = CryptoEngine::derive_account_recovery_keypair(&[32; 32]);
+        assert!(CryptoEngine::decrypt_group_key_from_peer(&encrypted, &other.private_key).is_err());
+    }
 }
