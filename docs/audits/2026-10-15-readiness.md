@@ -10,6 +10,7 @@
 |---|---|---|---|
 | R01 | iOS AppDelegate передавал вычисленное Int в Workmanager API, ожидающий NSNumber? | Настоящий Swift compile RED после устранения отдельной настройки SDK; минимальный NSNumber(value:...) дал успешный unsigned device build | Исправлено, spec/quality review PASS |
 | R02 | Внешнее удаление системной копии контакта ломает последующий reconciliation: pinned iOS API бросает ошибку отсутствующей записи, сервис ожидает null | Настоящий NativeSystemProjectionService на новом симуляторе: project → внешнее удаление созданного ID → _projectContacts/CrudApi.get PlatformException; отдельная unit-регрессия тоже RED | Исправлено, unit/native GREEN и spec/quality review PASS |
+| R03 | DB integration tests без URL базы пропускают тело и учитываются как passed | Subprocess запустил ровно один настоящий admin test без обоих DB env vars; старый код passed+skip, новая регрессия RED | Исправлено; 5 focused GREEN, 156 server tests с БД; spec/quality review PASS |
 
 R02 не выведен из ошибочного тестового ожидания get(id)==null: отдельно воспроизведён именно production-сервис. Первая ошибочная FRB fixture с не-UUID request ID также не считалась product-дефектом.
 
@@ -25,7 +26,7 @@ R02 не выведен из ошибочного тестового ожида�
 ## Очередь оставшихся проверок
 
 1. Task1 завершён, независимое review принято.
-2. Исключить успешные DB-тесты при отсутствующей базе.
+2. Task2 завершён: отсутствие PostgreSQL теперь даёт явную ошибку; независимое review принято.
 3. Проверить reset/refresh и deferred passkey commit в обоих порядках.
 4. Проверить реальные SQLite/IndexedDB crash boundaries и несколько browser tabs.
 5. Добавить поведенческие desktop/admin UI gates.
@@ -45,3 +46,7 @@ R02 не выведен из ошибочного тестового ожида�
 Коммит `ac0c51e`; [отчёт исполнителя](readiness-reports/2026-10-15-task-1.md), [независимое spec/quality review](readiness-reports/2026-10-15-task-1-review.md). Critical/Important замечаний нет. Сохранены неблокирующие предупреждения XCTest toolchain (SWIFT_DEBUG_INFORMATION environment, test-framework deployment target, AppIntents metadata и restoration marker), а также будущая необходимость SPM adoption для Rust plugin. Успешный native gate не объявляется warning-free. Android release после изменения общего Dart adapter будет обновлён итоговым контроллерным прогоном.
 
 [Решения продолжения и их цена](2026-10-15-readiness-decisions.md).
+
+## Принятый Task2
+
+Коммит `d4d9fd7`; [отчёт исполнителя](readiness-reports/2026-10-15-task-2.md), [независимое spec/quality review](readiness-reports/2026-10-15-task-2-review.md). 156 серверных тестов прошли с PostgreSQL18.6, включая 45 DB integrations; Clippy/fmt прошли. Отдельный запуск настоящего DB-теста без обоих URL намеренно завершился exit101 с actionable diagnostic; filtered unit-only workflow без базы остаётся рабочим (2/2). Новая subprocess-регрессия проверяет имя и ровно один запущенный test, исключая ложный успех от нулевого совпадения.

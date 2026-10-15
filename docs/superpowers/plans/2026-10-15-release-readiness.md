@@ -49,10 +49,10 @@
 **Files:** existing `apps/cloud-server/src/platform/test_support.rs` (extend current test_config/test_state helpers without replacing them); `platform/mod.rs` only if needed; DB helpers/callers in auth/handlers, admin, invites and operations integration tests, including operations/lock_regressions.rs if it shares the helper; `apps/cloud-server/package.json`, root testing docs/CI only when required to expose the intended test command.
 **Interfaces:** A shared test-only `required_test_database_url() -> String` resolves nonempty KAMORI_DATABASE_URL then DATABASE_URL, otherwise fails with an actionable missing-PostgreSQL message. No environment mutation in concurrently running tests.
 
-- [ ] Add a subprocess regression proving a representative real DB integration test exits nonzero with both DB variables absent; old behavior must produce RED because it exits successfully without executing assertions.
-- [ ] Centralize required URL resolution and remove silent missing-DB success paths across all current cloud-server DB helpers. Keep normal unit-only filtered commands possible and explain the full suite's DB prerequisite; preserve existing migrations/schema isolation.
-- [ ] Cover explicit URL, fallback URL and absent/empty inputs through isolated subprocesses or a pure resolver; do not log credentials or modify global environment unsafely.
-- [ ] Run no-DB regression plus full server suite against supplied dedicated PostgreSQL, strict Clippy/fmt and appropriate CI detector/shell checks if touched. Commit and report exact counts; no-DB failure must be intentional and documented.
+- [x] Add a subprocess regression proving a representative real DB integration test exits nonzero with both DB variables absent; old behavior must produce RED because it exits successfully without executing assertions.
+- [x] Centralize required URL resolution and remove silent missing-DB success paths across all current cloud-server DB helpers. Keep normal unit-only filtered commands possible and explain the full suite's DB prerequisite; preserve existing migrations/schema isolation.
+- [x] Cover explicit URL, fallback URL and absent/empty inputs through isolated subprocesses or a pure resolver; do not log credentials or modify global environment unsafely.
+- [x] Run no-DB regression plus full server suite against supplied dedicated PostgreSQL, strict Clippy/fmt and appropriate CI detector/shell checks if touched. Commit and report exact counts; no-DB failure must be intentional and documented.
 
 ### Task 3: Prove reset versus refresh and deferred passkey commit ordering
 
