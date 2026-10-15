@@ -42,3 +42,13 @@ RED воспроизвёл неидемпотентный retry, двойной 
 Оба native reqwest manifest явно включают TLS. Общий production builder применяется в FRB auth и sync runtime; синтетический HTTPS-сервер проверяет trusted CA success, untrusted CA и неверный hostname. Android использует Mozilla public roots без отсутствующего JVM verifier initialization; desktop/iOS сохраняют platform trust. Android **не** использует private/user CA или custom network-security-config roots; root bundle обновляется с клиентом. Системный trust store не менялся.
 
 Изолированные normal dependency gates для desktop/FRB/Android пройдены; `aarch64-linux-android` FRB `--lib` и desktop `--lib` компилируются. Android check потребовал NDK `llvm-ar/llvm-ranlib` и `aarch64-linux-android24-clang`. Полная native упаковка и физические устройства остаются отдельными gates; compile/host TLS не выдаются за проверку device runtime.
+
+## Desktop decode, recovery и сохранение сессии
+
+Коммит `bbd35d9`; закрыты C02–C04. Все cloud-ответы используют human-readable MessagePack; создание и восстановление collection применяют единый HPKE-пакет для account recovery identity. Испорченный legacy recovery package переписывается только при наличии действительного current-epoch ключа у авторизованного устройства.
+
+Startup читает тот же SQLCipher credential state, что runtime, повторяет pending request ID и сначала сохраняет выбранный OS anchor, затем отправляет refresh. Ответ проверяется на соответствие аккаунту и сохраняется до provisioning. Свежий password/browser signin атомарно заменяет только credential/scope/attempt rows, сохраняя PIM и курсоры. Legacy adoption требует точной привязки к доверенному endpoint/account credential; неоднозначное состояние не отправляется в сеть.
+
+RED воспроизвёл UUID string decode failure, несовместимый HPKE schema и refresh reuse после потери ответа. GREEN: **18 desktop +65 core/FRB +14 DAV passed**, fmt/strict Clippy чистые, независимое ревью без замечаний. Проверены повторные crash, response loss, OS-write failure, другой account/endpoint, legacy migration и сохранение кэша после нового входа.
+
+Принятое ограничение: если keychain отстал более чем на одно поколение runtime-ротации, требуется новый вход; старый токен не отправляется с новым ID и не вызывает отзыв остальных сессий. Реальный OS keychain и аппаратный power-loss не испытывались.

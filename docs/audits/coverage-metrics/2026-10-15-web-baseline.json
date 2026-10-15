@@ -1,0 +1,83 @@
+{
+  "revision": "81248927f1ad734c246f582486d9840da6b47637",
+  "scope": "Bun helper unit coverage; only reported/imported files, not all Svelte UI",
+  "note": "Line coverage only; branch coverage not measured. Denominator is reported files, not whole repository.",
+  "totals": {
+    "LF": 1234,
+    "LH": 978,
+    "FNF": 114,
+    "FNH": 101
+  },
+  "files": [
+    {
+      "path": "src/lib/auth/session-flow.js",
+      "FNF": 5,
+      "FNH": 5,
+      "LF": 71,
+      "LH": 66
+    },
+    {
+      "path": "src/lib/binary.ts",
+      "FNF": 2,
+      "FNH": 2,
+      "LF": 25,
+      "LH": 24
+    },
+    {
+      "path": "src/lib/endpoint.ts",
+      "FNF": 1,
+      "FNH": 1,
+      "LF": 18,
+      "LH": 18
+    },
+    {
+      "path": "src/lib/nav/section-nav.js",
+      "FNF": 3,
+      "FNH": 3,
+      "LF": 16,
+      "LH": 16
+    },
+    {
+      "path": "src/lib/passkeyLabels.ts",
+      "FNF": 4,
+      "FNH": 4,
+      "LF": 34,
+      "LH": 34
+    },
+    {
+      "path": "src/lib/pim.ts",
+      "FNF": 60,
+      "FNH": 58,
+      "LF": 695,
+      "LH": 599
+    },
+    {
+      "path": "src/lib/pimHistory.ts",
+      "FNF": 10,
+      "FNH": 9,
+      "LF": 92,
+      "LH": 83
+    },
+    {
+      "path": "src/lib/recoveryKitFile.ts",
+      "FNF": 6,
+      "FNH": 5,
+      "LF": 78,
+      "LH": 1
+    },
+    {
+      "path": "src/lib/sync/autoSyncCoordinator.ts",
+      "FNF": 11,
+      "FNH": 7,
+      "LF": 68,
+      "LH": 62
+    },
+    {
+      "path": "src/lib/webauthn.ts",
+      "FNF": 12,
+      "FNH": 7,
+      "LF": 137,
+      "LH": 75
+    }
+  ]
+}
