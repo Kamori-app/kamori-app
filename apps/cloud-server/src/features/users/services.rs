@@ -26,7 +26,7 @@ pub(crate) async fn delete_me(
     if payload.confirmation != format!("DELETE {username}") {
         return Err(bad_request("account deletion confirmation does not match"));
     }
-    consume_reauth_token(
+    let binding = consume_reauth_token(
         state,
         &payload.reauth_token,
         user_id,
@@ -34,14 +34,14 @@ pub(crate) async fn delete_me(
         ReauthAction::DeleteAccount,
     )
     .await?;
-    let deleted = delete_user(&state.pool, user_id)
-        .await
-        .map_err(internal_error)?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    let deleted = delete_user(&mut tx, binding).await?;
     if !deleted {
         return Err(conflict(
             "transfer or delete shared workspaces and security spaces before deleting the account",
         ));
     }
+    tx.commit().await.map_err(internal_error)?;
     Ok(DeleteMeResponse { deleted })
 }
 

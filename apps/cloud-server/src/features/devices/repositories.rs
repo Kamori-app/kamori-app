@@ -6,12 +6,11 @@ use uuid::Uuid;
 use super::dto::{DevicePlatform, DeviceSummary, RegisterDeviceRequest};
 
 pub(crate) async fn upsert_device(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     session_id: Uuid,
     request: &RegisterDeviceRequest,
 ) -> anyhow::Result<Option<DeviceSummary>> {
-    let mut tx = pool.begin().await?;
     let row = sqlx::query(
         r#"
         INSERT INTO devices (
@@ -36,7 +35,7 @@ pub(crate) async fn upsert_device(
     .bind(&request.hpke_public_key)
     .bind(&request.encrypted_name)
     .bind(request.platform.as_db_value())
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let Some(row) = row else {
         return Ok(None);
@@ -53,12 +52,11 @@ pub(crate) async fn upsert_device(
     .bind(session_id)
     .bind(user_id)
     .bind(request.device_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     if bound.rows_affected() != 1 {
         return Ok(None);
     }
-    tx.commit().await?;
     device_from_row(&row).map(Some)
 }
 
@@ -83,11 +81,10 @@ pub(crate) async fn list_devices(
 }
 
 pub(crate) async fn revoke_device(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     device_id: Uuid,
 ) -> anyhow::Result<bool> {
-    let mut tx = pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE devices
@@ -97,7 +94,7 @@ pub(crate) async fn revoke_device(
     )
     .bind(device_id)
     .bind(user_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     if result.rows_affected() != 1 {
         return Ok(false);
@@ -113,12 +110,12 @@ pub(crate) async fn revoke_device(
     .bind(user_id)
     .bind(device_id)
     .bind(now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     sqlx::query("DELETE FROM security_space_device_keys WHERE user_id = $1 AND device_id = $2")
         .bind(user_id)
         .bind(device_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     sqlx::query(
         r#"
@@ -129,9 +126,8 @@ pub(crate) async fn revoke_device(
     .bind(Uuid::new_v4())
     .bind(user_id)
     .bind(device_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    tx.commit().await?;
     Ok(true)
 }
 

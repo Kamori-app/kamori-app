@@ -45,8 +45,16 @@ async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
     .await
     .expect("insert admin");
     for (key_id, name, credential_id) in [
-        (primary_id, "Primary passkey", vec![2_u8; 32]),
-        (backup_id, "Backup passkey", vec![3_u8; 32]),
+        (
+            primary_id,
+            "Primary passkey",
+            Uuid::new_v4().as_bytes().to_vec(),
+        ),
+        (
+            backup_id,
+            "Backup passkey",
+            Uuid::new_v4().as_bytes().to_vec(),
+        ),
     ] {
         sqlx::query(
             r#"
@@ -106,7 +114,7 @@ async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
     )
     .bind(Uuid::new_v4())
     .bind(admin_id)
-    .bind(vec![5_u8; 32])
+    .bind(Uuid::new_v4().as_bytes().to_vec())
     .bind(vec![6_u8])
     .execute(&pool)
     .await;

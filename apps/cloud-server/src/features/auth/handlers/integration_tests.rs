@@ -317,53 +317,13 @@ async fn signin_user(
     password: &str,
     transport: SigninTransport,
 ) -> SigninArtifacts {
-    let mut rng = OsRng;
-    let login_start = ClientLogin::<DefaultOpaqueSuite>::start(&mut rng, password.as_bytes())
-        .expect("opaque login start");
-
-    let signin_start_response = post_msgpack(
-        &app.app,
-        "/auth/signin/start",
-        &SigninStartRequest {
-            username: username.to_string(),
-            opaque_start_request: login_start.message.serialize().to_vec(),
-        },
-        &HeaderMap::new(),
-    )
-    .await;
-    let (status, _headers, body) = split_response(signin_start_response).await;
-    assert_eq!(status, StatusCode::OK);
-    let signin_start: SigninStartResponse = decode_msgpack(&body);
-
-    let credential_response =
-        CredentialResponse::<DefaultOpaqueSuite>::deserialize(&signin_start.opaque_server_message)
-            .expect("deserialize credential response");
-    let login_finish = login_start
-        .state
-        .finish(
-            &mut rng,
-            password.as_bytes(),
-            credential_response,
-            ClientLoginFinishParameters::default(),
-        )
-        .expect("opaque login finish");
-
+    let pending = pending_signin(app, username, password).await;
     let mut headers = HeaderMap::new();
     if matches!(transport, SigninTransport::Cookie) {
         headers.insert(REFRESH_TRANSPORT_HEADER, HeaderValue::from_static("cookie"));
     }
-    let signin_finish_response = post_msgpack(
-        &app.app,
-        "/auth/signin/finish",
-        &SigninFinishRequest {
-            username: username.to_string(),
-            opaque_flow_id: signin_start.opaque_flow_id,
-            opaque_finish_request: login_finish.message.serialize().to_vec(),
-            totp_code: None,
-        },
-        &headers,
-    )
-    .await;
+    let signin_finish_response =
+        post_msgpack(&app.app, "/auth/signin/finish", &pending, &headers).await;
 
     let (status, response_headers, body) = split_response(signin_finish_response).await;
     assert_eq!(status, StatusCode::OK);
@@ -528,6 +488,56 @@ async fn external_browser_device_authorization_is_explicit_and_retry_safe() {
     assert_eq!(retry.refresh_token, token.refresh_token);
     assert_eq!(retry.refresh_token_id, token.refresh_token_id);
     assert_eq!(retry.device_enrollment_token, token.device_enrollment_token);
+
+    // Credential-policy changes can invalidate pending proofs while keeping
+    // existing sessions active. An exact token retry still resolves that session.
+    sqlx::query("UPDATE users SET auth_generation = auth_generation + 1 WHERE username = $1")
+        .bind(&username)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    // Revoking the approving browser does not break exact retries of the
+    // already-created active native session.
+    let response = post_msgpack(
+        &app.app,
+        "/auth/logout",
+        &LogoutRequest {
+            refresh_token: signin.refresh_token,
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &token_request,
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _, body) = split_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    let retry: DeviceAuthorizationTokenResponse = decode_msgpack(&body);
+    assert_eq!(retry.refresh_token, token.refresh_token);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/logout",
+        &LogoutRequest {
+            refresh_token: token.refresh_token,
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &token_request,
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(active_session_count(&app, &username).await, 0);
 
     app.shutdown().await;
 }
@@ -877,11 +887,13 @@ async fn deleting_only_passkey_preserves_password_authentication() {
     .await
     .expect("insert only passkey");
 
+    let mut tx = app.state.pool.begin().await.unwrap();
     assert!(
-        delete_passkey_for_user(&app.state.pool, user_id, passkey_id)
+        delete_passkey_for_user(&mut tx, user_id, passkey_id)
             .await
             .expect("delete only passkey")
     );
+    tx.commit().await.unwrap();
     let remaining: i64 =
         sqlx::query_scalar("SELECT count(*) FROM user_passkeys WHERE user_id = $1")
             .bind(user_id)
@@ -1146,11 +1158,20 @@ async fn account_deletion_anonymizes_authentication_and_recovery_material() {
     .await
     .expect("insert recovery attempt");
 
+    let mut tx = app.state.pool.begin().await.unwrap();
     assert!(
-        delete_user(&app.state.pool, user_id)
-            .await
-            .expect("delete account")
+        delete_user(
+            &mut tx,
+            crate::features::auth::repositories::AuthenticationBinding {
+                user_id,
+                generation: 0,
+                session_id: None
+            }
+        )
+        .await
+        .expect("delete account")
     );
+    tx.commit().await.unwrap();
     let state: (bool, bool, bool, bool, bool) = sqlx::query_as(
         r#"
         SELECT deleted_at IS NOT NULL,
@@ -1181,5 +1202,575 @@ async fn account_deletion_anonymizes_authentication_and_recovery_material() {
             .expect("count signup idempotency records");
     assert_eq!(signup_completions, 0);
 
+    app.shutdown().await;
+}
+
+async fn pending_signin(app: &TestApp, username: &str, password: &str) -> SigninFinishRequest {
+    let mut rng = OsRng;
+    let login_start = ClientLogin::<DefaultOpaqueSuite>::start(&mut rng, password.as_bytes())
+        .expect("opaque login start");
+
+    let signin_start_response = post_msgpack(
+        &app.app,
+        "/auth/signin/start",
+        &SigninStartRequest {
+            username: username.to_string(),
+            opaque_start_request: login_start.message.serialize().to_vec(),
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    let (status, _headers, body) = split_response(signin_start_response).await;
+    assert_eq!(status, StatusCode::OK);
+    let signin_start: SigninStartResponse = decode_msgpack(&body);
+
+    let credential_response =
+        CredentialResponse::<DefaultOpaqueSuite>::deserialize(&signin_start.opaque_server_message)
+            .expect("deserialize credential response");
+    let login_finish = login_start
+        .state
+        .finish(
+            &mut rng,
+            password.as_bytes(),
+            credential_response,
+            ClientLoginFinishParameters::default(),
+        )
+        .expect("opaque login finish");
+
+    SigninFinishRequest {
+        username: username.to_string(),
+        opaque_flow_id: signin_start.opaque_flow_id,
+        opaque_finish_request: login_finish.message.serialize().to_vec(),
+        totp_code: None,
+    }
+}
+
+async fn reset_deferred_account(app: &TestApp, username: &str, recovery: bool) {
+    let request = prepare_signup_request(app, username, "New-P@ssword123!", Uuid::new_v4()).await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(username)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    if recovery {
+        use crate::features::auth::repositories::{
+            AccountRecoveryReset, apply_account_recovery_reset, create_account_recovery_attempt,
+        };
+        let token_hash = [42; 32];
+        // Distinct durable recovery token for each synthetic account.
+        let token_hash: [u8; 32] =
+            Sha256::digest([token_hash.as_slice(), user_id.as_bytes()].concat()).into();
+        create_account_recovery_attempt(
+            &app.state.pool,
+            &token_hash,
+            user_id,
+            time::OffsetDateTime::now_utc() + time::Duration::minutes(5),
+        )
+        .await
+        .unwrap();
+        apply_account_recovery_reset(
+            &app.state.pool,
+            AccountRecoveryReset {
+                user_id,
+                token_hash: &token_hash,
+                request_hash: &[1; 32],
+                opaque_record: &request.opaque_finish_request,
+                encrypted_master_key: &[13; 64],
+            },
+        )
+        .await
+        .unwrap();
+    } else {
+        let mut tx = app.state.pool.begin().await.unwrap();
+        crate::features::auth::repositories::update_user_password_file_and_revoke_refresh_sessions(
+            &mut tx,
+            user_id,
+            &request.opaque_finish_request,
+            &[13; 64],
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+}
+
+async fn active_session_count(app: &TestApp, username: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id WHERE u.username = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()")
+        .bind(username).fetch_one(&app.state.pool).await.unwrap()
+}
+
+async fn stale_opaque_regression(recovery: bool, totp: bool) {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-deferred-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    if totp {
+        let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+            .bind(&username)
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+        let ciphertext = crate::platform::secret_box::encrypt_user_totp(
+            &app.state.config.auth_totp_kek,
+            &user_id.to_string(),
+            "JBSWY3DPEHPK3PXP",
+        )
+        .unwrap();
+        sqlx::query("UPDATE users SET totp_secret_ciphertext = $2 WHERE id = $1")
+            .bind(user_id)
+            .bind(ciphertext)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+    }
+    let pending = pending_signin(&app, &username, "P@ssword123!").await;
+    let continuation = if totp {
+        let response =
+            post_msgpack(&app.app, "/auth/signin/finish", &pending, &HeaderMap::new()).await;
+        let (status, _, body) = split_response(response).await;
+        assert_eq!(status, StatusCode::OK);
+        let result: SigninFinishResponse = decode_msgpack(&body);
+        assert!(result.access_token.is_none());
+        assert!(result.encrypted_master_key.is_empty());
+        result.totp_continuation_token
+    } else {
+        None
+    };
+    reset_deferred_account(&app, &username, recovery).await;
+    let response = if let Some(continuation_token) = continuation {
+        post_msgpack(
+            &app.app,
+            "/auth/signin/totp",
+            &crate::features::auth::dto::SigninTotpRequest {
+                continuation_token,
+                totp_code: crate::platform::security::auth::generate_totp_for_test(
+                    "JBSWY3DPEHPK3PXP",
+                    time::OffsetDateTime::now_utc(),
+                ),
+            },
+            &HeaderMap::new(),
+        )
+        .await
+    } else {
+        post_msgpack(&app.app, "/auth/signin/finish", &pending, &HeaderMap::new()).await
+    };
+    assert_eq!(
+        active_session_count(&app, &username).await,
+        0,
+        "stale proof minted a new active session"
+    );
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    if totp && !recovery {
+        sqlx::query("UPDATE users SET totp_secret_ciphertext = NULL WHERE username = $1")
+            .bind(&username)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+    }
+    signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn opaque_login_started_before_recovery_is_rejected() {
+    stale_opaque_regression(true, false).await;
+}
+#[tokio::test]
+async fn opaque_login_started_before_password_change_is_rejected() {
+    stale_opaque_regression(false, false).await;
+}
+#[tokio::test]
+async fn stale_totp_continuation_after_password_change_is_rejected() {
+    stale_opaque_regression(false, true).await;
+}
+#[tokio::test]
+async fn stale_totp_continuation_after_recovery_is_rejected() {
+    stale_opaque_regression(true, true).await;
+}
+
+async fn stale_device_regression(reset: Option<bool>) {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-deferred-device-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    let signin = signin_user(&app, &username, "P@ssword123!", SigninTransport::Body).await;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", signin.access_token)).unwrap(),
+    );
+    let enrollment = post_msgpack(
+        &app.app,
+        "/devices",
+        &RegisterDeviceRequest {
+            enrollment_token: signin.device_enrollment_token,
+            device_id: Uuid::new_v4(),
+            signing_public_key: ed25519_dalek::SigningKey::from_bytes(&[23; 32])
+                .verifying_key()
+                .to_bytes()
+                .to_vec(),
+            hpke_public_key: crypto_core_lib::CryptoEngine::generate_x25519_keypair()
+                .public_key
+                .to_vec(),
+            encrypted_name: vec![1],
+            platform: DevicePlatform::Web,
+        },
+        &headers,
+    )
+    .await;
+    assert_eq!(enrollment.status(), StatusCode::OK);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/start",
+        &DeviceAuthorizationStartRequest {
+            hpke_public_key: vec![7; 32],
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    let (_, _, body) = split_response(response).await;
+    let started: DeviceAuthorizationStartResponse = decode_msgpack(&body);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/approve",
+        &DeviceAuthorizationApproveRequest {
+            user_code: started.user_code,
+            encrypted_master_key_package: vec![9; 96],
+        },
+        &headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    if let Some(recovery) = reset {
+        reset_deferred_account(&app, &username, recovery).await;
+    } else {
+        let response = post_msgpack(
+            &app.app,
+            "/auth/logout",
+            &LogoutRequest {
+                refresh_token: signin.refresh_token,
+            },
+            &HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = post_msgpack(
+        &app.app,
+        "/auth/device-authorization/token",
+        &DeviceAuthorizationTokenRequest {
+            flow_id: started.flow_id,
+            device_secret: started.device_secret,
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(
+        active_session_count(&app, &username).await,
+        0,
+        "stale approval minted a new active session"
+    );
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    signin_user(
+        &app,
+        &username,
+        if reset.is_some() {
+            "New-P@ssword123!"
+        } else {
+            "P@ssword123!"
+        },
+        SigninTransport::Body,
+    )
+    .await;
+    app.shutdown().await;
+}
+#[tokio::test]
+async fn device_approval_before_recovery_is_rejected() {
+    stale_device_regression(Some(true)).await;
+}
+#[tokio::test]
+async fn device_approval_before_password_change_is_rejected() {
+    stale_device_regression(Some(false)).await;
+}
+#[tokio::test]
+async fn device_approval_from_revoked_session_is_rejected() {
+    stale_device_regression(None).await;
+}
+
+async fn enroll_signin(app: &TestApp, signin: &SigninArtifacts) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", signin.access_token)).unwrap(),
+    );
+    let response = post_msgpack(
+        &app.app,
+        "/devices",
+        &RegisterDeviceRequest {
+            enrollment_token: signin.device_enrollment_token.clone(),
+            device_id: Uuid::new_v4(),
+            signing_public_key: ed25519_dalek::SigningKey::from_bytes(&[23; 32])
+                .verifying_key()
+                .to_bytes()
+                .to_vec(),
+            hpke_public_key: crypto_core_lib::CryptoEngine::generate_x25519_keypair()
+                .public_key
+                .to_vec(),
+            encrypted_name: vec![1],
+            platform: DevicePlatform::Web,
+        },
+        &headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    headers
+}
+
+async fn pending_reauth(
+    app: &TestApp,
+    headers: &HeaderMap,
+    password: &str,
+    action: crate::features::auth::dto::ReauthAction,
+) -> crate::features::auth::dto::ReauthFinishRequest {
+    use crate::features::auth::dto::{
+        ReauthFinishRequest, ReauthStartRequest, ReauthStartResponse,
+    };
+    let mut rng = OsRng;
+    let started = ClientLogin::<DefaultOpaqueSuite>::start(&mut rng, password.as_bytes()).unwrap();
+    let response = post_msgpack(
+        &app.app,
+        "/auth/reauth/start",
+        &ReauthStartRequest {
+            action,
+            opaque_start_request: started.message.serialize().to_vec(),
+        },
+        headers,
+    )
+    .await;
+    let (status, _, body) = split_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    let response: ReauthStartResponse = decode_msgpack(&body);
+    let finished = started
+        .state
+        .finish(
+            &mut rng,
+            password.as_bytes(),
+            CredentialResponse::<DefaultOpaqueSuite>::deserialize(&response.opaque_server_message)
+                .unwrap(),
+            ClientLoginFinishParameters::default(),
+        )
+        .unwrap();
+    ReauthFinishRequest {
+        action,
+        opaque_flow_id: response.opaque_flow_id,
+        opaque_finish_request: finished.message.serialize().to_vec(),
+        totp_code: None,
+    }
+}
+
+async fn reauth_proof(
+    app: &TestApp,
+    headers: &HeaderMap,
+    password: &str,
+    action: crate::features::auth::dto::ReauthAction,
+) -> String {
+    let pending = pending_reauth(app, headers, password, action).await;
+    let response = post_msgpack(&app.app, "/auth/reauth/finish", &pending, headers).await;
+    let (status, _, body) = split_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    decode_msgpack::<crate::features::auth::dto::ReauthFinishResponse>(&body).reauth_token
+}
+
+#[tokio::test]
+async fn deferred_enrollment_and_reauth_cannot_cross_recovery() {
+    use crate::features::auth::dto::{
+        ReauthAction, TotpSetupFinishRequest, TotpSetupStartRequest, TotpSetupStartResponse,
+    };
+    let Some(mut app) = setup_test_app().await else {
+        return;
+    };
+    app.state.config.enable_totp = true;
+    app.app = build_router(app.state.clone()).unwrap();
+    let username = format!("it-deferred-grants-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    let old_signin = signin_user(&app, &username, "P@ssword123!", SigninTransport::Body).await;
+    let old_headers = enroll_signin(&app, &old_signin).await;
+    let old_reauth = pending_reauth(
+        &app,
+        &old_headers,
+        "P@ssword123!",
+        ReauthAction::SecuritySettings,
+    )
+    .await;
+    let old_proof = reauth_proof(
+        &app,
+        &old_headers,
+        "P@ssword123!",
+        ReauthAction::SecuritySettings,
+    )
+    .await;
+    let setup_proof = reauth_proof(
+        &app,
+        &old_headers,
+        "P@ssword123!",
+        ReauthAction::SecuritySettings,
+    )
+    .await;
+    let response = post_msgpack(
+        &app.app,
+        "/auth/totp/setup/start",
+        &TotpSetupStartRequest {
+            reauth_token: setup_proof,
+        },
+        &old_headers,
+    )
+    .await;
+    let (status, _, body) = split_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    let setup: TotpSetupStartResponse = decode_msgpack(&body);
+    reset_deferred_account(&app, &username, true).await;
+    let fresh = signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
+    let mut fresh_headers = HeaderMap::new();
+    fresh_headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", fresh.access_token)).unwrap(),
+    );
+    let device_id = Uuid::new_v4();
+    let response = post_msgpack(
+        &app.app,
+        "/devices",
+        &RegisterDeviceRequest {
+            enrollment_token: old_signin.device_enrollment_token,
+            device_id,
+            signing_public_key: ed25519_dalek::SigningKey::from_bytes(&[23; 32])
+                .verifying_key()
+                .to_bytes()
+                .to_vec(),
+            hpke_public_key: crypto_core_lib::CryptoEngine::generate_x25519_keypair()
+                .public_key
+                .to_vec(),
+            encrypted_name: vec![1],
+            platform: DevicePlatform::Web,
+        },
+        &fresh_headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let inserted: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM devices WHERE id = $1)")
+        .bind(device_id)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert!(!inserted);
+    let fresh_headers = enroll_signin(&app, &fresh).await;
+    let response = post_msgpack(&app.app, "/auth/reauth/finish", &old_reauth, &fresh_headers).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/totp/setup/start",
+        &TotpSetupStartRequest {
+            reauth_token: old_proof,
+        },
+        &fresh_headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = post_msgpack(
+        &app.app,
+        "/auth/totp/setup/finish",
+        &TotpSetupFinishRequest {
+            flow_id: setup.flow_id,
+            code: crate::platform::security::auth::generate_totp_for_test(
+                &setup.manual_entry_key,
+                time::OffsetDateTime::now_utc(),
+            ),
+        },
+        &fresh_headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let enabled: bool = sqlx::query_scalar(
+        "SELECT totp_secret_ciphertext IS NOT NULL FROM users WHERE username = $1",
+    )
+    .bind(&username)
+    .fetch_one(&app.state.pool)
+    .await
+    .unwrap();
+    assert!(!enabled);
+    // A newly authenticated proof still completes the real HTTP password path.
+    let proof = reauth_proof(
+        &app,
+        &fresh_headers,
+        "New-P@ssword123!",
+        ReauthAction::ChangePassword,
+    )
+    .await;
+    let registration =
+        prepare_signup_request(&app, &username, "Third-P@ssword123!", Uuid::new_v4()).await;
+    let response = post_msgpack(
+        &app.app,
+        "/auth/password/change/finish",
+        &crate::features::auth::dto::PasswordChangeFinishRequest {
+            reauth_token: proof,
+            opaque_finish_request: registration.opaque_finish_request,
+            encrypted_master_key: vec![14; 64],
+        },
+        &fresh_headers,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(active_session_count(&app, &username).await, 0);
+    signin_user(&app, &username, "Third-P@ssword123!", SigninTransport::Body).await;
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn login_final_validation_waits_for_concurrent_password_reset() {
+    let Some(app) = setup_test_app().await else {
+        return;
+    };
+    let username = format!("it-auth-lock-{}", Uuid::new_v4());
+    register_user(&app, &username, "P@ssword123!").await;
+    let pending = pending_signin(&app, &username, "P@ssword123!").await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
+        .bind(&username)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let registration =
+        prepare_signup_request(&app, &username, "New-P@ssword123!", Uuid::new_v4()).await;
+    let mut reset_tx = app.state.pool.begin().await.unwrap();
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *reset_tx)
+        .await
+        .unwrap();
+    crate::features::auth::repositories::update_user_password_file_and_revoke_refresh_sessions(
+        &mut reset_tx,
+        user_id,
+        &registration.opaque_finish_request,
+        &[13; 64],
+    )
+    .await
+    .unwrap();
+    let router = app.app.clone();
+    let finishing = tokio::spawn(async move {
+        post_msgpack(&router, "/auth/signin/finish", &pending, &HeaderMap::new()).await
+    });
+    // Observe the real lock wait rather than relying on a sleep to order the race.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))").bind(blocker_pid).fetch_one(&app.state.pool).await.unwrap();
+            if blocked { break; }
+            assert!(!finishing.is_finished(), "login returned before reset released the user lock");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("login waits for reset transaction");
+    reset_tx.commit().await.unwrap();
+    let response = finishing.await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(active_session_count(&app, &username).await, 0);
+    signin_user(&app, &username, "New-P@ssword123!", SigninTransport::Body).await;
     app.shutdown().await;
 }

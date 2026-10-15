@@ -69,6 +69,12 @@ pub(crate) async fn apply_account_recovery_reset(
 ) -> Result<AccountRecoveryResetOutcome, ApiError> {
     let now = OffsetDateTime::now_utc();
     let mut tx = pool.begin().await.map_err(internal_error)?;
+    // Match authentication's account-before-session/credential lock order.
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE")
+        .bind(reset.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal_error)?;
     let attempt = sqlx::query(
         r#"
         SELECT user_id, request_hash, expires_at, completed_at
@@ -119,7 +125,7 @@ pub(crate) async fn apply_account_recovery_reset(
         .map_err(internal_error)?;
 
     let updated = sqlx::query(
-        "UPDATE users SET opaque_record = $2, encrypted_master_key = $3, totp_secret_ciphertext = NULL WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL",
+        "UPDATE users SET auth_generation = auth_generation + 1, opaque_record = $2, encrypted_master_key = $3, totp_secret_ciphertext = NULL WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL",
     )
     .bind(reset.user_id)
     .bind(reset.opaque_record)

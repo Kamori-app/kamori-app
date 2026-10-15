@@ -44,6 +44,7 @@ struct TotpContinuation {
     user_id: Uuid,
     username: String,
     attempts: u8,
+    auth_generation: i64,
 }
 
 pub(crate) async fn signin_start(
@@ -72,6 +73,7 @@ pub(crate) async fn signin_start(
             &username,
             &payload.opaque_start_request,
             password_file_bytes,
+            user.as_ref().map(|user| user.auth_generation),
         )
         .await
         .map_err(|_| unauthenticated("invalid credentials"))?;
@@ -98,7 +100,7 @@ pub(crate) async fn signin_finish(
         .map_err(|_| unauthenticated("invalid credentials"))?;
     let user = find_user_by_username(&state.pool, &username).await?;
 
-    state
+    let proof = state
         .opaque
         .login_finish(
             &username,
@@ -108,6 +110,10 @@ pub(crate) async fn signin_finish(
         .await
         .map_err(|_| unauthenticated("invalid credentials"))?;
     let user = user.ok_or_else(|| unauthenticated("invalid credentials"))?;
+
+    if proof.auth_generation != Some(user.auth_generation) {
+        return Err(unauthenticated("authentication credentials have changed"));
+    }
 
     // `enable_totp` controls new enrollment only. Once an account has a TOTP
     // secret, configuration changes must never turn its second factor into an
@@ -161,7 +167,9 @@ pub(crate) async fn signin_totp(
     .await?;
     let user = find_user_by_username(&state.pool, &continuation.username)
         .await?
-        .filter(|user| user.id == continuation.user_id)
+        .filter(|user| {
+            user.id == continuation.user_id && user.auth_generation == continuation.auth_generation
+        })
         .ok_or_else(|| unauthenticated("account is unavailable"))?;
     verify_user_totp(state, &user, code).await?;
     let consumed = state
@@ -187,7 +195,12 @@ async fn complete_login(
     let client = client_metadata_from_headers(headers);
     let issued_refresh = create_refresh_token(
         &state.pool,
-        user.id,
+        super::super::repositories::AuthenticationBinding {
+            user_id: user.id,
+            generation: user.auth_generation,
+            session_id: None,
+        },
+        None,
         client.user_agent.as_deref(),
         client.ip_address.as_deref(),
         OffsetDateTime::now_utc() + state.refresh_token_ttl(),
@@ -196,7 +209,15 @@ async fn complete_login(
     let access_token = state
         .issue_access_token(user.id, &user.username, issued_refresh.token_id)
         .map_err(internal_error)?;
-    let device_enrollment_token = super::device_enrollment::issue(state, user.id).await?;
+    let device_enrollment_token = super::device_enrollment::issue(
+        state,
+        super::super::repositories::AuthenticationBinding {
+            user_id: user.id,
+            generation: user.auth_generation,
+            session_id: Some(issued_refresh.token_id),
+        },
+    )
+    .await?;
     let refresh_token = match refresh_transport {
         RefreshTransport::Body => Some(issued_refresh.token.clone()),
         RefreshTransport::Cookie => None,
@@ -270,6 +291,7 @@ async fn create_totp_continuation(state: &AppState, user: &UserRow) -> Result<St
         user_id: user.id,
         username: user.username.clone(),
         attempts: 0,
+        auth_generation: user.auth_generation,
     };
     let encoded = rmp_serde::to_vec_named(&continuation).map_err(internal_error)?;
     for _ in 0..3 {
@@ -349,6 +371,7 @@ mod tests {
                 .expect("encrypt TOTP secret");
         let user = UserRow {
             id: user_id,
+            auth_generation: 0,
             username: "alice".to_string(),
             opaque_record: None,
             totp_secret_ciphertext: Some(encrypted_secret),

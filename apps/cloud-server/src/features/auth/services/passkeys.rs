@@ -43,7 +43,7 @@ pub(crate) async fn passkey_add_start(
     payload: PasskeyAddStartRequest,
 ) -> Result<PasskeyAddStartResponse, ApiError> {
     let principal = authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -61,6 +61,15 @@ pub(crate) async fn passkey_add_start(
         .await
         .map_err(internal_error)?;
 
+    state
+        .state_store
+        .put(
+            &format!("auth:passkey-enrollment:{flow_id}"),
+            &rmp_serde::to_vec_named(&binding).map_err(internal_error)?,
+            std::time::Duration::from_secs(5 * 60),
+        )
+        .await
+        .map_err(internal_error)?;
     Ok(PasskeyAddStartResponse {
         flow_id,
         challenge: options.challenge,
@@ -73,7 +82,19 @@ pub(crate) async fn passkey_add_finish(
     headers: &HeaderMap,
     payload: PasskeyAddFinishRequest,
 ) -> Result<PasskeyAddFinishResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = authorize_principal(state, headers).await?;
+    let user_id = principal.user_id;
+    let stored = state
+        .state_store
+        .take(&format!("auth:passkey-enrollment:{}", payload.flow_id))
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| unauthenticated("passkey enrollment expired"))?;
+    let binding: super::super::repositories::AuthenticationBinding =
+        rmp_serde::from_slice(&stored).map_err(internal_error)?;
+    if binding.user_id != user_id || binding.session_id != Some(principal.session_id) {
+        return Err(unauthenticated("passkey enrollment session mismatch"));
+    }
     validate_encrypted_passkey_name(&payload.encrypted_name)?;
 
     let credential: RegisterPublicKeyCredential = serde_json::from_slice(&payload.credential)
@@ -86,8 +107,10 @@ pub(crate) async fn passkey_add_finish(
 
     let credential_id = passkey.cred_id().as_ref().to_vec();
     let passkey_data = encode_passkey(&passkey).map_err(internal_error)?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
     let metadata = upsert_owned_user_passkey(
-        &state.pool,
+        &mut tx,
         user_id,
         &credential_id,
         &passkey_data,
@@ -95,6 +118,7 @@ pub(crate) async fn passkey_add_finish(
     )
     .await?;
 
+    tx.commit().await.map_err(internal_error)?;
     Ok(PasskeyAddFinishResponse { passkey: metadata })
 }
 
@@ -136,7 +160,7 @@ pub(crate) async fn passkey_delete(
     payload: PasskeyDeleteRequest,
 ) -> Result<PasskeyDeleteResponse, ApiError> {
     let principal = authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -146,13 +170,16 @@ pub(crate) async fn passkey_delete(
     .await?;
     let user_id = principal.user_id;
 
-    let deleted = delete_passkey_for_user(&state.pool, user_id, payload.passkey_id)
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    let deleted = delete_passkey_for_user(&mut tx, user_id, payload.passkey_id)
         .await
         .map_err(internal_error)?;
     if !deleted {
         return Err(unauthorized("passkey not found"));
     }
 
+    tx.commit().await.map_err(internal_error)?;
     Ok(PasskeyDeleteResponse { deleted })
 }
 
@@ -201,7 +228,12 @@ pub(crate) async fn passkey_login_finish(
     let client = client_metadata_from_headers(headers);
     let refresh = create_refresh_token(
         &state.pool,
-        user.id,
+        super::super::repositories::AuthenticationBinding {
+            user_id: user.id,
+            generation: user.auth_generation,
+            session_id: None,
+        },
+        Some(&credential_id),
         client.user_agent.as_deref(),
         client.ip_address.as_deref(),
         OffsetDateTime::now_utc() + state.refresh_token_ttl(),
@@ -211,7 +243,15 @@ pub(crate) async fn passkey_login_finish(
     let access_token = state
         .issue_access_token(user.id, &user.username, refresh.token_id)
         .map_err(internal_error)?;
-    let device_enrollment_token = super::device_enrollment::issue(state, user.id).await?;
+    let device_enrollment_token = super::device_enrollment::issue(
+        state,
+        super::super::repositories::AuthenticationBinding {
+            user_id: user.id,
+            generation: user.auth_generation,
+            session_id: Some(refresh.token_id),
+        },
+    )
+    .await?;
     let refresh_token = match refresh_transport {
         RefreshTransport::Body => Some(refresh.token.clone()),
         RefreshTransport::Cookie => None,

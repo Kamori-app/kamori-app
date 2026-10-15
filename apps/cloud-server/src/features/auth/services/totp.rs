@@ -31,7 +31,7 @@ const TOTP_SETUP_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Deserialize, Serialize)]
 struct TotpSetupState {
-    user_id: Uuid,
+    binding: super::super::repositories::AuthenticationBinding,
     manual_entry_key: String,
 }
 
@@ -68,7 +68,7 @@ pub(crate) async fn totp_setup_start(
     }
 
     let principal = authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -94,7 +94,7 @@ pub(crate) async fn totp_setup_start(
         .put(
             &totp_setup_key(flow_id),
             &rmp_serde::to_vec_named(&TotpSetupState {
-                user_id,
+                binding,
                 manual_entry_key: manual_entry_key.clone(),
             })
             .map_err(internal_error)?,
@@ -119,7 +119,8 @@ pub(crate) async fn totp_setup_finish(
         return Err(bad_request("totp is disabled"));
     }
 
-    let user_id = authorize_session(state, headers).await?;
+    let principal = authorize_principal(state, headers).await?;
+    let user_id = principal.user_id;
     if get_user_totp_ciphertext_by_id(&state.pool, user_id)
         .await?
         .is_some()
@@ -134,7 +135,7 @@ pub(crate) async fn totp_setup_finish(
         .map_err(internal_error)?
         .ok_or_else(|| unauthenticated("totp setup expired or was already used"))?;
     let setup: TotpSetupState = rmp_serde::from_slice(&setup).map_err(internal_error)?;
-    if setup.user_id != user_id {
+    if setup.binding.user_id != user_id || setup.binding.session_id != Some(principal.session_id) {
         return Err(unauthenticated("totp setup belongs to another account"));
     }
     let manual_entry_key = normalize_totp_manual_entry_key(&setup.manual_entry_key)?;
@@ -166,8 +167,10 @@ pub(crate) async fn totp_setup_finish(
         &manual_entry_key,
     )
     .map_err(crate::features::common::internal_error)?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    setup.binding.lock(&mut tx).await?;
     let enabled = enable_totp_for_user_with_recovery_codes(
-        &state.pool,
+        &mut tx,
         user_id,
         &totp_secret_ciphertext,
         &recovery_code_rows,
@@ -177,6 +180,7 @@ pub(crate) async fn totp_setup_finish(
         return Err(bad_request("totp is already enabled"));
     }
 
+    tx.commit().await.map_err(internal_error)?;
     let recovery_codes = generated_recovery_codes
         .into_iter()
         .map(|(display, _hash)| display)
@@ -194,7 +198,7 @@ pub(crate) async fn totp_disable(
     payload: TotpDisableRequest,
 ) -> Result<TotpDisableResponse, ApiError> {
     let principal = authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -232,7 +236,10 @@ pub(crate) async fn totp_disable(
         return Err(unauthenticated("invalid totp code"));
     }
 
-    clear_totp_for_user(&state.pool, user_id).await?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    clear_totp_for_user(&mut tx, user_id).await?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(TotpDisableResponse { enabled: false })
 }
 
@@ -242,7 +249,7 @@ pub(crate) async fn account_recovery_codes_regenerate(
     payload: AccountRecoveryCodesRegenerateRequest,
 ) -> Result<AccountRecoveryCodesRegenerateResponse, ApiError> {
     let principal = authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -257,7 +264,10 @@ pub(crate) async fn account_recovery_codes_regenerate(
         .map(|(_display, code_hash)| (Uuid::new_v4(), code_hash.clone()))
         .collect::<Vec<_>>();
 
-    regenerate_recovery_codes_for_user(&state.pool, user_id, &recovery_code_rows).await?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    regenerate_recovery_codes_for_user(&mut tx, user_id, &recovery_code_rows).await?;
+    tx.commit().await.map_err(internal_error)?;
     let recovery_codes = generated_recovery_codes
         .into_iter()
         .map(|(display, _hash)| display)

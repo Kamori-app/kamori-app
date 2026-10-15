@@ -7,6 +7,7 @@ use crate::features::common::{ApiError, internal_error, unauthenticated};
 
 pub(crate) struct UserRow {
     pub(crate) id: Uuid,
+    pub(crate) auth_generation: i64,
     pub(crate) username: String,
     pub(crate) opaque_record: Option<Vec<u8>>,
     pub(crate) totp_secret_ciphertext: Option<Vec<u8>>,
@@ -68,7 +69,7 @@ pub(crate) async fn get_user_by_username(
     pool: &PgPool,
     username: &str,
 ) -> Result<UserRow, ApiError> {
-    let sql = r#"SELECT id, username, opaque_record, totp_secret_ciphertext, encrypted_master_key, public_key_bundle
+    let sql = r#"SELECT id, auth_generation, username, opaque_record, totp_secret_ciphertext, encrypted_master_key, public_key_bundle
                FROM users
                WHERE username = $1 AND deleted_at IS NULL AND suspended_at IS NULL"#;
 
@@ -88,7 +89,7 @@ pub(crate) async fn find_user_by_username(
     username: &str,
 ) -> Result<Option<UserRow>, ApiError> {
     let row = sqlx::query(
-        r#"SELECT id, username, opaque_record, totp_secret_ciphertext,
+        r#"SELECT id, auth_generation, username, opaque_record, totp_secret_ciphertext,
                   encrypted_master_key, public_key_bundle
            FROM users
            WHERE username = $1 AND deleted_at IS NULL AND suspended_at IS NULL"#,
@@ -125,6 +126,7 @@ pub(super) fn map_user_row(row: &sqlx::postgres::PgRow) -> Result<UserRow, ApiEr
 
     Ok(UserRow {
         id,
+        auth_generation: row.try_get("auth_generation").map_err(internal_error)?,
         username,
         opaque_record,
         totp_secret_ciphertext,
@@ -271,11 +273,14 @@ pub(crate) async fn get_user_totp_ciphertext_by_id(
         .map_err(internal_error)
 }
 
-pub(crate) async fn clear_totp_for_user(pool: &PgPool, user_id: Uuid) -> Result<(), ApiError> {
+pub(crate) async fn clear_totp_for_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<(), ApiError> {
     let result =
-        sqlx::query("UPDATE users SET totp_secret_ciphertext = NULL WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL")
+        sqlx::query("UPDATE users SET auth_generation = auth_generation + 1, totp_secret_ciphertext = NULL WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL")
             .bind(user_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .map_err(internal_error)?;
     if result.rows_affected() == 0 {

@@ -66,7 +66,7 @@ pub(crate) async fn password_change_finish(
         .await
         .map_err(|_| bad_request("invalid OPAQUE password-change finish"))?;
 
-    consume_reauth_token(
+    let binding = consume_reauth_token(
         state,
         &payload.reauth_token,
         user_id,
@@ -75,14 +75,17 @@ pub(crate) async fn password_change_finish(
     )
     .await?;
 
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
     update_user_password_file_and_revoke_refresh_sessions(
-        &state.pool,
+        &mut tx,
         user_id,
         &password_file_bytes,
         &payload.encrypted_master_key,
     )
     .await?;
 
+    tx.commit().await.map_err(internal_error)?;
     Ok(PasswordChangeFinishResponse { changed: true })
 }
 

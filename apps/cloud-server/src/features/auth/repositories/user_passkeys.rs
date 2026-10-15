@@ -15,7 +15,7 @@ pub(crate) async fn get_user_and_passkey_by_credential_id(
     pool: &PgPool,
     credential_id: &[u8],
 ) -> Result<(UserRow, Passkey), ApiError> {
-    let sql = r#"SELECT u.id, u.username, u.opaque_record, u.totp_secret_ciphertext, u.encrypted_master_key, u.public_key_bundle, up.passkey_data
+    let sql = r#"SELECT u.id, u.auth_generation, u.username, u.opaque_record, u.totp_secret_ciphertext, u.encrypted_master_key, u.public_key_bundle, up.passkey_data
                FROM user_passkeys up
                JOIN users u ON u.id = up.user_id
                WHERE up.credential_id = $1 AND u.deleted_at IS NULL AND u.suspended_at IS NULL"#;
@@ -46,7 +46,7 @@ fn map_passkey_metadata(row: &sqlx::postgres::PgRow) -> Result<PasskeyMetadata, 
 
 /// Inserts or updates a user passkey, but never allows cross-user credential takeover.
 pub(crate) async fn upsert_owned_user_passkey(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     credential_id: &[u8],
     passkey_data: &[u8],
@@ -70,7 +70,7 @@ pub(crate) async fn upsert_owned_user_passkey(
     .bind(credential_id)
     .bind(passkey_data)
     .bind(encrypted_name)
-    .fetch_optional(pool)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(internal_error)?;
 
@@ -148,14 +148,14 @@ pub(crate) async fn update_passkey_name_for_user(
 /// Deletes passkey by id for the specific user, including their final passkey.
 /// OPAQUE password authentication is independent and remains available.
 pub(crate) async fn delete_passkey_for_user(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     passkey_id: Uuid,
 ) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM user_passkeys WHERE id = $1 AND user_id = $2")
         .bind(passkey_id)
         .bind(user_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
     Ok(result.rows_affected() > 0)
 }
