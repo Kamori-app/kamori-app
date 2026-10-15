@@ -553,3 +553,88 @@ test("master-key callbacks reject a replaced lifetime and erase their temporary 
   expect(await page.evaluate(() => Array.from((window as any).temporaryKey))).toEqual(Array(32).fill(0));
   expect(await page.evaluate(() => (window as any).durability.vault.withActiveMasterKey((key: Uint8Array) => key[0]))).toBe(8);
 });
+
+test("a held local save cannot publish an obsolete editor notification under Bob", async ({ page }, info) => {
+  await open(page); await start(page, "bob", `${origin}/pim`, 8);
+  await save(page, "Bob notification sentinel");
+  const bobBefore = await snapshot(page);
+  await open(page); await start(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  holdAppend = () => gate; online = true;
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New task" });
+  await editor.getByRole("textbox", { name: "Title" }).fill("Alice held local save");
+  await editor.getByRole("button", { name: "Save task" }).click();
+  await expect.poll(() => appends.length).toBe(1);
+  await expect(editor.getByRole("button", { name: "Saving…", exact: true })).toBeVisible();
+  const aliceHeld = await snapshot(page);
+  expect(aliceHeld.state.items.map((item: any) => item.title)).toEqual(["Alice held local save"]);
+  expect(aliceHeld.queue).toHaveLength(1);
+  expect(appends).toEqual([aliceHeld.queue[0].client_op_id]);
+  expect(appendAuthorizations).toEqual(["Bearer synthetic-alice"]);
+  online = false;
+  await page.evaluate(args => (window as any).durability.start(args), {
+    endpoint: `${origin}/pim`, account: "bob", space, keyByte: 8,
+  });
+  await expect(page.getByText("Bob notification sentinel", { exact: true })).toBeVisible();
+  expect(await snapshot(page)).toEqual(bobBefore);
+  const notificationsBefore = await page.evaluate(() => (window as any).durability.notifications);
+  const sessionBefore = await page.evaluate(() => (window as any).durability.session());
+  expect(sessionBefore).toEqual({ username: "bob", token: "synthetic-bob", accessToken: "synthetic-bob" });
+  release(); holdAppend = undefined;
+  await expect.poll(() => page.evaluate(async () => {
+    const locks = await navigator.locks.query();
+    return [...(locks.held ?? []), ...(locks.pending ?? [])]
+      .filter(lock => lock.name === "kamori-web-data-plane-v1").length;
+  })).toBe(0);
+  const bobAfter = await snapshot(page);
+  const sessionAfter = await page.evaluate(() => (window as any).durability.session());
+  const notificationsAfter = await page.evaluate(() => (window as any).durability.notifications);
+  expect(bobAfter).toEqual(bobBefore);
+  expect(sessionAfter).toEqual(sessionBefore);
+  expect(refreshes).toEqual([]);
+  await start(page);
+  const aliceAfter = await snapshot(page);
+  expect(aliceAfter).toEqual(aliceHeld);
+  const path = info.outputPath("held-save-notifications.json");
+  writeFileSync(path, JSON.stringify({ aliceHeld, aliceAfter, bobBefore, bobAfter,
+    sessionBefore, sessionAfter, notificationsBefore, notificationsAfter, appends, appendAuthorizations }, null, 2));
+  await info.attach("held-save-notifications", { path, contentType: "application/json" });
+  const previousIds = new Set(notificationsBefore.map((notice: any) => notice.id));
+  expect(notificationsAfter.filter((notice: any) => !previousIds.has(notice.id))).toEqual([]);
+});
+
+test("a current local save failure still notifies and rejects without closing the editor", async ({ page }) => {
+  await open(page); await start(page);
+  const before = await snapshot(page);
+  // Remove this synthetic account's cached space key through real IndexedDB.
+  // The mounted UI is still writable; the production save must report the loss.
+  await page.evaluate(async space => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("kamori-web-vault");
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction("space-keys", "readwrite");
+        const store = transaction.objectStore("space-keys");
+        const keys = store.getAllKeys();
+        keys.onsuccess = () => keys.result.filter(key => String(key).endsWith(`:${space}:1`))
+          .forEach(key => store.delete(key));
+        transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error);
+      });
+    } finally { database.close(); }
+  }, space);
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New task" });
+  await editor.getByRole("textbox", { name: "Title" }).fill("Current editor failure");
+  await editor.getByRole("button", { name: "Save task" }).click();
+  const message = "This device has no key for the selected collection.";
+  await expect(editor.getByText(message, { exact: true })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Save task", exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).durability.notifications.map(({ message, source, kind, persistent }: any) =>
+    ({ message, source, kind, persistent })))).toEqual([{ message, source: "Editor", kind: "error", persistent: true }]);
+  expect(await snapshot(page)).toEqual(before);
+  expect(appends).toEqual([]);
+});

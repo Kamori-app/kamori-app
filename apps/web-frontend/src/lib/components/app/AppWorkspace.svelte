@@ -249,9 +249,12 @@
         }
     }
 
-    const setNotice = (notice: string) => {
+    const setNotice = (
+        notice: string,
+        options: Parameters<typeof notify>[1] = {},
+    ) => {
         if (!isWorkspaceCurrent()) return;
-        notify(notice, { source: localized("Web app", "Веб-приложение") });
+        notify(notice, { source: localized("Web app", "Веб-приложение"), ...options });
     };
 
     const clearDeviceAuthorizationQuery = () => {
@@ -426,7 +429,7 @@
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             collectionFormError = `${localized("Space creation failed", "Не удалось создать пространство")}: ${message}`;
-            notify(collectionFormError, {
+            setNotice(collectionFormError, {
                 kind: "error",
                 source: localized("Spaces", "Пространства"),
             });
@@ -1103,7 +1106,7 @@
                 : localized("Changes saved to the encrypted offline outbox.", "Изменения сохранены в зашифрованной офлайн-очереди."));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            notify(message, { kind: "error", source: localized("Editor", "Редактор") });
+            setNotice(message, { kind: "error", source: localized("Editor", "Редактор") });
             throw error;
         } finally {
             clearLoading();
@@ -1183,7 +1186,7 @@
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            notify(
+            setNotice(
                 `${localized("Restore failed", "Не удалось восстановить")}: ${message}`,
                 {
                     kind: "error",
