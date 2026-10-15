@@ -78,13 +78,13 @@
 
 ### Task 5: Add behavioral desktop and admin UI gates
 
-**Files:** desktop package scripts and new focused UI tests/fixtures under desktop or tests/acceptance; existing desktop LoginPage/CollectionsPage/DashboardPage only for proven behavior defects; admin UI tests/fixtures and components only when proven. Reuse pinned Playwright and existing Svelte compilation infrastructure.
+**Files:** `.github/workflows/ci.yml` pinned Chromium/Linux dependency provisioning and CI affected-path detector/tests when required so external UI-only edits run the new PR gates; `turbo.json` narrow UI-test input overrides when fixtures/components live outside the owning package; desktop package scripts and new focused UI tests/fixtures under desktop or tests/acceptance; existing desktop LoginPage/CollectionsPage/DashboardPage only for proven behavior defects; admin UI tests/fixtures and components only when proven. Reuse pinned Playwright and existing Svelte compilation infrastructure.
 **Interfaces:** Actual mounted Svelte components with synthetic Tauri IPC or HTTP/WebAuthn boundaries. Production IPC dispatch, data validation and UI state must run; no production-only testing switch.
 
-- [ ] Make desktop `test` run a behavioral suite in addition to its existing typecheck. Test sign-in-only UI and error recovery, restored/offline control state, collection action validation and invite expiry bounds without replacing component logic with a fixture implementation.
-- [ ] Test admin authentication error/second-factor states and at least one privileged mutation's pending/success/failure behavior with actual mounted UI and synthetic transport/authenticator boundaries. Ensure no privileged request before the required ceremony/confirmation.
-- [ ] Assert visible DOM changes and exact boundary calls/payloads; mocked OS/network boundaries are acceptable but static source-string tests and mere rendering snapshots are insufficient.
-- [ ] Fix only demonstrated regressions; run desktop/admin check/test/build on Bun1.3.14 and report real behavioral counts separately from typecheck. Commit task files and any strictly required test-only dependency/lockfile change.
+- [x] Make desktop `test` run a behavioral suite in addition to its existing typecheck. Test sign-in-only UI and error recovery, restored/offline control state and collection action validation. Verify invite expiry bounds in the existing production web sharing component as a separately identified case, since desktop README assigns sharing to web/mobile; do not add desktop sharing UI. Do not replace component logic with a fixture implementation.
+- [x] Test admin authentication error/second-factor states and at least one privileged mutation's pending/success/failure behavior with actual mounted UI and synthetic transport/authenticator boundaries. Ensure no privileged request before the required ceremony/confirmation.
+- [x] Assert visible DOM changes and exact boundary calls/payloads; mocked OS/network boundaries are acceptable but static source-string tests and mere rendering snapshots are insufficient.
+- [x] Fix only demonstrated regressions; run desktop/admin check/test/build on Bun1.3.14 and report real behavioral counts separately from typecheck. Commit task files and any strictly required test-only dependency/lockfile change.
 
 ### Task 6: Verify imported recurrence/unknown-field/DAV compatibility
 
