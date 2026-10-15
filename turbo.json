@@ -47,6 +47,34 @@
     },
     "format": {
       "outputs": []
+    },
+    "dav-bridge-desktop#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/specs/uiHost.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/uiGates.bundle.mjs",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/desktop-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/desktopUi.js",
+        "$TURBO_ROOT$/tests/acceptance/specs/invite-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/inviteUi.js",
+        "$TURBO_ROOT$/apps/web-frontend/src/**",
+        "$TURBO_ROOT$/apps/web-frontend/package.json"
+      ]
+    },
+    "admin-frontend#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/specs/uiHost.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/uiGates.bundle.mjs",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/admin-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/adminUi.js"
+      ]
     }
   }
 }
