@@ -111,16 +111,16 @@
 **Files:** reusable local-only restore harness under `tests/release-readiness/restore/`, supporting container definitions; `docs/runbooks/backup-restore.md` and evidence; production backup/replication scripts only for a reproduced orchestration defect.
 **Interfaces:** Real PostgreSQL16 matching hosted provisioning/runbook, pgBackRest encrypted repository/WAL archive/restore, real MinIO primary/DR endpoints and production blob replication tooling. Parent provisions exact own container/project names; no production endpoints/credentials or host PGDATA.
 
-- [ ] Create a synthetic migrated database with known operation/counter/account canaries; create an encrypted pgBackRest full backup and archive WAL across two distinguishable committed markers. Use the actual backup job/archive check where locally adaptable, with only external paths/env configured for the sandbox.
-- [ ] Restore to a point between markers into a distinct disposable PGDATA/container, start it, and assert schema/checksum/accounting and pre-target marker/ciphertext bytes match while post-target marker is absent. Record backup/check/restore commands and targeted recovery outcome.
-- [ ] Put synthetic ciphertext objects in the local primary store, execute actual replication, restore/read from independent DR and compare size/hash. Prove missing/corrupt data is detected, not merely successful process exit.
-- [ ] Fix any demonstrated script/runbook errors minimally and add behavioral regression. Keep destructive cleanup strictly scoped to owned project/volume labels; never read actual secrets or claim this proves remote-provider/production disaster recovery.
-- [ ] Run affected Go1.25.11 tests/vet/shell checks, archive concise local restore evidence, commit harness/docs/fixes and report exact objects/rows/target and cleanup result.
+- [x] Create a synthetic migrated database with known operation/counter/account canaries; create an encrypted pgBackRest full backup and archive WAL across two distinguishable committed markers. Use the actual backup job/archive check where locally adaptable, with only external paths/env configured for the sandbox.
+- [x] Restore to a point between markers into a distinct disposable PGDATA/container, start it, and assert schema/checksum/accounting and pre-target marker/ciphertext bytes match while post-target marker is absent. Record backup/check/restore commands and targeted recovery outcome.
+- [x] Put synthetic ciphertext objects in the local primary store, execute actual replication, restore/read from independent DR and compare size/hash. Prove missing/corrupt data is detected, not merely successful process exit.
+- [x] Fix any demonstrated script/runbook errors minimally and add behavioral regression. Keep destructive cleanup strictly scoped to owned project/volume labels; never read actual secrets or claim this proves remote-provider/production disaster recovery.
+- [x] Run affected Go1.25.11 tests/vet/shell checks, archive concise local restore evidence, commit harness/docs/fixes and report exact objects/rows/target and cleanup result.
 
 ## Controller final integration and completion
 
-- [ ] Preserve separate per-task base/head commits, reports and spec+quality reviews. Scope rereviews to fix diffs; no duplicate full suites to confirm a report.
+- [x] Preserve separate per-task base/head commits, reports and spec+quality reviews. Scope rereviews to fix diffs; no duplicate full suites to confirm a report.
 - [ ] Run final pinned workspace Rust+FRB with supplied PostgreSQL, fmt/strict Clippy, web/admin/desktop checks/tests/builds, Flutter analyze/tests and real native builds affected by changed source. Run full fresh-image browser acceptance after source is frozen.
-- [ ] Record only freshly measured coverage or retain exact prior revision provenance; test-only lines/expanded populations cannot prove full business coverage.
+- [x] Record only freshly measured coverage or retain exact prior revision provenance; test-only lines/expanded populations cannot prove full business coverage.
 - [ ] Save new findings, actual RED/GREEN, benchmark/restore/native results and remaining physical/signing/legal gates in `docs/audits/2026-10-15-readiness.md`; update the existing business-test matrix without erasing historical baseline evidence.
 - [ ] Perform one final review of this continuation range, fix all confirmed findings, collect every new Ruling with its cost into permanent docs/final response, archive reports, and remove only this plan's scratch/resources after clean review. Keep `fix/audit-remediation` checked out; no merge/push or branch creation.
