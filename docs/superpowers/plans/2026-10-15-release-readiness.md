@@ -59,10 +59,10 @@
 **Files:** auth/handlers integration tests or focused sibling test module; auth repositories/services only when the new production-path regression proves a defect. Reuse Task2 DB prerequisite helper.
 **Interfaces:** Existing AuthenticationBinding/auth_generation, refresh session rows and passkey registration persistence. Preserve MessagePack, exact refresh retry and one-use authorization semantics.
 
-- [ ] Add deterministic `refresh_commit_and_password_reset_serialize_in_both_orders`: real refresh/reset transaction paths, observed PostgreSQL lock wait, reset-first rejects stale capability, refresh-first replacement is revoked by the subsequent reset. Assert no surviving unauthorized session and no unrelated-account mutation.
-- [ ] Add `passkey_registration_commit_rejects_reset_generation`: prepare a valid deferred registration with a software/test authenticator or existing valid fixture, pause the actual commit transaction versus reset, and assert no stale passkey row/capability. Cover commit-first then reset behavior according to the retained generation/session contract.
-- [ ] Add controls for an eligible current-generation completion and exact retry where supported. Do not substitute a mocked final binding validator for production persistence or require physical authenticator hardware.
-- [ ] If any assertion exposes a real violation, record actual RED and minimally fix it; otherwise report these as newly proven coverage. Run focused cases, full server once, strict Clippy/fmt; commit and report.
+- [x] Add deterministic `refresh_commit_and_password_reset_serialize_in_both_orders`: real refresh/reset transaction paths, observed PostgreSQL lock wait, reset-first rejects stale capability, refresh-first replacement is revoked by the subsequent reset. Assert no surviving unauthorized session and no unrelated-account mutation.
+- [x] Add `passkey_registration_commit_rejects_reset_generation`: prepare a valid deferred registration with a software/test authenticator or existing valid fixture, pause the actual commit transaction versus reset, and assert no stale passkey row/capability. Cover commit-first then reset behavior according to the retained generation/session contract.
+- [x] Add controls for an eligible current-generation completion and exact retry where supported. Do not substitute a mocked final binding validator for production persistence or require physical authenticator hardware.
+- [x] If any assertion exposes a real violation, record actual RED and minimally fix it; otherwise report these as newly proven coverage. Run focused cases, full server once, strict Clippy/fmt; commit and report.
 
 ### Task 4: Exercise real client crash durability and multi-tab coordination
 

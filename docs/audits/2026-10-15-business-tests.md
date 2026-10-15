@@ -41,3 +41,13 @@
 Native harness один раз выявил нестабильность собственных accepted TCP sockets. Отдельный std-only probe подтвердил immediate WouldBlock; явный blocking mode исправил harness без ослабления assertions. Матрица 6 тестов прошла пять раз подряд, затем полный core/workspace. Пять повторов выполнялись из-за конкретного сбоя, не вместо выяснения причины.
 
 Продолжение native-валидации: Task1 `ac0c51e` добавил настоящий iOS arm64 build, 6 installed-plugin integration и 3 XCTest; 72 Flutter tests/analyze pass. Проверены реальные Contacts/Calendar CRUD и восстановление после внешнего удаления контакта. [Доказательства](2026-10-15-readiness.md). Физический scheduler, data protection и Android runtime этим не сертифицируются.
+
+## Проверки продолжения аудита
+
+Следующие результаты относятся к отдельному [плану готовности](../superpowers/plans/2026-10-15-release-readiness.md); исторические 258 Rust tests и coverage выше сохраняют исходный revision. Новые числа не являются новой оценкой line coverage.
+
+| Задача / revision | Проверенная граница | Остаточное ограничение |
+|---|---|---|
+| Task1 / `ac0c51e` | Реальные iOS FRB/native channels, Contacts/Calendar CRUD, external-delete reconciliation; 6 integration +3 XCTest +72 Flutter; unsigned arm64 build | Simulator не доказывает физический scheduler, аппаратный power loss или подпись; локальная сборка использует scoped SDK runner |
+| Task2 / `d4d9fd7` | Реальный subprocess без обоих DB URL: до исправления passed+skip, после явный exit101; 5 prerequisite tests, fallback1, unit-only2, весь сервер156/156 с PostgreSQL18.6, включая45 DB integrations | Это достоверность запуска тестов, не дополнительный процент покрытия бизнес-ветвей; полному suite нужна отдельная БД |
+| Task3 / `a3c2efe` | `refresh_commit_and_password_reset_serialize_in_both_orders`, `passkey_registration_commit_rejects_reset_generation`: реальные HTTP/DB, оба порядка, шесть точных lock waits, ES256 registration/login и current-generation controls; server158/158 | Уже GREEN на прежних guards; программный authenticator не проверяет OS/hardware UI, все алгоритмы и внешний lifecycle challenge store |

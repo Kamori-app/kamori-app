@@ -27,7 +27,7 @@ R02 не выведен из ошибочного тестового ожида�
 
 1. Task1 завершён, независимое review принято.
 2. Task2 завершён: отсутствие PostgreSQL теперь даёт явную ошибку; независимое review принято.
-3. Проверить reset/refresh и deferred passkey commit в обоих порядках.
+3. Task3 завершён: оба порядка reset/refresh и deferred passkey commit доказаны; независимое review принято.
 4. Проверить реальные SQLite/IndexedDB crash boundaries и несколько browser tabs.
 5. Добавить поведенческие desktop/admin UI gates.
 6. Проверить corpus импортированных recurrence exceptions и DAV round-trip.
@@ -50,3 +50,7 @@ R02 не выведен из ошибочного тестового ожида�
 ## Принятый Task2
 
 Коммит `d4d9fd7`; [отчёт исполнителя](readiness-reports/2026-10-15-task-2.md), [независимое spec/quality review](readiness-reports/2026-10-15-task-2-review.md). 156 серверных тестов прошли с PostgreSQL18.6, включая 45 DB integrations; Clippy/fmt прошли. Отдельный запуск настоящего DB-теста без обоих URL намеренно завершился exit101 с actionable diagnostic; filtered unit-only workflow без базы остаётся рабочим (2/2). Новая subprocess-регрессия проверяет имя и ровно один запущенный test, исключая ложный успех от нулевого совпадения.
+
+## Принятый Task3
+
+Коммит `a3c2efe`; [отчёт исполнителя](readiness-reports/2026-10-15-task-3.md), [независимое spec/quality review](readiness-reports/2026-10-15-task-3-review.md). Два новых сценария прошли сразу на существующих guards: это дополнительное покрытие, без новой product-находки. Наблюдены шесть точных PostgreSQL backend/blocker ожиданий; проверены stale rejection, отзыв replacement session после reset, current-generation exact refresh retry, one-use passkey completion, настоящий ES256 login и device enrollment, неизменность чужого аккаунта. Полный server suite:158/158; Clippy/fmt прошли. Reset вызван на настоящей repository transaction boundary; HTTP admission reset не выдаётся за отдельный новый конкурентный тест.
