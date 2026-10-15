@@ -1480,6 +1480,8 @@ impl LocalBridgeState {
                 "DAV resource kind cannot change"
             );
         }
+        self.validate_dav_stream(&collection_id, stream_id, &logical_resource_id)
+            .await?;
         let operation = PimOperationV1::Upsert(PimUpsertV1 {
             schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
@@ -1585,6 +1587,8 @@ impl LocalBridgeState {
         let logical_resource_id = head.logical_resource_id;
         let parent_operation_id = Some(head.client_op_id);
         let dependencies = vec![head.client_op_id];
+        self.validate_dav_stream(&collection_id, stream_id, &logical_resource_id)
+            .await?;
         let operation = PimOperationV1::Delete(PimDeleteV1 {
             schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
@@ -1626,6 +1630,23 @@ impl LocalBridgeState {
         drop(materialization_guard);
         let _ = self.flush_outbox(space_id).await;
         Ok(true)
+    }
+
+    /// Preflight exactly the graph reconciliation will consume, including other branches.
+    #[cfg(feature = "local-bridge")]
+    async fn validate_dav_stream(
+        &self,
+        collection_id: &str,
+        stream_id: Uuid,
+        logical_resource_id: &str,
+    ) -> Result<()> {
+        let cache = self.cache.clone();
+        let collection = collection_id.to_string();
+        let logical_resource_id = logical_resource_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            cache.validate_pim_stream(&collection, stream_id, &logical_resource_id)
+        })
+        .await?
     }
 
     /// Resolve the selected projection branch and validate its ancestry before queueing.

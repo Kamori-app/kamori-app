@@ -800,3 +800,173 @@ async fn recreates_a_deleted_first_party_href_in_its_existing_stream() {
     assert_eq!(value.dependencies, vec![tombstone.client_op_id]);
     bridge.stop().await;
 }
+
+fn persisted_dav_rows(
+    bridge: &TestBridge,
+) -> BTreeMap<&'static str, Vec<Vec<rusqlite::types::Value>>> {
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    [
+        "operation_outbox",
+        "operation_states",
+        "resource_heads",
+        "calendars",
+        "dav_changes",
+    ]
+    .into_iter()
+    .map(|table| {
+        let mut statement = connection
+            .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+            .unwrap();
+        let columns = statement.column_count();
+        let rows = statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|index| row.get(index))
+                    .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        (table, rows)
+    })
+    .collect()
+}
+
+async fn assert_rejects_unselected_sibling(method: &str, damage: &str) {
+    let bridge = TestBridge::start().await;
+    let stream = Uuid::new_v4();
+    let root = bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+        )
+        .await
+        .unwrap();
+    let selected = bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Selected".into()))]),
+        )
+        .await
+        .unwrap();
+    // A larger sibling id leaves the existing selected branch at the canonical href.
+    let sibling = Uuid::from_u128(u128::MAX);
+    let sibling_href = format!("{stream}.conflict-{sibling}.ics");
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    connection.execute(
+            "INSERT INTO operation_states (collection_id, client_op_id, stream_id, logical_resource_id, materialized_resource_id, resource_kind, payload, deleted, space_seq, parent_operation_id, seed_projection_resource_id)
+             SELECT collection_id, ?1, stream_id, logical_resource_id, ?2, resource_kind, payload, deleted, space_seq, ?3, NULL FROM operation_states WHERE client_op_id = ?4",
+            rusqlite::params![sibling.to_string(), sibling_href, root.to_string(), selected.to_string()],
+        ).unwrap();
+    connection.execute(
+            "INSERT INTO calendars SELECT collection_id, ?1, ical, etag, updated_at_ms FROM calendars WHERE resource_id = ?2",
+            rusqlite::params![sibling_href, format!("{stream}.ics")],
+        ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO resource_heads VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                bridge.space_id.to_string(),
+                sibling_href,
+                sibling.to_string()
+            ],
+        )
+        .unwrap();
+    match damage {
+        "missing-parent" => {
+            connection
+                .execute(
+                    "UPDATE operation_states SET parent_operation_id = ?1 WHERE client_op_id = ?2",
+                    rusqlite::params![Uuid::new_v4().to_string(), sibling.to_string()],
+                )
+                .unwrap();
+        }
+        "cycle" => {
+            connection.execute("UPDATE operation_states SET parent_operation_id = client_op_id WHERE client_op_id = ?1", [sibling.to_string()]).unwrap();
+        }
+        "seed-on-child" => {
+            connection.execute("UPDATE operation_states SET seed_projection_resource_id = materialized_resource_id WHERE client_op_id = ?1", [sibling.to_string()]).unwrap();
+        }
+        _ => unreachable!(),
+    }
+    drop(connection);
+    let selected_path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+    let sibling_path = format!("/caldav/{}/{sibling_href}", bridge.space_id);
+    assert_eq!(
+        bridge.send("GET", &sibling_path).await.status(),
+        StatusCode::OK
+    );
+    let get = bridge.send("GET", &selected_path).await;
+    assert_eq!(get.status(), StatusCode::OK);
+    let etag = header_string(&get, ETAG);
+    let payload = get.text().await.unwrap();
+    let before = persisted_dav_rows(&bridge);
+    let response = bridge
+        .request(method, &selected_path)
+        .header(IF_MATCH, etag)
+        .body(payload.replace("Selected", "Edited"))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_server_error());
+    let after = persisted_dav_rows(&bridge);
+    assert_eq!(
+        after["operation_outbox"].len(),
+        before["operation_outbox"].len(),
+        "{method} with unselected {damage} sibling must leave outbox unchanged"
+    );
+    assert_eq!(
+        after, before,
+        "rejected {method} must preserve every persisted graph/projection row"
+    );
+    assert_eq!(
+        bridge
+            .send("GET", &selected_path)
+            .await
+            .text()
+            .await
+            .unwrap(),
+        payload
+    );
+    assert_eq!(
+        bridge.send("GET", &sibling_path).await.status(),
+        StatusCode::OK
+    );
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_missing_parent_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "missing-parent").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_cycle_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "cycle").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_seed_misuse_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "seed-on-child").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_missing_parent_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "missing-parent").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_cycle_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "cycle").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_seed_misuse_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "seed-on-child").await;
+}

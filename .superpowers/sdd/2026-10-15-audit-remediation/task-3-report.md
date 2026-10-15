@@ -189,3 +189,84 @@ transactions; this task does not claim power-loss atomicity across those writes.
 - Final full core run: **62 + 8 tests passed**; isolated FRB run: **51 passed**;
   final strict Clippy: passed; Android isolated FRB check: passed.
 - Final `git diff --check`: passed.
+
+## Review fix round 1 — validate every reconciliation branch before persistence
+
+Review: `/private/tmp/kamori-audit-20261015/task-3-review.md`, Important finding 1.
+Base: `6470410c80793a6d27eee6453a75962d7d78c78a`.
+
+The review identified a real gap: selected-head ancestry validation accepted a
+healthy branch while a separate sibling in the same stream contained an absent
+parent, cycle, or a projection seed on a nonroot node. Reconciliation validates
+the complete stream after persistence, so this produced an HTTP error after an
+outbox/state mutation. This corrects the earlier report's claim that no unresolved
+malformed-graph rejection paths remained.
+
+Change: extracted reconciliation's existing SQL graph read and
+`assign_pim_branches` call into `load_validated_pim_stream`. Reconciliation and
+DAV preflight both use that exact helper. Both PUT and DELETE call the preflight
+before operation construction/queue/state persistence while still holding the
+existing materialization lock. PUT's new-href path also preflights its resolved
+stream. Selected-head route, stream and kind checks remain in place. No graph
+validation rules were duplicated, no cache schema changed, and no TLS source,
+dependency declaration, or lockfile changed in this fix round.
+
+Added six independently runnable real authenticated HTTP regressions:
+
+- `rejects_unselected_sibling_missing_parent_on_put_without_persistence`
+- `rejects_unselected_sibling_missing_parent_on_delete_without_persistence`
+- `rejects_unselected_sibling_cycle_on_put_without_persistence`
+- `rejects_unselected_sibling_cycle_on_delete_without_persistence`
+- `rejects_unselected_sibling_seed_misuse_on_put_without_persistence`
+- `rejects_unselected_sibling_seed_misuse_on_delete_without_persistence`
+
+Each creates a healthy selected Task branch and another materialized sibling,
+corrupts only that sibling using the synthetic SQLite fixture, GETs the selected
+resource/ETag, and issues a conditional PUT or DELETE. After the HTTP rejection,
+it checks exact row equality for `operation_outbox`, `operation_states`,
+`resource_heads`, `calendars`, and `dav_changes`, and confirms both HTTP projections
+remain readable with the selected payload unchanged. The selected ancestry stays
+valid in all six cases, which distinguishes them from the original head tests.
+
+Commands below use the original pinned Cargo prefix and target directory stated
+above; all worktree mutations and loopback tests used required tool escalation.
+
+RED:
+
+`test --locked --offline -p crypto-core-lib --test dav_conformance rejects_unselected -- --nocapture`
+
+All **six failed** for the expected persistence violation: each rejected HTTP
+PUT/DELETE changed the outbox count from **2 to 3**. Log:
+`/private/tmp/kamori-audit-20261015/task3-fixround1-red.log`.
+
+Focused GREEN after shared validation:
+
+`test --locked --offline -p crypto-core-lib --test dav_conformance rejects_unselected -- --nocapture`
+
+**6 passed**, zero failed/ignored. Log:
+`/private/tmp/kamori-audit-20261015/task3-fixround1-green.log`.
+
+Final verification after moving preflight onto both complete DAV write paths:
+
+- `test --locked --offline -p crypto-core-lib --features frb`: **62 unit + 14 DAV
+  tests passed**, zero failed/ignored; doc tests also passed. Log:
+  `/private/tmp/kamori-audit-20261015/task3-fixround1-core-full.log`.
+- `clippy --locked --offline -p crypto-core-lib --features frb --all-targets -- -D warnings`:
+  passed. Log: `/private/tmp/kamori-audit-20261015/task3-fixround1-clippy.log`.
+- `fmt --all -- --check`: passed, no diagnostics. Log:
+  `/private/tmp/kamori-audit-20261015/task3-fixround1-format.log`.
+- `git diff --check`: passed.
+
+Self-review compared the preflight and reconciliation helper arguments and
+confirmed identical collection, stream, and canonical projection ids. The
+existing lock spans preflight and the write/reconciliation sequence, so ordinary
+runner mutations cannot change the graph between them. Existing transaction and
+power-loss limits still apply; this change closes graph-validation rejection
+before persistence, not arbitrary I/O-failure rollback. TLS was unchanged, so no
+duplicate Android/desktop build gates were run. The full core run still executes
+the real shared/cloud/FRB/Android connector TLS tests. No remaining scoped review
+finding is known; controller review remains the next gate.
+
+Changed files in this fix round: `src/local_bridge_runner/cache.rs`,
+`src/local_bridge_runner/mod.rs`, `tests/dav_conformance.rs` (all under
+`packages/crypto-core-lib/`), and this report.

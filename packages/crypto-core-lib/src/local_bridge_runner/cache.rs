@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::operation_envelope::OperationEnvelopeV1;
-use crate::pim::{PimBranchNodeV1, assign_pim_branches};
+use crate::pim::{PimBranchAssignmentV1, PimBranchNodeV1, assign_pim_branches};
 use sha2::{Digest, Sha256};
 
 const DEFAULT_SYNC_SCOPE: &str = "workspace:personal";
@@ -746,6 +746,23 @@ impl LocalCache {
             .map_err(Into::into)
     }
 
+    /// Preflight the complete stream before a DAV write persists its envelope/state.
+    #[cfg(feature = "local-bridge")]
+    pub(crate) fn validate_pim_stream(
+        &self,
+        collection_id: &str,
+        stream_id: Uuid,
+        default_projection_resource_id: &str,
+    ) -> Result<()> {
+        load_validated_pim_stream(
+            &self.connect()?,
+            collection_id,
+            stream_id,
+            default_projection_resource_id,
+        )?;
+        Ok(())
+    }
+
     /// Rebuilds one stream's projection rows from its complete known version
     /// graph in a single transaction. Arrival order cannot influence branch
     /// identity or which branch inherits the canonical DAV resource name.
@@ -758,32 +775,12 @@ impl LocalCache {
     ) -> Result<()> {
         let mut conn = self.connect()?;
         let transaction = conn.transaction()?;
-        let states = {
-            let mut statement = transaction.prepare(
-                r#"
-                SELECT client_op_id, collection_id, stream_id, logical_resource_id,
-                       materialized_resource_id, resource_kind, payload, deleted, space_seq,
-                       parent_operation_id, seed_projection_resource_id
-                FROM operation_states
-                WHERE collection_id = ?1 AND stream_id = ?2
-                "#,
-            )?;
-            statement
-                .query_map(
-                    params![collection_id, stream_id.to_string()],
-                    map_operation_state,
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let nodes = states
-            .iter()
-            .map(|state| PimBranchNodeV1 {
-                operation_id: state.client_op_id,
-                parent_operation_id: state.parent_operation_id,
-                seed_projection_resource_id: state.seed_projection_resource_id.clone(),
-            })
-            .collect::<Vec<_>>();
-        let assignments = assign_pim_branches(default_projection_resource_id, &nodes)?;
+        let (states, assignments) = load_validated_pim_stream(
+            &transaction,
+            collection_id,
+            stream_id,
+            default_projection_resource_id,
+        )?;
         let assignment_by_id = assignments
             .iter()
             .map(|assignment| (assignment.operation_id, assignment))
@@ -1135,6 +1132,42 @@ impl LocalCache {
             .optional()
             .map_err(Into::into)
     }
+}
+
+/// Read and validate exactly the complete graph used to rebuild a stream.
+fn load_validated_pim_stream(
+    conn: &Connection,
+    collection_id: &str,
+    stream_id: Uuid,
+    default_projection_resource_id: &str,
+) -> Result<(Vec<CachedOperationState>, Vec<PimBranchAssignmentV1>)> {
+    let states = {
+        let mut statement = conn.prepare(
+            r#"
+                SELECT client_op_id, collection_id, stream_id, logical_resource_id,
+                       materialized_resource_id, resource_kind, payload, deleted, space_seq,
+                       parent_operation_id, seed_projection_resource_id
+                FROM operation_states
+                WHERE collection_id = ?1 AND stream_id = ?2
+                "#,
+        )?;
+        statement
+            .query_map(
+                params![collection_id, stream_id.to_string()],
+                map_operation_state,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let nodes = states
+        .iter()
+        .map(|state| PimBranchNodeV1 {
+            operation_id: state.client_op_id,
+            parent_operation_id: state.parent_operation_id,
+            seed_projection_resource_id: state.seed_projection_resource_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    let assignments = assign_pim_branches(default_projection_resource_id, &nodes)?;
+    Ok((states, assignments))
 }
 
 fn upsert_operation_state(conn: &Connection, state: &CachedOperationState) -> Result<()> {
