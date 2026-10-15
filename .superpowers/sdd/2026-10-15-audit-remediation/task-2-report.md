@@ -95,3 +95,78 @@ The sharing scenario passes with the new same-recipient retry assertion (includi
 - The PostgreSQL integration harness still follows the repository's existing optional-DB convention, but every server run reported here explicitly configured the disposable DB; no DB test was counted from a skipped local run.
 - Only the targeted sharing browser scenario was run for this task. Broader acceptance/workspace verification remains with the controller's final integration run.
 - Synthetic acceptance project is left running for the controller's final suite. No push, production access, real credential changes or private secrets reads occurred.
+
+## Fix round 1 — migration exclusion before trigger DDL
+
+Review base: `e49312f595046016b2a66ac5d2a55aafb9d77488`. Scoped review: `/private/tmp/kamori-audit-20261015/task-2-review.md`.
+
+The review finding was reproduced before changing SQL. SHARE ROW EXCLUSIVE admits ROW SHARE, so an append could lock the security-space tuple while the old migration blocked writes to its table. The migration's repair then waited for the append's tuple and the append waited for the migration's table lock. CREATE TRIGGER had already acquired that permissive table lock, so strengthening only the later repair lock would retain an upgrade window.
+
+The unshipped migration 002 now starts with `LOCK TABLE security_spaces, operation_log, users IN EXCLUSIVE MODE`, before CREATE FUNCTION, CREATE TRIGGER or repair. EXCLUSIVE excludes both row-locking SELECT transactions and writes while allowing ordinary readers. Acquiring the strongest space table lock first lets an already-admitted append finish or makes a new append wait before acquiring a space tuple. There is no later migration space-lock upgrade. Baseline migrations remain unchanged.
+
+The focused regression `operation_usage_migration_serializes_with_live_append_without_deadlock` runs the actual SQLx migrator and repository append against a unique synthetic schema with 003 already applied and 002 pending. An external SHARE lock on operation_log pauses the migration after it has acquired its security_spaces table lock. PostgreSQL pg_locks/pg_stat_activity prove that wait before a real signed append starts, and prove the append's table-lock wait before releasing the gate. This schedules the old deadlock deterministically and verifies both corrected transactions complete with accepted sequence 1 and exact space/account/live-operation counters. It covers the earlier trigger-DDL lock window as well as the repair window; moving an EXCLUSIVE upgrade only to the old later lock would fail to reach the expected migration gate. The test drops its schema before asserting migration/append outcomes, including in the reproduced deadlock case.
+
+### RED command and output
+
+```sh
+PATH=/Users/yujin/.cargo/bin:$PATH \
+CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197 \
+KAMORI_DATABASE_URL=postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit \
+rustup run 1.97.1 cargo test -p cloud-server \
+operation_usage_migration_serializes_with_live_append_without_deadlock -- --nocapture
+```
+
+`/private/tmp/task2-fix1-red.log`:
+
+```text
+running 1 test
+live append must not deadlock with accounting migration: error returned from database: deadlock detected at line 1133
+Caused by:
+    deadlock detected at line 1133
+test features::operations::integration_tests::operation_usage_migration_serializes_with_live_append_without_deadlock ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 141 filtered out; finished in 1.50s
+```
+
+### Fresh DB and GREEN command/output
+
+Because the unshipped 002 SQL/checksum changed, created a new disposable database in the existing standalone audit PostgreSQL container:
+
+```sh
+docker exec kamori-audit-20261015-postgres psql -U kamori -d postgres \
+-v ON_ERROR_STOP=1 -c 'CREATE DATABASE kamori_audit_fix1 OWNER kamori'
+# CREATE DATABASE
+```
+
+New verification URL: `postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit_fix1`. The old `kamori_audit` database/SQLx ledger is unchanged; no migration checksum was edited in a database.
+
+```sh
+PATH=/Users/yujin/.cargo/bin:$PATH \
+CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197 \
+KAMORI_DATABASE_URL=postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit_fix1 \
+rustup run 1.97.1 cargo test -p cloud-server \
+operation_usage_migration_serializes_with_live_append_without_deadlock -- --nocapture
+```
+
+`/private/tmp/task2-fix1-green.log`: **1 passed; 0 failed; 141 filtered out; 0.59s**.
+
+### Final affected verification
+
+```sh
+PATH=/Users/yujin/.cargo/bin:$PATH \
+CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197 \
+KAMORI_DATABASE_URL=postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit_fix1 \
+rustup run 1.97.1 cargo test -p cloud-server
+
+PATH=/Users/yujin/.cargo/bin:$PATH rustup run 1.97.1 cargo fmt --all -- --check
+
+PATH=/Users/yujin/.cargo/bin:$PATH \
+CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197 \
+rustup run 1.97.1 cargo clippy -p cloud-server --all-targets -- -D warnings
+```
+
+- `/private/tmp/task2-fix1-final-tests.log`: **142 passed; 0 failed; 0 ignored; 0 filtered out; 2.97s**, including the retained 003-before-002/fresh migration regressions.
+- Formatting: exit 0.
+- `/private/tmp/task2-fix1-clippy.log`: `Finished dev profile ... in 2.39s`, exit 0, no warnings.
+- `git diff --check`: exit 0.
+
+This round changes only migration exclusion SQL and its focused regression. Sharing behavior/clients are unchanged, so browser acceptance was not repeated. The running acceptance stack still has the previous cloud image and disposable migration checksum; its own database must be refreshed when the controller rebuilds/runs the final full stack. No acceptance containers or volumes were stopped/reset in this round, and no unrelated containers were touched. The standalone old audit database is retained intact.

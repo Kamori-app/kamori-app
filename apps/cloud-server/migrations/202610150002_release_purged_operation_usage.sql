@@ -1,3 +1,11 @@
+-- Exclude row-locking transactions before any trigger DDL or repair. Appends
+-- lock space before account/device/operation work; acquire the strongest table
+-- locks in that same order so admitted appends finish before repair starts.
+-- EXCLUSIVE blocks both ROW SHARE (SELECT FOR UPDATE) and ROW EXCLUSIVE writes
+-- while permitting ordinary readers. Taking this before CREATE TRIGGER avoids
+-- a SHARE ROW EXCLUSIVE-to-EXCLUSIVE upgrade window on security_spaces.
+LOCK TABLE security_spaces, operation_log, users IN EXCLUSIVE MODE;
+
 -- The parent row is no longer visible to operation_log's AFTER DELETE
 -- trigger during a cascade. Release its aggregate exactly once before removal;
 -- direct operation deletes still update both the live parent and its owner.
@@ -15,9 +23,8 @@ CREATE TRIGGER security_space_operation_usage_delete
 BEFORE DELETE ON security_spaces
 FOR EACH ROW EXECUTE FUNCTION release_security_space_operation_usage();
 
--- Block concurrent accounting writes while repairing pre-existing drift,
--- including accounts with no remaining spaces. Derive totals from live rows.
-LOCK TABLE security_spaces, operation_log, users IN SHARE ROW EXCLUSIVE MODE;
+-- Repair pre-existing drift, including accounts with no remaining spaces.
+-- Derive totals from live rows under the exclusion acquired above.
 UPDATE security_spaces s
 SET operation_bytes = COALESCE((
     SELECT sum(octet_length(nonce) + octet_length(ciphertext) + octet_length(signature) + 192)::bigint

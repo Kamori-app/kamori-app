@@ -813,3 +813,120 @@ async fn duplicate_append_still_rejects_revoked_device_member_and_stale_epoch() 
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn operation_usage_migration_serializes_with_live_append_without_deadlock() {
+    let Some(pool) = test_pool().await else {
+        return;
+    };
+    // Schema and application names contain only literal prefixes and local UUIDs.
+    let schema = format!("usage_append_migration_{}", Uuid::new_v4().simple());
+    let migration_label = format!("usage-migrate-{}", Uuid::new_v4());
+    let append_label = format!("usage-append-{}", Uuid::new_v4());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let url = std::env::var("KAMORI_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let options = options.options([("search_path", schema.as_str())]);
+    let isolated = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options.clone())
+        .await
+        .unwrap();
+    let before = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            MIGRATOR
+                .iter()
+                .filter(|m| m.version != 202610150002)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    before.run(&isolated).await.unwrap();
+    let owner = Uuid::new_v4();
+    let (_, envelope) = operation_fixture(&isolated, owner).await;
+    let space = envelope.space_id;
+    let charge = i64::try_from(
+        envelope.nonce.len() + envelope.ciphertext.len() + envelope.signature.len() + 192,
+    )
+    .unwrap();
+    let migration_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.clone().application_name(&migration_label))
+        .await
+        .unwrap();
+    let append_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.application_name(&append_label))
+        .await
+        .unwrap();
+    // Hold the next table in the migration's lock order, so its security_spaces
+    // table lock is granted before we start a real repository append. This gate
+    // exposes both the old CREATE TRIGGER window and the later repair lock.
+    let mut gate = isolated.begin().await.unwrap();
+    sqlx::query("LOCK TABLE operation_log IN SHARE MODE")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let migrating = migration_pool.clone();
+    let migration = tokio::spawn(async move { MIGRATOR.run(&migrating).await });
+    let migration_waiting = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid WHERE a.application_name=$1 AND a.wait_event_type='Lock' AND l.locktype='relation' AND l.relation=to_regclass($2)::oid AND NOT l.granted)")
+                .bind(&migration_label).bind(format!("{schema}.operation_log")).fetch_one(&pool).await.unwrap();
+            if blocked { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await;
+    let appending = append_pool.clone();
+    let append = tokio::spawn(async move {
+        append_operation(&appending, owner, &envelope, 1_000_000, 1_000_000).await
+    });
+    let append_waiting = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid WHERE a.application_name=$1 AND a.wait_event_type='Lock' AND l.locktype='relation' AND l.relation=to_regclass($2)::oid AND NOT l.granted)")
+                .bind(&append_label).bind(format!("{schema}.security_spaces")).fetch_one(&pool).await.unwrap();
+            if blocked { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await;
+    gate.commit().await.unwrap();
+    migration_waiting.expect("migration must hold its space lock and wait at operation_log");
+    append_waiting.expect("live append must reach the migration's space table lock");
+    let (migration_result, append_result) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(migration, append)
+        })
+        .await
+        .unwrap();
+    // Collect evidence and clean up even when the old migration is aborted by
+    // deadlock detection. Assertions concern real migration/append outcomes.
+    let migration_result = migration_result.unwrap();
+    let append_result = append_result.unwrap();
+    let totals = usage(&isolated, owner).await;
+    let space_totals: (i64, i64) =
+        sqlx::query_as("SELECT operation_bytes, next_sequence FROM security_spaces WHERE id=$1")
+            .bind(space)
+            .fetch_one(&isolated)
+            .await
+            .unwrap();
+    migration_pool.close().await;
+    append_pool.close().await;
+    isolated.close().await;
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    migration_result.expect("accounting migration must not deadlock with a live append");
+    assert!(matches!(
+        append_result.expect("live append must not deadlock with accounting migration"),
+        AppendResult::Accepted(1)
+    ));
+    assert_eq!(totals, (charge, charge));
+    assert_eq!(space_totals, (charge, 1));
+}
