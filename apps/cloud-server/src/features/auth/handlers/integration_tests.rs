@@ -2017,3 +2017,6 @@ async fn recovery_fix_account_deletion_and_device_revocation_do_not_deadlock() {
     assert!(deleted);
     app.shutdown().await;
 }
+
+#[path = "persistence_race_tests.rs"]
+mod persistence_race_tests;
