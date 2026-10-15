@@ -161,6 +161,9 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-frontend-
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Install Chromium for frontend UI gates
+        # Use the acceptance workspace's pinned Playwright and Linux dependencies.
+        run: bun run --cwd tests/acceptance playwright install --with-deps chromium
       - name: Test frontends
         run: >-
           bunx turbo run test
