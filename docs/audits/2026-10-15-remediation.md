@@ -1,6 +1,6 @@
 # Исправления по аудиту Kamori и результаты проверок
 
-Исходный коммит `8124892`; исправления выполняются в изолированном worktree. Все результаты ниже получены на синтетических данных. Основной [аудит](2026-10-15-kamori.md) описывает дефекты и пределы проверки.
+Исходный коммит `8124892`; исправления выполнены в изолированном worktree. Все результаты ниже получены на синтетических данных. Основной [аудит](2026-10-15-kamori.md) описывает дефекты и пределы проверки.
 
 ## Аутентификация и восстановление
 
@@ -41,7 +41,7 @@ RED воспроизвёл неидемпотентный retry, двойной 
 
 Оба native reqwest manifest явно включают TLS. Общий production builder применяется в FRB auth и sync runtime; синтетический HTTPS-сервер проверяет trusted CA success, untrusted CA и неверный hostname. Android использует Mozilla public roots без отсутствующего JVM verifier initialization; desktop/iOS сохраняют platform trust. Android **не** использует private/user CA или custom network-security-config roots; root bundle обновляется с клиентом. Системный trust store не менялся.
 
-Изолированные normal dependency gates для desktop/FRB/Android пройдены; `aarch64-linux-android` FRB `--lib` и desktop `--lib` компилируются. Android check потребовал NDK `llvm-ar/llvm-ranlib` и `aarch64-linux-android24-clang`. Полная native упаковка и физические устройства остаются отдельными gates; compile/host TLS не выдаются за проверку device runtime.
+Изолированные normal dependency gates для desktop/FRB/Android пройдены; `aarch64-linux-android` FRB `--lib` и desktop `--lib` компилируются. Android check потребовал NDK `llvm-ar/llvm-ranlib` и `aarch64-linux-android24-clang`. На этом этапе native упаковка и физические устройства оставались отдельными gates; compile/host TLS не выдаются за проверку device runtime.
 
 ## Desktop decode, recovery и сохранение сессии
 
@@ -65,7 +65,7 @@ GREEN: **60 web units** обычной командой в UTC, Asia/Tbilisi и 
 
 Rust 1.97.1 workspace + FRB с отдельной PostgreSQL: **142 server +65 core +14 DAV +18 desktop =239 passed**, без пропусков; общий strict Clippy и fmt чистые. LLVM line coverage при том же фильтре: **48,71% →55,19%**; ограничения inline test modules и branch coverage приведены в основном аудите. Admin: 4 unit/check/build; desktop UI: check/build; закреплённый Bun 1.3.14. Existing Rollup empty virtual env chunk notice не является Svelte diagnostic.
 
-Предварительный Android release с реальным FRB собран; все три native ABI присутствуют. Итоговая упаковка после background/offline изменений ещё обязательна. iOS SDK query завершается кодом 69: лицензия Xcode не принята; системные условия от имени пользователя не принимались.
+Предварительный Android release с реальным FRB собран; все три native ABI присутствуют. Итоговая упаковка после background/offline изменений выполнена ниже. iOS SDK query завершается кодом 69: лицензия Xcode не принята; системные условия от имени пользователя не принимались.
 
 ## Web refresh, offline restore и background projection
 
@@ -80,3 +80,19 @@ GREEN после actual RED: **66 web units/check/build; 68 Flutter tests/analyz
 iOS identifier/plist/Workmanager callback и pending-admission channel согласованы с pinned plugin; plist/Swift syntax checks проходят. Pending request не доказывает delivery. Полный iOS compile/link блокирован непринятой лицензией Xcode. Platform-channel CRUD-тест использует реальный Contacts adapter; Calendar CRUD и реальные providers/scheduler остаются physical gates. Сторонний OS CRUD после уничтожения engine не получает Rust opaque reference; abnormal provider atomicity или remote wipe не заявляются (SPEC §9 предусматривает interrupted projection и следующий reconcile).
 
 Повторный общий Rust gate на `dab0ba8`: **243 passed, 0 skipped/failed**, workspace+FRB Clippy/fmt чистые. LLVM **14806/26759 lines (55,33%)**, функции 48,07%; Flutter **1049/4565 (22,98%)**. Web LCOV **1128/1991** нельзя напрямую сравнивать с **978/1234**: добавлены три ранее не инструментированные API/transport файла; common helper files — 989/1247 против 978/1234. Subprocess/browser выполнение не полностью отражается в Bun LCOV. JSON с относительными путями сохранён в coverage-metrics.
+
+## Инфраструктура, буквальные секреты и резервные копии
+
+Коммит 35a4b15; закрыты I01–I04, независимое task review без замечаний. Sourced PostgreSQL/backup environments используют POSIX literal assignments, Compose dotenv — отдельный encoder с буквальными dollar/quotes/backslash/control chars. Настоящие Bash и Compose env_file/--env-file parsing RED показывали interpolation и выполнение синтетического command marker; GREEN сохраняет значения без выполнения.
+
+EXIT handlers обоих job scripts записывают один failed terminal heartbeat после nonzero этапа и сохраняют исходные коды 41–49; success пишет один ok. Пятнадцать настоящих script cases с fake external commands проверяют backup/check/copy/inventory/hash/missing/mismatch/success. Дополнительный RED показал ложный ok при empty DR/nonempty primary: NR==FNR заменён на идентификацию входного файла. Empty DR теперь failed, оба пустых — valid.
+
+.dockerignore исключает root/nested SECRETS.md, .aws и audit scratch. Исходное попадание установлено по именам и COPY . .; закрытое содержимое не исследовалось. Реальный Docker COPY/context absence gate прошёл (e8757a0). Pinned Go 1.25.11 tests/coverage/vet/mod verify/gofmt, shell syntax и CI detector чистые. Go statement coverage 215/591 (36,38%); shell logic не входит в знаменатель.
+
+## Итоговые интеграционные проверки
+
+Полный browser acceptance на свежей disposable PostgreSQL и пересобранных cloud/web/admin: **9/9 passed, 1,2 минуты**. Реальные recovery/sharing/blob quota/offline PIM сценарии и четыре Chromium due editor cases. Production connections и deployments не выполнялись.
+
+Android release на dab0ba8 с реальным FRB: **102,5 MB**, три ABI содержат настоящую libcrypto_core_lib.so; стандартный Cargokit сам задаёт NDK ranlib, ручные overrides не нужны. Flutter 3.47.0 предупреждает о будущем KGP compatibility в двух pinned plugins; сборка успешна, warning не подавлялся. iOS SDK exit 69 остаётся внешним лицензионным ограничением.
+
+Финальные Rust **243**, web **66**, Flutter **68**, admin **4** passed; строгие линтеры/typechecks проходят. Промежуточные цифры выше сохранены с указанием этапа. Машинные [метрики](coverage-metrics/README.md), [матрица инвариантов](2026-10-15-business-tests.md) и [десять решений](2026-10-15-decisions.md) сохраняют результаты после удаления рабочего SDD scratch. Итоговое whole-branch review ещё выполняется.
