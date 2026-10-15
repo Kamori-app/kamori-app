@@ -263,7 +263,8 @@ pub(crate) async fn accept_offer(
     account_operation_storage_limit: i64,
 ) -> anyhow::Result<AcceptOfferResult> {
     let mut tx = pool.begin().await?;
-    // Workspace ownership is admission into the recipient's deletion set.
+    // Ownership is admission into the recipient's deletion set, including a
+    // space whose invite membership appeared after deletion began discovery.
     // Read immutable identity first, then lock both accounts in UUID order
     // before the offer/resource. Source deletion also cancels this offer.
     let identity: Option<(String, Uuid, Uuid)> = sqlx::query_as(
@@ -277,14 +278,12 @@ pub(crate) async fn accept_offer(
         tx.rollback().await?;
         return Ok(AcceptOfferResult::NotFound);
     };
-    if expected_kind == OwnershipResourceKind::Workspace.as_db() {
-        let mut accounts = [expected_owner, actor_id];
-        accounts.sort_unstable();
-        for account in accounts {
-            crate::features::auth::repositories::lock_account_security_mutation(&mut tx, account)
-                .await
-                .map_err(|(_, error)| anyhow::anyhow!(error.0.message))?;
-        }
+    let mut accounts = [expected_owner, actor_id];
+    accounts.sort_unstable();
+    for account in accounts {
+        crate::features::auth::repositories::lock_account_security_mutation(&mut tx, account)
+            .await
+            .map_err(|(_, error)| anyhow::anyhow!(error.0.message))?;
     }
     let offer = sqlx::query(
         r#"
@@ -372,8 +371,10 @@ pub(crate) async fn accept_offer(
                   ON target.space_id = space.id
                  AND target.user_id = $3 AND target.status = 'active'
                 JOIN users recipient ON recipient.id = target.user_id
+                JOIN users owner ON owner.id = space.owner_user_id
                 WHERE space.id = $1 AND space.owner_user_id = $2 AND space.status = 'active'
                   AND recipient.deleted_at IS NULL AND recipient.suspended_at IS NULL
+                  AND owner.deleted_at IS NULL AND owner.suspended_at IS NULL
                 FOR UPDATE OF space
                 "#,
             )
@@ -399,9 +400,10 @@ pub(crate) async fn accept_offer(
                 // Eligibility was read before account locks; check again after
                 // waiting for suspension/deletion, retaining the row locks.
                 let eligible: bool = sqlx::query_scalar(
-                    "SELECT deleted_at IS NULL AND suspended_at IS NULL FROM users WHERE id = $1",
+                    "SELECT count(*) = 2 FROM users WHERE id IN ($1, $2) AND deleted_at IS NULL AND suspended_at IS NULL",
                 )
                 .bind(actor_id)
+                .bind(current_owner_id)
                 .fetch_one(&mut *tx)
                 .await?;
                 if !eligible {

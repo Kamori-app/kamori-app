@@ -947,3 +947,185 @@ async fn final_workspace_offer_and_account_deletion_share_admission() {
     }
     drop_admission_database(&admin, pool, &schema).await;
 }
+
+#[tokio::test]
+async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
+    use crate::features::invites::repositories::{
+        InviteCodeInsert, InviteCodeInsertResult, RedeemInviteOutcome, insert_invite_code,
+        redeem_invite_code_tx,
+    };
+    use crate::features::spaces::dto::SpaceRole;
+    let Some((admin, pool, schema)) = admission_database().await else {
+        return;
+    };
+    for deletion_first in [true, false] {
+        let old = Uuid::new_v4();
+        let recipient = Uuid::new_v4();
+        let (_, envelope) = operation_fixture(&pool, old).await;
+        let (_, own) = operation_fixture(&pool, recipient).await;
+        for (owner, operation) in [(old, &envelope), (recipient, &own)] {
+            append_operation(&pool, owner, operation, 1_000_000, 1_000_000)
+                .await
+                .unwrap();
+        }
+        let rotation = Uuid::new_v4();
+        sqlx::query("INSERT INTO security_space_epochs(space_id,key_epoch,rotation_id,status,created_by,committed_at) VALUES($1,1,$2,'committed',$3,now())").bind(envelope.space_id).bind(rotation).bind(old).execute(&pool).await.unwrap();
+        let mut hash = [0_u8; 32];
+        hash[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+        assert!(matches!(
+            insert_invite_code(
+                &pool,
+                InviteCodeInsert {
+                    id: Uuid::new_v4(),
+                    space_id: envelope.space_id,
+                    rotation_id: rotation,
+                    created_by: old,
+                    role: SpaceRole::Editor,
+                    code_hash: &hash,
+                    encrypted_key_package: &[1],
+                    encrypted_note: None,
+                    ttl_minutes: 15,
+                    request_hash: &[8; 32],
+                }
+            )
+            .await
+            .unwrap(),
+            InviteCodeInsertResult::Stored(_)
+        ));
+        let trigger = format!("zz_late_member_{}", recipient.simple());
+        let gate_key = i64::from_be_bytes(recipient.as_bytes()[..8].try_into().unwrap());
+        if deletion_first {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.owner_user_id = '{recipient}'::uuid THEN PERFORM pg_advisory_xact_lock({gate_key}); END IF; RETURN OLD; END; $$; CREATE TRIGGER {trigger} BEFORE DELETE ON security_spaces FOR EACH ROW EXECUTE FUNCTION {trigger}();"))).execute(&pool).await.unwrap();
+        }
+        let mut gate = pool.begin().await.unwrap();
+        if deletion_first {
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(gate_key)
+                .execute(&mut *gate)
+                .await
+                .unwrap();
+        } else {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,731))")
+                .bind(recipient.to_string())
+                .execute(&mut *gate)
+                .await
+                .unwrap();
+        }
+        let delete_label = format!("late-member-delete-{recipient}");
+        let accept_label = format!("late-member-accept-{recipient}");
+        let delete_pool = admission_pool(&schema, &delete_label, 1).await;
+        let accept_pool = admission_pool(&schema, &accept_label, 1).await;
+        let mut delete = None;
+        if deletion_first {
+            let delete_pool = delete_pool.clone();
+            delete = Some(tokio::spawn(async move {
+                delete_account(&delete_pool, recipient).await
+            }));
+            waiting(&pool, &delete_label).await;
+        }
+        // In the failing schedule these complete AFTER delete has discovered
+        // every then-visible membership/space and taken its owner account lock.
+        assert!(matches!(
+            redeem_invite_code_tx(&pool, &hash, recipient)
+                .await
+                .unwrap(),
+            RedeemInviteOutcome::Redeemed(_)
+        ));
+        let offer = match create_offer(
+            &pool,
+            old,
+            OwnershipResourceKind::SecuritySpace,
+            envelope.space_id,
+            recipient,
+        )
+        .await
+        .unwrap()
+        {
+            CreateOfferResult::Created(offer) => offer,
+            _ => panic!("fresh invite member can receive a production ownership offer"),
+        };
+        let accept = tokio::spawn(async move {
+            accept_offer(
+                &accept_pool,
+                recipient,
+                offer.transfer_id,
+                1_000_000,
+                1_000_000,
+            )
+            .await
+        });
+        waiting(&pool, &accept_label).await;
+        let admission_wait = if deletion_first {
+            waits_for_admission(&pool, &accept_label, recipient).await
+        } else {
+            delete = Some(tokio::spawn(async move {
+                delete_account(&delete_pool, recipient).await
+            }));
+            waiting(&pool, &delete_label).await;
+            waits_for_admission(&pool, &delete_label, recipient).await
+        };
+        gate.commit().await.unwrap();
+        let (accept, delete) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(accept, delete.unwrap())
+        })
+        .await
+        .unwrap();
+        if deletion_first {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "DROP TRIGGER {trigger} ON security_spaces; DROP FUNCTION {trigger}();"
+            )))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let owner: Uuid =
+            sqlx::query_scalar("SELECT owner_user_id FROM security_spaces WHERE id=$1")
+                .bind(envelope.space_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let old_usage = usage(&pool, old).await;
+        let recipient_usage = usage(&pool, recipient).await;
+        let member_status: String = sqlx::query_scalar(
+            "SELECT status FROM security_space_members WHERE space_id=$1 AND user_id=$2",
+        )
+        .bind(envelope.space_id)
+        .bind(recipient)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        clean(&pool, old).await;
+        clean(&pool, recipient).await;
+        let accept = accept
+            .unwrap()
+            .expect("late-member space ownership acceptance must not deadlock");
+        let delete = delete
+            .unwrap()
+            .expect("account deletion must not deadlock against late-member ownership");
+        assert!(
+            admission_wait,
+            "all ownership admission must acquire913 before offer/space/user locks"
+        );
+        if deletion_first {
+            assert!(delete);
+            assert!(matches!(
+                accept,
+                AcceptOfferResult::NotFound | AcceptOfferResult::NoLongerValid
+            ));
+            assert_eq!(owner, old);
+            assert_eq!(member_status, "revoked");
+            assert_eq!(old_usage, (282, 282));
+            assert_eq!(recipient_usage, (0, 0));
+        } else {
+            assert!(matches!(accept, AcceptOfferResult::Accepted));
+            assert!(
+                !delete,
+                "new shared space ownership blocks account deletion"
+            );
+            assert_eq!(owner, recipient);
+            assert_eq!(old_usage, (0, 0));
+            assert_eq!(recipient_usage, (564, 564));
+        }
+    }
+    drop_admission_database(&admin, pool, &schema).await;
+}
