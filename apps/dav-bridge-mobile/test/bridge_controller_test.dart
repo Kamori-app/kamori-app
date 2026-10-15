@@ -1429,7 +1429,19 @@ void backgroundTests() {
               ..['id'] = id;
             return id;
           case 'crud.get':
+            if (!osContacts.containsKey(args['id'])) {
+              throw PlatformException(
+                code: 'flutter_contacts_error',
+                message: 'Updated Record Does Not Exist',
+              );
+            }
             return osContacts[args['id']];
+          case 'crud.getAll':
+            final ids = ((args['filter'] as Map)['id'] as List).cast<String>();
+            return ids
+                .where(osContacts.containsKey)
+                .map((id) => osContacts[id])
+                .toList();
           case 'crud.update':
             final value = Map<String, dynamic>.from(args['contact'] as Map);
             osContacts[value['id'] as String] = value;
@@ -1469,6 +1481,44 @@ void backgroundTests() {
       expect(
           osCalls, containsAll(['crud.create', 'crud.update', 'crud.delete']));
       expect(osCalls.where((method) => method.contains('permission')), isEmpty);
+    });
+
+    test('recreates externally deleted contacts and removes stale mappings',
+        () async {
+      final item = await contact('Alice');
+      bridge.materializedItems = [item];
+      expect(await run(), isTrue);
+      osContacts.clear(); // User deletes the projection in the system app.
+      await projection.projectEnabled([item]);
+      expect(osContacts, hasLength(1));
+      expect(osContacts.values.single['name']['first'], 'Alice');
+      osContacts.clear();
+      await projection.projectEnabled([]);
+      expect(osContacts, isEmpty);
+      expect(
+          await const FlutterSecureStorage()
+              .read(key: 'kamori.projection.contacts.items.$scope'),
+          '{}');
+      await projection.projectEnabled([item]);
+      osContacts.clear();
+      await projection.disableContacts('enabled', removeProjectedData: true);
+      expect((await projection.readSettings()).contactsCollectionIds, isEmpty);
+      expect(osCalls.where((method) => method.contains('permission')), isEmpty);
+    });
+
+    test('missing-contact lookup preserves genuine provider failures',
+        () async {
+      final item = await contact('Alice');
+      bridge.materializedItems = [item];
+      expect(await run(), isTrue);
+      providerFails = true;
+      await expectLater(
+          projection.projectEnabled([item]),
+          throwsA(isA<PlatformException>()
+              .having((error) => error.code, 'code', 'provider-unavailable')));
+      expect(osContacts, hasLength(1));
+      expect((await projection.readSettings()).contactsCollectionIds,
+          contains('enabled'));
     });
 
     test('reads current opt-ins after sync and skips disabled collection',

@@ -14,7 +14,7 @@ import workmanager_apple
     }
     WorkmanagerPlugin.registerPeriodicTask(
       withIdentifier: "kamori_background_sync_task",
-      earliestBeginInSeconds: 4 * 60 * 60
+      earliestBeginInSeconds: NSNumber(value: 4 * 60 * 60)
     )
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

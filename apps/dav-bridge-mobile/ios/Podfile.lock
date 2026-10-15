@@ -1,0 +1,22 @@
+PODS:
+  - crypto_core_lib (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - crypto_core_lib (from `.symlinks/plugins/crypto_core_lib/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  crypto_core_lib:
+    :path: ".symlinks/plugins/crypto_core_lib/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  crypto_core_lib: 27be6bf1c2352ed65ab45deb7cf4582fa8780aab
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+
+PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
+
+COCOAPODS: 1.17.0

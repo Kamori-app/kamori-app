@@ -167,7 +167,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
           .toList(growable: false);
       for (final key in keys) {
         final id = mapping[key];
-        if (id != null && await FlutterContacts.get(id) != null) {
+        if (id != null && await _findContact(id) != null) {
           await FlutterContacts.delete(id);
         }
         mapping.remove(key);
@@ -348,7 +348,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
         .toSet();
     for (final staleKey in managedKeys.difference(activeKeys)) {
       final contactId = mapping[staleKey];
-      if (contactId != null && await FlutterContacts.get(contactId) != null) {
+      if (contactId != null && await _findContact(contactId) != null) {
         await FlutterContacts.delete(contactId);
       }
       mapping.remove(staleKey);
@@ -431,7 +431,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
         continue;
       }
 
-      final existing = await FlutterContacts.get(
+      final existing = await _findContact(
         existingId,
         properties: const {
           ContactProperty.name,
@@ -474,6 +474,19 @@ class NativeSystemProjectionService implements SystemProjectionService {
       }
     }
     await _writeMap(_contactMapKey, mapping);
+  }
+
+  Future<Contact?> _findContact(
+    String id, {
+    Set<ContactProperty>? properties,
+  }) async {
+    // iOS unifiedContact throws for a deleted ID. An ID-filtered query returns
+    // an empty list instead, while permission and provider errors still escape.
+    final contacts = await FlutterContacts.getAll(
+      filter: ContactFilter.ids([id]),
+      properties: properties,
+    );
+    return contacts.isEmpty ? null : contacts.single;
   }
 
   Future<String> _getOrCreateCalendarId() async {
