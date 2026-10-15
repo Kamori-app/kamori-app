@@ -37,6 +37,11 @@
       "dependsOn": ["^test"],
       "outputs": []
     },
+    "cloud-server#test": {
+      "dependsOn": ["^test"],
+      "cache": false,
+      "passThroughEnv": ["KAMORI_DATABASE_URL", "DATABASE_URL"]
+    },
     "fast": {
       "outputs": []
     },

@@ -439,11 +439,17 @@ The full suite requires a **dedicated PostgreSQL 18 test database**. Set a
 nonempty `KAMORI_DATABASE_URL`, or `DATABASE_URL` as a fallback, before running
 `test`, `bun run verify`, or `cargo test --workspace`. Empty and whitespace-only
 values are treated as missing. Missing configuration fails database tests with
-an actionable message instead of silently passing them.
+an actionable message instead of silently passing them. The root Turbo test
+pipeline passes both URL variables through its strict environment. The
+`cloud-server#test` task always executes against PostgreSQL, including repeated
+runs with the same URL, because its results depend on external database state;
+other packages retain their existing test caching.
 
 ```bash
 export KAMORI_DATABASE_URL='postgres://test_user:test_password@localhost:5432/kamori_test'
 cargo test -p cloud-server
+# Root Turbo path, with the same database prerequisite:
+bun run test --filter=cloud-server
 ```
 
 Use a disposable database: tests apply the current migrations, write fixtures,
