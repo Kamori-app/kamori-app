@@ -270,11 +270,7 @@ class _PimScreenState extends ConsumerState<PimScreen> {
         initial: initial,
         spaces: state.collections,
         kindLocked: existing != null,
-        editingSeries: existing != null &&
-            existing.kind == PimItemKind.calendarEvent &&
-            (existing.recurrenceRule?.isNotEmpty == true ||
-                existing.recurrenceRdates.isNotEmpty ||
-                existing.recurrenceOverrides.isNotEmpty),
+        editingSeries: existing != null && _isCalendarSeries(existing),
         onSave: (draft) =>
             ref.read(bridgeControllerProvider.notifier).savePimItem(draft),
       ),
@@ -1151,8 +1147,7 @@ class _PimItemTile extends StatelessWidget {
           : [
               occurrence == null
                   ? _displayTemporal(item.startsAt)
-                  : _displayDateTime(occurrence!.startsAt,
-                      dateOnly: occurrence!.allDay),
+                  : '${_displayDateTime(occurrence!.startsAt, dateOnly: occurrence!.allDay)} – ${_displayDateTime(occurrence!.endsAt, dateOnly: occurrence!.allDay)}',
               occurrence?.location ?? item.location,
               occurrence?.notes ?? item.notes,
             ]
@@ -1191,11 +1186,8 @@ class _PimItemTile extends StatelessWidget {
                 : subtitle),
         onTap: onEdit,
         trailing: IconButton(
-          tooltip: context.strings.text(
-              item.recurrenceRule?.isNotEmpty == true ||
-                      item.recurrenceOverrides.isNotEmpty
-                  ? 'deleteSeries'
-                  : 'delete'),
+          tooltip: context.strings
+              .text(_isCalendarSeries(item) ? 'deleteSeries' : 'delete'),
           onPressed: onDelete,
           icon: const Icon(Icons.delete_outline),
         ),
@@ -1236,8 +1228,19 @@ String _displayTemporal(PimTemporal? value) {
   return date == null ? '' : _displayDateTime(date, dateOnly: value!.isAllDay);
 }
 
+bool _isCalendarSeries(PimItem item) =>
+    item.kind == PimItemKind.calendarEvent &&
+    (item.recurrenceRule?.isNotEmpty == true ||
+        item.recurrenceRdates.isNotEmpty ||
+        item.recurrenceOverrides.isNotEmpty);
+
 String _displayDateTime(DateTime value, {bool dateOnly = false}) {
-  final local = value.toLocal();
+  // TZDateTime.toLocal uses the timezone package's configured local location,
+  // which need not be the device timezone. Normalize to an ordinary instant.
+  final local = DateTime.fromMicrosecondsSinceEpoch(
+          value.microsecondsSinceEpoch,
+          isUtc: true)
+      .toLocal();
   String two(int number) => number.toString().padLeft(2, '0');
   final date = '${local.year}-${two(local.month)}-${two(local.day)}';
   return dateOnly ? date : '$date ${two(local.hour)}:${two(local.minute)}';

@@ -11,6 +11,9 @@ import 'package:dav_bridge_mobile/src/services/system_projection_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('device_calendar_plus_android');
+  const contactsChannel = MethodChannel('flutter_contacts');
+  late List<MethodCall> contactCalls;
+  late Map<String, dynamic>? projectedContact;
   const base = 'https://synthetic.example.invalid';
   final scope = sha256.convert(utf8.encode('$base\nalice')).toString();
   final mapKey = 'kamori.projection.calendar.events.$scope';
@@ -69,6 +72,8 @@ void main() {
   setUp(() {
     DeviceCalendarPlusAndroid.registerWith();
     calls = [];
+    contactCalls = [];
+    projectedContact = null;
     provider = {};
     deleteFails = false;
     readFails = false;
@@ -104,10 +109,11 @@ void main() {
           provider[id] = {...nativeEvent(id), ...args};
           return id;
         case 'updateEvent':
-          provider[args['eventId']]!.addAll(args);
+          provider[args['eventId']]!.addAll(Map.fromEntries(
+              args.entries.where((entry) => entry.value != null)));
           return null;
         case 'deleteEvent':
-          if (deleteFails) {
+          if (deleteFails && args['eventId'] == 'owned') {
             throw PlatformException(
                 code: 'provider-unavailable',
                 message: 'synthetic deletion failure');
@@ -119,6 +125,31 @@ void main() {
       }
     });
   });
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(contactsChannel, (call) async {
+      contactCalls.add(call);
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      switch (call.method) {
+        case 'crud.create':
+          projectedContact = {
+            ...Map<String, dynamic>.from(args['contact'] as Map),
+            'id': 'contact-owned'
+          };
+          return 'contact-owned';
+        case 'crud.getAll':
+          return projectedContact == null ? [] : [projectedContact];
+        case 'crud.update':
+          projectedContact = Map<String, dynamic>.from(args['contact'] as Map);
+          return null;
+        default:
+          throw StateError('Unexpected contact call ${call.method}');
+      }
+    });
+  });
+  tearDown(() => TestDefaultBinaryMessengerBinding
+      .instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(contactsChannel, null));
   tearDown(() => TestDefaultBinaryMessengerBinding
       .instance.defaultBinaryMessenger
       .setMockMethodCallHandler(channel, null));
@@ -214,6 +245,78 @@ void main() {
     expect((await mapping())['enabled/imported.ics'], 'owned');
     expect(calls.map((call) => call.method), ['getEvent']);
   });
+  for (final failCleanup in [false, true]) {
+    test(
+        'mixed reconciliation continues supported update/delete and contacts with cleanup failure=$failCleanup',
+        () async {
+      await existing();
+      await storage.write(key: settingsKey, value: '["enabled","supported"]');
+      await storage.write(
+          key: 'kamori.projection.contacts.collections.v2.$scope',
+          value: '["contacts"]');
+      await storage.write(
+          key: 'kamori.projection.contacts.items.$scope', value: '{}');
+      await storage.write(
+          key: mapKey,
+          value: jsonEncode({
+            'enabled/imported.ics': 'owned',
+            'supported/current.ics': 'supported',
+            'supported/stale.ics': 'stale',
+          }));
+      provider['supported'] = nativeEvent('supported');
+      provider['stale'] = nativeEvent('stale');
+      const supported = PimItem(
+        spaceId: 'supported',
+        resourceId: 'supported',
+        projectionId: 'current.ics',
+        headOperationId: 'head',
+        kind: PimItemKind.calendarEvent,
+        title: 'Updated supported event',
+        completed: false,
+        startsAt: PimTemporal(kind: 'utc', utc: '20261023T120000Z'),
+        endsAt: PimTemporal(kind: 'utc', utc: '20261023T130000Z'),
+        recurrenceRule: 'FREQ=WEEKLY',
+      );
+      const contact = PimItem(
+          spaceId: 'contacts',
+          resourceId: 'contact',
+          projectionId: 'contact.vcf',
+          headOperationId: 'head',
+          kind: PimItemKind.contact,
+          title: 'Updated contact',
+          completed: false);
+      deleteFails = failCleanup;
+      await expectLater(
+          service.projectEnabled([event('exdates'), supported, contact]),
+          throwsA(failCleanup
+              ? isA<PlatformException>()
+                  .having((error) => error.code, 'code', 'provider-unavailable')
+              : isA<FormatException>()));
+      expect(provider['supported']!['title'], 'Updated supported event');
+      expect(provider.containsKey('stale'), isFalse);
+      expect(contactCalls.map((call) => call.method), contains('crud.create'));
+      expect(projectedContact!['name']['first'], 'Updated contact');
+      expect(
+          jsonDecode((await storage.read(
+              key: 'kamori.projection.contacts.items.$scope'))!),
+          {'contacts/contact.vcf': 'contact-owned'});
+      expect((await mapping()).containsKey('supported/stale.ics'), isFalse);
+      expect(
+          (await mapping()).containsKey('enabled/imported.ics'), failCleanup);
+      expect(provider.containsKey('owned'), failCleanup);
+      expect(calls.any((call) => call.method == 'requestPermissions'), isFalse);
+      deleteFails = false;
+      calls.clear();
+      contactCalls.clear();
+      await expectLater(
+          service.projectEnabled([event('exdates'), supported, contact]),
+          throwsA(isA<FormatException>()));
+      expect((await mapping()).containsKey('enabled/imported.ics'), isFalse);
+      expect(provider.containsKey('owned'), isFalse);
+      expect(calls.any((call) => call.method == 'updateEvent'), isTrue);
+      expect(contactCalls.map((call) => call.method), contains('crud.update'));
+    });
+  }
   test(
       'ordinary supported weekly series still projects through real provider API',
       () async {

@@ -114,6 +114,15 @@ void main() {
             .onDateChanged(DateTime.parse('2026-11-08T01:30:00Z').toLocal());
         await tester.pumpAndSettle();
         expect(find.text('Detached override'), findsOneWidget);
+        String displayed(String instant) => DateTime.parse(instant)
+            .toLocal()
+            .toIso8601String()
+            .substring(0, 16)
+            .replaceFirst('T', ' ');
+        expect(
+            find.textContaining(
+                '${displayed('2026-11-08T01:30:00Z')} – ${displayed('2026-11-08T01:45:00Z')}'),
+            findsOneWidget);
         expect(find.textContaining('Override room'), findsOneWidget);
         expect(find.textContaining('Leave this exception untouched'),
             findsOneWidget);
@@ -220,6 +229,111 @@ void main() {
     expect(draft.addresses.single.locality, 'Tbilisi');
     expect(draft.categories, ['Friends', 'Work']);
     expect(draft.favorite, isTrue);
+  });
+
+  test(
+      'explicit original DTEND survives DST for ordinary and recurring anchors',
+      () {
+    for (final rule in [null, 'FREQ=WEEKLY;COUNT=2']) {
+      final item = PimItem(
+        spaceId: 'space',
+        resourceId: 'dst',
+        projectionId: 'dst.ics',
+        headOperationId: 'head',
+        kind: PimItemKind.calendarEvent,
+        title: 'DST interval',
+        completed: false,
+        startsAt: PimTemporal.zoned(
+            DateTime(2026, 10, 31, 23, 30), 'America/New_York'),
+        endsAt:
+            PimTemporal.zoned(DateTime(2026, 11, 2, 0, 30), 'America/New_York'),
+        recurrenceRule: rule,
+      );
+      final anchor =
+          pimOccurrencesOnDate(item, DateTime.utc(2026, 11, 1, 3, 30).toLocal())
+              .single;
+      expect(anchor.endsAt.toUtc(), DateTime.utc(2026, 11, 2, 5, 30));
+      expect(
+          pimOccurrencesOnDate(
+              item, DateTime.utc(2026, 11, 2, 5, 15).toLocal()),
+          hasLength(1));
+      if (rule != null) {
+        final next = pimOccurrencesOnDate(
+                item, DateTime.utc(2026, 11, 8, 4, 30).toLocal())
+            .single;
+        expect(next.startsAt.toUtc(), DateTime.utc(2026, 11, 8, 4, 30));
+        expect(next.endsAt.toUtc(), DateTime.utc(2026, 11, 9, 6, 30));
+        expect(
+            next.endsAt.difference(next.startsAt), const Duration(hours: 26));
+      }
+    }
+  });
+
+  testWidgets('RDATE-only occurrence deletion is explicitly a series action',
+      (tester) async {
+    const item = PimItem(
+      spaceId: 'space',
+      resourceId: 'series',
+      projectionId: 'series.ics',
+      headOperationId: 'head',
+      kind: PimItemKind.calendarEvent,
+      title: 'Additional date',
+      completed: false,
+      startsAt: PimTemporal(kind: 'date', date: '2026-11-01'),
+      endsAt: PimTemporal(kind: 'date', date: '2026-11-02'),
+      recurrenceRdates: [PimTemporal(kind: 'date', date: '2026-11-03')],
+    );
+    tester.view.physicalSize = const Size(900, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = _CorpusController(item);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [bridgeControllerProvider.overrideWith(() => controller)],
+      child: const MaterialApp(
+          localizationsDelegates: [AppLocalizations.delegate],
+          home: PimScreen(initialKind: PimItemKind.calendarEvent)),
+    ));
+    await tester.pumpAndSettle();
+    tester
+        .widget<CalendarDatePicker>(find.byType(CalendarDatePicker))
+        .onDateChanged(DateTime(2026, 11, 3));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Delete series'), findsOneWidget);
+    await tester.tap(find.byTooltip('Delete series'));
+    await tester.pumpAndSettle();
+    expect(controller.deleted, same(item));
+  });
+
+  testWidgets('raw TZID task due date renders in the viewer timezone',
+      (tester) async {
+    const item = PimItem(
+      spaceId: 'space',
+      resourceId: 'task',
+      projectionId: 'task.ics',
+      headOperationId: 'head',
+      kind: PimItemKind.task,
+      title: 'Zoned due task',
+      completed: false,
+      dueAt: PimTemporal(
+          kind: 'zoned_datetime',
+          local: '20261107T204500',
+          timezone: 'America/New_York'),
+    );
+    final controller = _CorpusController(item);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [bridgeControllerProvider.overrideWith(() => controller)],
+      child: const MaterialApp(
+          localizationsDelegates: [AppLocalizations.delegate],
+          home: PimScreen(initialKind: PimItemKind.task)),
+    ));
+    await tester.pumpAndSettle();
+    final expected = DateTime.utc(2026, 11, 8, 1, 45)
+        .toLocal()
+        .toIso8601String()
+        .substring(0, 16)
+        .replaceFirst('T', ' ');
+    expect(find.text('Due: $expected'), findsOneWidget);
   });
 
   test('typed temporal values preserve all-day and UTC semantics', () {
@@ -333,6 +447,12 @@ class _CorpusController extends BridgeController {
   _CorpusController(this.item);
   final PimItem item;
   PimDraft? saved;
+  PimItem? deleted;
+  @override
+  Future<void> deletePimItem(PimItem item) async {
+    deleted = item;
+  }
+
   @override
   BridgeState build() => BridgeState.initial().copyWith(
         pimItems: [item],

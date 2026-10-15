@@ -183,13 +183,40 @@ class NativeSystemProjectionService implements SystemProjectionService {
   @override
   Future<void> projectEnabled(List<PimItem> items) async {
     final settings = await readSettings();
-    if (settings.calendarCollectionIds.isNotEmpty) {
-      await _projectCalendar(items, settings.calendarCollectionIds);
-    }
-    if (settings.contactsCollectionIds.isNotEmpty) {
-      await _projectContacts(items, settings.contactsCollectionIds);
-    }
+    await _runIndependentProjections([
+      for (final collectionId in settings.calendarCollectionIds)
+        () => _projectCalendar(items, {collectionId}),
+      for (final collectionId in settings.contactsCollectionIds)
+        () => _projectContacts(items, {collectionId}),
+    ]);
   }
+
+  // Complete independent work before surfacing one original error. Provider or
+  // storage failures take precedence over a permanent unsupported-set refusal;
+  // subsequent reconciliation retries retain the original mapping/error path.
+  Future<void> _runIndependentProjections(
+      Iterable<Future<void> Function()> projections) async {
+    Object? failure;
+    StackTrace? failureStack;
+    for (final project in projections) {
+      try {
+        await project();
+      } catch (error, stack) {
+        if (failure == null ||
+            (failure is FormatException && error is! FormatException)) {
+          failure = error;
+          failureStack = stack;
+        }
+      }
+    }
+    if (failure != null) Error.throwWithStackTrace(failure, failureStack!);
+  }
+
+  bool _hasUnsupportedRecurrenceSet(PimItem item) =>
+      item.recurrenceExdates.isNotEmpty ||
+      item.recurrenceRdates.isNotEmpty ||
+      item.recurrenceOverrides.isNotEmpty ||
+      item.recurrenceUnsupported.isNotEmpty;
 
   // The pinned calendar provider can write RRULE only. Refuse a lossy set,
   // removing any prior owned master so the OS does not keep showing false dates.
@@ -202,10 +229,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
             item.kind == PimItemKind.calendarEvent &&
             !item.conflict &&
             collectionIds.contains(item.spaceId) &&
-            (item.recurrenceExdates.isNotEmpty ||
-                item.recurrenceRdates.isNotEmpty ||
-                item.recurrenceOverrides.isNotEmpty ||
-                item.recurrenceUnsupported.isNotEmpty))
+            _hasUnsupportedRecurrenceSet(item))
         .toList();
     if (unsupported.isEmpty) return;
     final mapping = await _readMap(_eventMapKey);
@@ -237,10 +261,18 @@ class NativeSystemProjectionService implements SystemProjectionService {
     List<PimItem> items,
     Set<String> enabledCollectionIds,
   ) async {
-    await _rejectUnsupportedRecurrenceSets(items, enabledCollectionIds);
-    final calendarId = await _getOrCreateCalendarId();
+    await _runIndependentProjections([
+      () => _rejectUnsupportedRecurrenceSets(items, enabledCollectionIds),
+      () => _projectSupportedCalendar(items, enabledCollectionIds),
+    ]);
+  }
+
+  Future<void> _projectSupportedCalendar(
+    List<PimItem> items,
+    Set<String> enabledCollectionIds,
+  ) async {
     final mapping = await _readMap(_eventMapKey);
-    final events = items
+    final calendarItems = items
         .where(
           (item) =>
               item.kind == PimItemKind.calendarEvent &&
@@ -248,12 +280,17 @@ class NativeSystemProjectionService implements SystemProjectionService {
               enabledCollectionIds.contains(item.spaceId),
         )
         .toList(growable: false);
+    final events = calendarItems
+        .where((item) => !_hasUnsupportedRecurrenceSet(item))
+        .toList();
     for (final item in events) {
       final rule = item.recurrenceRule;
       if (rule == null || rule.isEmpty) continue;
       _parseSystemRecurrence(item);
     }
-    final activeKeys = events.map(_itemKey).toSet();
+    // Failed unsupported cleanup must never become an ordinary stale deletion
+    // that bypasses ownership checks or drops its durable retry mapping.
+    final activeKeys = calendarItems.map(_itemKey).toSet();
 
     final managedKeys = mapping.keys
         .where(
@@ -271,6 +308,8 @@ class NativeSystemProjectionService implements SystemProjectionService {
       await _writeMap(_eventMapKey, mapping);
     }
 
+    if (events.isEmpty) return;
+    final calendarId = await _getOrCreateCalendarId();
     for (final item in events) {
       final start = item.startsAt?.toDateTime();
       final explicitEnd = item.endsAt?.toDateTime();

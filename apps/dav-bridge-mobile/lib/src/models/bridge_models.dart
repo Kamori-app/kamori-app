@@ -511,17 +511,19 @@ List<PimCalendarOccurrence> pimOccurrencesOnDate(PimItem item, DateTime date) {
     if (instant == null) return null;
     return value!.isAllDay
         ? DateTime.utc(instant.year, instant.month, instant.day)
-        : instant.toUtc();
+        : DateTime.fromMillisecondsSinceEpoch(instant.millisecondsSinceEpoch,
+            isUtc: true);
   }
 
   final start = axis(temporal)!;
   final floatingStart = _floatingTemporal(temporal);
-  final floatingEnd = item.endsAt == null
-      ? floatingStart.add(temporal.isAllDay
+  // Explicit DTEND defines an exact duration for every instance. Date-only
+  // values use the civil axis; timed values use converted absolute instants.
+  final end = axis(item.endsAt) ??
+      start.add(temporal.isAllDay
           ? const Duration(days: 1)
-          : const Duration(milliseconds: 1))
-      : _floatingTemporal(item.endsAt!);
-  final duration = floatingEnd.difference(floatingStart);
+          : const Duration(milliseconds: 1));
+  final duration = end.difference(start);
   final dayStart = DateTime(date.year, date.month, date.day);
   final dayEnd = DateTime(date.year, date.month, date.day + 1);
   final excluded = item.recurrenceExdates
@@ -587,7 +589,12 @@ List<PimCalendarOccurrence> pimOccurrencesOnDate(PimItem item, DateTime date) {
 
   for (final entry in candidates.entries) {
     if (!excluded.contains(entry.key) && !replaced.contains(entry.key)) {
-      add(entry.value, entry.value.add(duration), temporal.isAllDay);
+      // DTSTART is an explicit interval, including its absolute DTEND across
+      // offset changes. Subsequent occurrences use the same exact duration.
+      final end = entry.key == start.millisecondsSinceEpoch
+          ? axis(item.endsAt) ?? entry.value.add(duration)
+          : entry.value.add(duration);
+      add(entry.value, end, temporal.isAllDay);
     }
   }
   final seenOverrides = <int>{};
