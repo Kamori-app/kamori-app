@@ -11,8 +11,11 @@ same access controls as production.
 - Take a daily base backup; retain enough WAL for at least 30 days during beta.
 - Copy B2 objects to the private Hetzner DR bucket with object key, byte length,
   and SHA-256 inventory verification.
-- Backup credentials are write-only where the provider supports it; restore
-  credentials are separate and normally disabled.
+- Scope each backup credential to its bucket and the operations its job needs.
+  Blob replication requires destination list/read/write permissions for its
+  inventory and hash checks; a write-only credential cannot run this job.
+  Keep deletion privileges separate where supported, and keep independent
+  disaster-recovery credentials normally disabled.
 - Never expose the Hetzner DR bucket as a client download origin.
 
 ## Installed jobs
@@ -24,11 +27,22 @@ The protected B2 repository retains five full and thirty differential backup
 sets. Credentials are scoped to that bucket.
 
 The ops node runs `kamori-blob-replication.timer`. It uses a read-only B2
-credential and a write-only Hetzner credential, copies immutable ciphertext
+credential and a Hetzner credential with destination bucket listing and object
+read/write permissions, copies immutable ciphertext
 without propagating deletions, compares complete path/size inventories, and
 downloads a bounded random sample from both providers for SHA-256 comparison.
 `BLOB_VERIFY_SAMPLE_COUNT` is deliberately configurable to keep verification
-egress within budget.
+egress within budget. The DR credential needs the provider equivalents of
+`ListBucket`, `GetBucketLocation`, `GetObject`, `PutObject` and multipart upload
+operations; the replication script does not delete destination objects.
+
+The current infrastructure consumes externally supplied
+`hetznerObjectAccessKey`/`hetznerObjectSecretKey` for both bucket provisioning and
+the ops job; it does not create or verify a restricted replication IAM policy.
+Verify the actual provider credential scope before deployment. The local MinIO
+exercise proves the job's list/read requirement, not the permissions of a live
+Hetzner account. pgBackRest also reads repository metadata; its credential must
+support its backup/check and configured retention operations.
 
 Both jobs update `operator_job_heartbeats` through narrowly scoped identities.
 A green heartbeat means the last check completed; it does not replace the
@@ -86,3 +100,22 @@ a completed restore with measured RPO/RTO and integrity verification.
 Never run a destructive restore against the primary paths. The restore host
 must use a fresh protected volume and a separate database endpoint. Keep
 `registration_enabled=false` throughout the exercise.
+
+## Repeatable local correctness check
+
+Run `python3 tests/release-readiness/restore/run.py` from the repository root;
+see [the harness contract](../../tests/release-readiness/restore/README.md) for
+its fixed local resource ownership and pinned migrator requirements. It runs
+real PostgreSQL 16, SQLx migrations, encrypted pgBackRest backup/WAL/time-target
+restore into a distinct PGDATA, production backup/replication scripts, and two
+independent MinIO stores. It verifies restored schema, migration hashes,
+operation/counter/ciphertext canaries and page checksums, then stops the primary
+object store and checks DR objects against restored size/SHA-256 metadata.
+Restricted-credential, missing-object and same-size-corruption failures are
+required assertions. Logs, manifests, versions, elapsed times and ownership
+cleanup evidence survive the run in its private temporary artifact directory.
+
+This finite local check complements the quarterly procedure. It does not prove
+remote B2/Hetzner permissions, retention or network behavior, production RPO/RTO,
+systemd operation, valid application signatures, or app readiness/authentication/
+sync/export after restore. Record those gates separately.
