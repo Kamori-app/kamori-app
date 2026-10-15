@@ -44,8 +44,10 @@ use crate::{
         users::repositories::delete_user,
     },
     platform::{
-        security::opaque::DefaultOpaqueSuite, state::AppState, state_store::InMemoryStore,
-        test_support::test_config,
+        security::opaque::DefaultOpaqueSuite,
+        state::AppState,
+        state_store::InMemoryStore,
+        test_support::{required_test_database_url, test_config},
     },
 };
 
@@ -87,12 +89,6 @@ struct SigninArtifacts {
     set_cookie_headers: Vec<String>,
 }
 
-fn test_database_url() -> Option<String> {
-    std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())
-}
-
 async fn ensure_migrations(pool: &PgPool) {
     MIGRATIONS_READY
         .get_or_init(|| async {
@@ -101,7 +97,7 @@ async fn ensure_migrations(pool: &PgPool) {
         .await;
 }
 
-async fn setup_test_app() -> Option<TestApp> {
+async fn setup_test_app() -> TestApp {
     let _ = tracing_subscriber::fmt()
         .with_test_writer()
         .with_env_filter(
@@ -109,12 +105,7 @@ async fn setup_test_app() -> Option<TestApp> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("error")),
         )
         .try_init();
-    let Some(database_url) = test_database_url() else {
-        eprintln!(
-            "skipping auth integration tests: set KAMORI_DATABASE_URL or DATABASE_URL to enable"
-        );
-        return None;
-    };
+    let database_url = required_test_database_url();
 
     let mut config = test_config();
     config.database_url = database_url.clone();
@@ -131,7 +122,7 @@ async fn setup_test_app() -> Option<TestApp> {
     )));
     let state = AppState::new(pool, config, state_store).expect("build app state");
     let app = build_router(state.clone()).expect("build app router");
-    Some(TestApp { app, state })
+    TestApp { app, state }
 }
 
 async fn post_msgpack<T: Serialize>(
@@ -278,9 +269,7 @@ async fn register_user(app: &TestApp, username: &str, password: &str) {
 
 #[tokio::test]
 async fn signup_finish_is_exact_retry_idempotent_after_registration_closes() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-signup-retry-{}", Uuid::new_v4());
     let request_id = Uuid::new_v4();
     let request = prepare_signup_request(&app, &username, "P@ssword123!", request_id).await;
@@ -345,9 +334,7 @@ async fn signin_user(
 
 #[tokio::test]
 async fn external_browser_device_authorization_is_explicit_and_retry_safe() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-device-flow-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -544,9 +531,7 @@ async fn external_browser_device_authorization_is_explicit_and_retry_safe() {
 
 #[tokio::test]
 async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-cookie-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -670,9 +655,7 @@ async fn cookie_signin_refresh_logout_sets_and_clears_refresh_and_csrf_cookies()
 
 #[tokio::test]
 async fn cookie_refresh_rejects_csrf_mismatch() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-csrf-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -721,9 +704,7 @@ async fn cookie_refresh_rejects_csrf_mismatch() {
 
 #[tokio::test]
 async fn cookie_refresh_rejects_missing_origin_or_referer() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-origin-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -774,9 +755,7 @@ async fn cookie_refresh_rejects_missing_origin_or_referer() {
 
 #[tokio::test]
 async fn body_transport_refresh_and_logout_remain_compatible() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-body-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -862,9 +841,7 @@ async fn body_transport_refresh_and_logout_remain_compatible() {
 
 #[tokio::test]
 async fn deleting_only_passkey_preserves_password_authentication() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-last-passkey-{}", Uuid::new_v4());
     let password = "P@ssword123!";
@@ -910,9 +887,7 @@ async fn deleting_only_passkey_preserves_password_authentication() {
 
 #[tokio::test]
 async fn account_recovery_returns_current_space_keys_and_revokes_old_credentials() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
 
     let username = format!("it-recovery-{}", Uuid::new_v4());
     register_user(&app, &username, "Old-P@ssword123!").await;
@@ -1104,9 +1079,7 @@ async fn account_recovery_returns_current_space_keys_and_revokes_old_credentials
 
 #[tokio::test]
 async fn totp_backup_code_can_only_be_consumed_once() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-backup-code-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
@@ -1139,9 +1112,7 @@ async fn totp_backup_code_can_only_be_consumed_once() {
 
 #[tokio::test]
 async fn account_deletion_anonymizes_authentication_and_recovery_material() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-delete-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
@@ -1305,9 +1276,7 @@ async fn active_session_count(app: &TestApp, username: &str) -> i64 {
 }
 
 async fn stale_opaque_regression(recovery: bool, totp: bool) {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-deferred-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;
     if totp {
@@ -1395,9 +1364,7 @@ async fn stale_totp_continuation_after_recovery_is_rejected() {
 }
 
 async fn stale_device_regression(reset: Option<bool>) {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-deferred-device-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;
     let signin = signin_user(&app, &username, "P@ssword123!", SigninTransport::Body).await;
@@ -1593,9 +1560,7 @@ async fn deferred_enrollment_and_reauth_cannot_cross_recovery() {
     use crate::features::auth::dto::{
         ReauthAction, TotpSetupFinishRequest, TotpSetupStartRequest, TotpSetupStartResponse,
     };
-    let Some(mut app) = setup_test_app().await else {
-        return;
-    };
+    let mut app = setup_test_app().await;
     app.state.config.enable_totp = true;
     app.app = build_router(app.state.clone()).unwrap();
     let username = format!("it-deferred-grants-{}", Uuid::new_v4());
@@ -1733,9 +1698,7 @@ async fn deferred_enrollment_and_reauth_cannot_cross_recovery() {
 
 #[tokio::test]
 async fn login_final_validation_waits_for_concurrent_password_reset() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-auth-lock-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;
     let pending = pending_signin(&app, &username, "P@ssword123!").await;
@@ -1821,9 +1784,7 @@ async fn pending_recovery(
 
 #[tokio::test]
 async fn recovery_fix_invalidates_other_pending_attempts_but_preserves_exact_retry() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-recovery-other-{}", Uuid::new_v4());
     register_user(&app, &username, "Old-P@ssword123!").await;
     let first = pending_recovery(&app, &username, "New-P@ssword123!").await;
@@ -1891,9 +1852,7 @@ async fn recovery_fix_invalidates_other_pending_attempts_but_preserves_exact_ret
 
 #[tokio::test]
 async fn recovery_fix_rejects_start_racing_credential_reset() {
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-recovery-admission-{}", Uuid::new_v4());
     register_user(&app, &username, "Old-P@ssword123!").await;
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE username = $1")
@@ -1960,9 +1919,7 @@ async fn recovery_fix_rejects_start_racing_credential_reset() {
 #[tokio::test]
 async fn recovery_fix_account_deletion_and_device_revocation_do_not_deadlock() {
     use crate::features::auth::repositories::AuthenticationBinding;
-    let Some(app) = setup_test_app().await else {
-        return;
-    };
+    let app = setup_test_app().await;
     let username = format!("it-delete-revoke-{}", Uuid::new_v4());
     let owner_name = format!("it-delete-revoke-owner-{}", Uuid::new_v4());
     register_user(&app, &username, "P@ssword123!").await;

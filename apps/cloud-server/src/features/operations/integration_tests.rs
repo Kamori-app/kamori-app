@@ -14,27 +14,24 @@ use super::repositories::{
     AppendResult, append_operation, list_operations, load_append_authorization,
 };
 
+use crate::platform::test_support::required_test_database_url;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-async fn test_pool() -> Option<PgPool> {
-    let database_url = std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())?;
+async fn test_pool() -> PgPool {
+    let database_url = required_test_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
         .await
         .expect("connect postgres");
     MIGRATOR.run(&pool).await.expect("run migrations");
-    Some(pool)
+    pool
 }
 
 #[tokio::test]
 async fn append_is_signed_authorized_and_idempotent() {
-    let Some(pool) = test_pool().await else {
-        eprintln!("skipping operation integration test: DATABASE_URL is not set");
-        return;
-    };
+    let pool = test_pool().await;
 
     let user_id = Uuid::new_v4();
     let (_, envelope) = operation_fixture(&pool, user_id).await;
@@ -441,9 +438,7 @@ async fn usage(pool: &PgPool, owner: Uuid) -> (i64, i64) {
 
 #[tokio::test]
 async fn deleting_operations_spaces_and_workspaces_releases_only_their_charge() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let owner = Uuid::new_v4();
     let (workspace, first) = operation_fixture(&pool, owner).await;
     let other_space = Uuid::new_v4();
@@ -541,18 +536,14 @@ async fn deleting_operations_spaces_and_workspaces_releases_only_their_charge() 
 
 #[tokio::test]
 async fn distinct_concurrent_appends_allocate_sequences_without_lock_upgrade_deadlock() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let owner = Uuid::new_v4();
     let (_, first) = operation_fixture(&pool, owner).await;
     let mut second = first.clone();
     second.client_op_id = Uuid::new_v4();
     second.sign(&SigningKey::from_bytes(&[17; 32]));
     let label = format!("append-concurrency-{}", Uuid::new_v4());
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     let workers = PgPoolOptions::new()
         .max_connections(2)
@@ -641,18 +632,14 @@ async fn distinct_concurrent_appends_allocate_sequences_without_lock_upgrade_dea
 
 #[tokio::test]
 async fn operation_usage_migration_repairs_live_and_empty_accounts_after_newer_migration() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     // Identifier contains only this literal prefix and locally generated hex.
     let schema = format!("usage_migration_{}", Uuid::new_v4().simple());
     sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
         .execute(&pool)
         .await
         .unwrap();
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     let isolated = PgPoolOptions::new()
         .max_connections(2)
@@ -764,9 +751,7 @@ async fn operation_usage_migration_repairs_live_and_empty_accounts_after_newer_m
 
 #[tokio::test]
 async fn duplicate_append_still_rejects_revoked_device_member_and_stale_epoch() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     for changed in ["device", "member", "epoch"] {
         let owner = Uuid::new_v4();
         let (workspace, envelope) = operation_fixture(&pool, owner).await;
@@ -816,9 +801,7 @@ async fn duplicate_append_still_rejects_revoked_device_member_and_stale_epoch() 
 
 #[tokio::test]
 async fn operation_usage_migration_serializes_with_live_append_without_deadlock() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     // Schema and application names contain only literal prefixes and local UUIDs.
     let schema = format!("usage_append_migration_{}", Uuid::new_v4().simple());
     let migration_label = format!("usage-migrate-{}", Uuid::new_v4());
@@ -827,9 +810,7 @@ async fn operation_usage_migration_serializes_with_live_append_without_deadlock(
         .execute(&pool)
         .await
         .unwrap();
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     let options = options.options([("search_path", schema.as_str())]);
     let isolated = PgPoolOptions::new()

@@ -8,27 +8,24 @@ use super::repositories::{
     RemoveSecurityKeyResult, RenamePasskeyResult, remove_security_key, rename_passkey,
 };
 
+use crate::platform::test_support::required_test_database_url;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-async fn test_pool() -> Option<PgPool> {
-    let database_url = std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())?;
+async fn test_pool() -> PgPool {
+    let database_url = required_test_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
         .await
         .expect("connect postgres");
     MIGRATOR.run(&pool).await.expect("run migrations");
-    Some(pool)
+    pool
 }
 
 #[tokio::test]
 async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
-    let Some(pool) = test_pool().await else {
-        eprintln!("skipping admin integration test: DATABASE_URL is not set");
-        return;
-    };
+    let pool = test_pool().await;
     let admin_id = Uuid::new_v4();
     let primary_id = Uuid::new_v4();
     let backup_id = Uuid::new_v4();

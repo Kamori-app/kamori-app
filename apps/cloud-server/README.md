@@ -435,6 +435,26 @@ Where:
 - `lint` = strict clippy gate (`-D warnings`).
 - `test` = full `cargo test -p cloud-server` (first cold run can be slow).
 
+The full suite requires a **dedicated PostgreSQL 18 test database**. Set a
+nonempty `KAMORI_DATABASE_URL`, or `DATABASE_URL` as a fallback, before running
+`test`, `bun run verify`, or `cargo test --workspace`. Empty and whitespace-only
+values are treated as missing. Missing configuration fails database tests with
+an actionable message instead of silently passing them.
+
+```bash
+export KAMORI_DATABASE_URL='postgres://test_user:test_password@localhost:5432/kamori_test'
+cargo test -p cloud-server
+```
+
+Use a disposable database: tests apply the current migrations, write fixtures,
+and create/drop isolated schemas. The database user must have those permissions.
+No Valkey or object store is needed for these tests. Pure unit tests can still
+run without PostgreSQL by selecting them, for example:
+
+```bash
+cargo test -p cloud-server features::invites::services::tests
+```
+
 Transport note:
 - Active API endpoints use MessagePack (`application/msgpack`). UUIDs use
   canonical lowercase hyphenated strings, while byte fields remain MessagePack

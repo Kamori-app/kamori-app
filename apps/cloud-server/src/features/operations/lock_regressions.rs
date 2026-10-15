@@ -13,9 +13,7 @@ use crate::features::{
 use std::time::Duration;
 
 async fn named_pool(label: &str) -> PgPool {
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     PgPoolOptions::new()
         .max_connections(1)
@@ -47,9 +45,7 @@ async fn clean(pool: &PgPool, owner: Uuid) {
 
 #[tokio::test]
 async fn final_rotation_and_recovery_serialize_in_both_orders() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     for recovery_first in [true, false] {
         let owner = Uuid::new_v4();
         let (_, envelope) = operation_fixture(&pool, owner).await;
@@ -197,9 +193,7 @@ async fn final_rotation_and_recovery_serialize_in_both_orders() {
 
 #[tokio::test]
 async fn final_blob_reservation_and_ownership_accept_serialize() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let old = Uuid::new_v4();
     let recipient = Uuid::new_v4();
     let (_, from) = operation_fixture(&pool, old).await;
@@ -297,9 +291,7 @@ async fn final_blob_reservation_and_ownership_accept_serialize() {
 
 #[tokio::test]
 async fn final_multispace_account_delete_and_append_serialize() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let owner = Uuid::new_v4();
     let (workspace, mut envelope) = operation_fixture(&pool, owner).await;
     let second = Uuid::new_v4();
@@ -395,9 +387,7 @@ async fn final_multispace_account_delete_and_append_serialize() {
 
 #[tokio::test]
 async fn final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease() {
-    let Some(admin) = test_pool().await else {
-        return;
-    };
+    let admin = test_pool().await;
     // Maintenance deliberately scans its entire database: isolate every row and
     // queued object in a synthetic schema, never the controller's shared fixtures.
     let schema = format!("maintenance_{}", Uuid::new_v4().simple());
@@ -405,9 +395,7 @@ async fn final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease()
         .execute(&admin)
         .await
         .unwrap();
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     let options = options.options([("search_path", schema.as_str())]);
     let pool = PgPoolOptions::new()
@@ -519,8 +507,8 @@ async fn final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease()
 
 // Trigger DDL must not contend with another concurrency test's deliberately
 // paused transaction. Each admission scenario owns a migrated synthetic schema.
-async fn admission_database() -> Option<(PgPool, PgPool, String)> {
-    let admin = test_pool().await?;
+async fn admission_database() -> (PgPool, PgPool, String) {
+    let admin = test_pool().await;
     let schema = format!("admission_{}", Uuid::new_v4().simple());
     sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
         .execute(&admin)
@@ -528,12 +516,10 @@ async fn admission_database() -> Option<(PgPool, PgPool, String)> {
         .unwrap();
     let pool = admission_pool(&schema, "admission-observer", 2).await;
     MIGRATOR.run(&pool).await.unwrap();
-    Some((admin, pool, schema))
+    (admin, pool, schema)
 }
 async fn admission_pool(schema: &str, label: &str, connections: u32) -> PgPool {
-    let url = std::env::var("KAMORI_DATABASE_URL")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap();
+    let url = required_test_database_url();
     let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
     PgPoolOptions::new()
         .max_connections(connections)
@@ -606,9 +592,7 @@ async fn final_late_personal_workspace_cannot_escape_account_deletion() {
     late_workspace_admission(true).await;
 }
 async fn late_workspace_admission(personal: bool) {
-    let Some((admin, pool, schema)) = admission_database().await else {
-        return;
-    };
+    let (admin, pool, schema) = admission_database().await;
     let owner = Uuid::new_v4();
     let (workspace, mut envelope) = operation_fixture(&pool, owner).await;
     // Leave no personal workspace, so ensure must exercise its insert path.
@@ -735,9 +719,7 @@ async fn late_workspace_admission(personal: bool) {
 
 #[tokio::test]
 async fn final_workspace_admission_first_is_included_in_account_deletion() {
-    let Some((admin, pool, schema)) = admission_database().await else {
-        return;
-    };
+    let (admin, pool, schema) = admission_database().await;
     for (personal, existing) in [(false, false), (true, false), (true, true)] {
         let owner = Uuid::new_v4();
         let (workspace, _) = operation_fixture(&pool, owner).await;
@@ -810,9 +792,7 @@ async fn final_workspace_admission_first_is_included_in_account_deletion() {
 
 #[tokio::test]
 async fn final_workspace_offer_and_account_deletion_share_admission() {
-    let Some((admin, pool, schema)) = admission_database().await else {
-        return;
-    };
+    let (admin, pool, schema) = admission_database().await;
     for deletion_first in [true, false] {
         let old = Uuid::new_v4();
         let recipient = Uuid::new_v4();
@@ -955,9 +935,7 @@ async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
         redeem_invite_code_tx,
     };
     use crate::features::spaces::dto::SpaceRole;
-    let Some((admin, pool, schema)) = admission_database().await else {
-        return;
-    };
+    let (admin, pool, schema) = admission_database().await;
     for deletion_first in [true, false] {
         let old = Uuid::new_v4();
         let recipient = Uuid::new_v4();

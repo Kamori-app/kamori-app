@@ -9,19 +9,19 @@ use super::repositories::{
 };
 use crate::features::spaces::{dto::SpaceRole, repositories::list_spaces};
 
+use crate::platform::test_support::required_test_database_url;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-async fn test_pool() -> Option<PgPool> {
-    let database_url = std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())?;
+async fn test_pool() -> PgPool {
+    let database_url = required_test_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
         .await
         .expect("connect postgres");
     MIGRATOR.run(&pool).await.expect("run migrations");
-    Some(pool)
+    pool
 }
 
 async fn insert_user(pool: &PgPool, user_id: Uuid, label: &str) {
@@ -76,10 +76,7 @@ fn unique_code_hash() -> [u8; 32] {
 
 #[tokio::test]
 async fn invite_creation_and_redemption_preserve_authorization_invariants() {
-    let Some(pool) = test_pool().await else {
-        eprintln!("skipping invite integration test: DATABASE_URL is not set");
-        return;
-    };
+    let pool = test_pool().await;
     let owner_id = Uuid::new_v4();
     let editor_id = Uuid::new_v4();
     let reader_id = Uuid::new_v4();
@@ -339,9 +336,7 @@ fn assert_same_redemption(
 
 #[tokio::test]
 async fn lost_redemption_response_retries_preserve_original_response_and_entitlement() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     for existing_role in [None, Some("editor")] {
         let actor = Uuid::new_v4();
         let (owner, space, hash) = redemption_fixture(&pool, actor, existing_role).await;
@@ -401,9 +396,7 @@ async fn lost_redemption_response_retries_preserve_original_response_and_entitle
 
 #[tokio::test]
 async fn concurrent_same_recipient_redemptions_return_identical_response() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let actor = Uuid::new_v4();
     let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
     let (left, right) = tokio::join!(
@@ -447,9 +440,7 @@ async fn concurrent_same_recipient_redemptions_return_identical_response() {
 
 #[tokio::test]
 async fn concurrent_different_recipients_cannot_share_single_use_invite() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let actor = Uuid::new_v4();
     let other = Uuid::new_v4();
     let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
@@ -511,9 +502,7 @@ async fn concurrent_different_recipients_cannot_share_single_use_invite() {
 
 #[tokio::test]
 async fn retries_reject_removed_members_stale_epochs_and_inactive_spaces() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     for mutation in ["removed", "epoch", "space", "revoked"] {
         let actor = Uuid::new_v4();
         let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
@@ -578,9 +567,7 @@ async fn retries_reject_removed_members_stale_epochs_and_inactive_spaces() {
 
 #[tokio::test]
 async fn expired_unused_invite_never_activates_membership() {
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let actor = Uuid::new_v4();
     let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
     sqlx::query(
@@ -634,9 +621,7 @@ async fn redemption_retry_preserves_entitlement_after_recipient_becomes_owner() 
         dto::OwnershipResourceKind,
         repositories::{AcceptOfferResult, CreateOfferResult, accept_offer, create_offer},
     };
-    let Some(pool) = test_pool().await else {
-        return;
-    };
+    let pool = test_pool().await;
     let actor = Uuid::new_v4();
     let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
     let original = redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());

@@ -7,6 +7,30 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::platform::{config::Config, state::AppState, state_store::InMemoryStore};
 
+/// Requires a dedicated PostgreSQL database for integration tests.
+///
+/// Empty or whitespace-only values are treated as missing. Unit tests using
+/// `test_config` or `test_state` do not need a live database.
+pub fn required_test_database_url() -> String {
+    let explicit = std::env::var("KAMORI_DATABASE_URL").ok();
+    let fallback = std::env::var("DATABASE_URL").ok();
+    resolve_test_database_url(explicit.as_deref(), fallback.as_deref())
+        .expect(
+            "database integration tests require a dedicated PostgreSQL database: set a nonempty \
+             KAMORI_DATABASE_URL or DATABASE_URL; see apps/cloud-server/README.md",
+        )
+        .to_owned()
+}
+
+fn resolve_test_database_url<'a>(
+    explicit: Option<&'a str>,
+    fallback: Option<&'a str>,
+) -> Option<&'a str> {
+    explicit
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| fallback.filter(|url| !url.trim().is_empty()))
+}
+
 /// Returns a stable config baseline for unit tests.
 pub fn test_config() -> Config {
     Config {
@@ -97,4 +121,81 @@ pub fn test_state() -> AppState {
     let mut state = AppState::new(pool, config, store).expect("state");
     state.account_state_checks_enabled = false;
     state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_test_database_url;
+
+    #[test]
+    fn explicit_database_url_takes_precedence() {
+        assert_eq!(
+            resolve_test_database_url(
+                Some("postgres://explicit/test"),
+                Some("postgres://fallback/test")
+            ),
+            Some("postgres://explicit/test"),
+        );
+    }
+
+    #[test]
+    fn fallback_database_url_is_used_when_explicit_is_missing_or_blank() {
+        for explicit in [None, Some(""), Some(" \t\n")] {
+            assert_eq!(
+                resolve_test_database_url(explicit, Some("postgres://fallback/test")),
+                Some("postgres://fallback/test"),
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_database_url_does_not_require_fallback() {
+        for fallback in [None, Some(""), Some(" \t\n")] {
+            assert_eq!(
+                resolve_test_database_url(Some("postgres://explicit/test"), fallback),
+                Some("postgres://explicit/test"),
+            );
+        }
+    }
+
+    #[test]
+    fn missing_or_blank_database_urls_are_rejected() {
+        for explicit in [None, Some(""), Some(" \t\n")] {
+            for fallback in [None, Some(""), Some(" \t\n")] {
+                assert_eq!(resolve_test_database_url(explicit, fallback), None);
+            }
+        }
+    }
+
+    #[test]
+    fn database_integration_test_requires_postgres_configuration() {
+        let test_name = "features::admin::integration_tests::passkey_names_are_unique_rename_is_audited_and_last_key_is_retained";
+        let output =
+            std::process::Command::new(std::env::current_exe().expect("current test binary"))
+                .args(["--exact", test_name, "--nocapture"])
+                .env_remove("KAMORI_DATABASE_URL")
+                .env_remove("DATABASE_URL")
+                .output()
+                .expect("run representative database integration test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stdout.contains("running 1 test"),
+            "integration test must actually run: {stdout} {stderr}"
+        );
+        assert!(
+            stdout.contains(test_name),
+            "expected integration test must run: {stdout} {stderr}"
+        );
+        assert!(
+            !output.status.success(),
+            "database integration test must fail without PostgreSQL configuration: {stdout} {stderr}"
+        );
+        assert!(
+            stderr.contains("KAMORI_DATABASE_URL")
+                && stderr.contains("DATABASE_URL")
+                && stderr.contains("dedicated PostgreSQL"),
+            "missing database diagnostic must explain the prerequisite: {stdout} {stderr}"
+        );
+    }
 }
