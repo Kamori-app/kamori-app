@@ -25,7 +25,7 @@
 - New SQL migrations must have unique numeric prefixes; do not edit committed old migrations.
 - Work exclusively in the isolated worktree, use synthetic data. Do not deploy, push, access production, alter real credentials, or read SECRETS.md/private PKI.
 - Add behavioral regression tests for corrected business logic; record RED/GREEN evidence. Test doubles are allowed for OS/keychain/network boundaries; assertions must exercise real orchestration.
-- Use `rustup run 1.97.1 cargo` (PATH cargo is newer), `CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197`, and the controller's disposable DB URL. Reuse controller dependencies and avoid unrelated lockfile changes.
+- Use `PATH=/Users/yujin/.cargo/bin:$PATH rustup run 1.97.1 cargo` (PATH cargo/rustc/Clippy are newer), `CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197`, and the controller's disposable DB URL. Reuse controller dependencies and avoid unrelated lockfile changes.
 
 ## Review Focus
 
@@ -64,6 +64,7 @@
 **Requirements:** Resolve C01/C05. Existing resource writes use cached head stream_id and actual PIM kind, including Task tombstones and conflict copies; only new DAV hrefs derive a fresh deterministic stream id. Validate graph dependency before persisting invalid outbox state. Enable the supported TLS backend in both reqwest declarations rather than rely on cloud-server feature unification.
 
 - [ ] Add real HTTP DAV regressions editing/deleting first-party random-stream task/event/contact and conflict branches with ETags. Assert same-stream parent, immediate projection, valid tombstone kind, replay/retry semantics and no invalid queued operation after rejection.
+- [ ] Expand `signature_covers_every_client_field_and_ciphertext` to mutate each public envelope field and ciphertext separately, asserting verification failure; this strengthens an existing invariant and needs no artificial failing-before-code step.
 - [ ] Add an isolated feature/transport regression proving core FRB and desktop builds have TLS, with local synthetic CA HTTPS handshake using the real configured client or equivalent connector smoke. No production network required.
 - [ ] Run tests RED, implement minimal fixes, then core FRB tests, DAV suite and isolated native graph/build checks on pinned Rust. Commit with evidence and explain platform trust limits.
 
