@@ -83,10 +83,31 @@ pub(crate) async fn append_operation(
         .execute(&mut *transaction)
         .await?;
 
-    // Duplicate retries are still authorization-sensitive. Lock the exact
-    // space, membership, and device rows before the idempotency fast path so a
-    // concurrent revocation or epoch rotation cannot be bypassed by replaying
-    // an already-known client operation id.
+    // Acquire the strongest space lock before any account or device row. This
+    // serializes distinct appends without competing SHARE-to-UPDATE upgrades.
+    let active_space: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM security_spaces WHERE id = $1 AND status = 'active' AND current_key_epoch = $2 FOR UPDATE",
+    )
+    .bind(envelope.space_id)
+    .bind(i32::try_from(envelope.key_epoch)?)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if active_space.is_none() {
+        return Ok(AppendResult::AccessDeniedOrStaleEpoch);
+    }
+
+    // Account security mutations acquire the user before the device. Preserve
+    // that order here, while retaining the quota paths' space-before-account
+    // order. NO KEY UPDATE also permits concurrent FK references to the owner.
+    sqlx::query(
+        "SELECT u.id FROM users u JOIN security_spaces s ON s.owner_user_id = u.id WHERE s.id = $1 FOR NO KEY UPDATE OF u",
+    )
+    .bind(envelope.space_id)
+    .execute(&mut *transaction)
+    .await?;
+
+    // Duplicate retries remain sensitive to membership/device revocation and
+    // epoch rotation. Keep these locks through the final write or retry result.
     let still_authorized = sqlx::query_scalar::<_, Uuid>(
         r#"
         SELECT d.id
@@ -103,7 +124,7 @@ pub(crate) async fn append_operation(
         WHERE s.id = $1
           AND s.status = 'active'
           AND s.current_key_epoch = $2
-        FOR SHARE OF s, sm, d
+        FOR SHARE OF sm, d
         "#,
     )
     .bind(envelope.space_id)
@@ -143,7 +164,7 @@ pub(crate) async fn append_operation(
         FROM security_spaces s
         JOIN users u ON u.id = s.owner_user_id
         WHERE s.id = $1
-        FOR UPDATE OF s, u
+        FOR NO KEY UPDATE OF u
         "#,
     )
     .bind(envelope.space_id)

@@ -186,18 +186,23 @@ pub(crate) async fn redeem_invite_code_tx(
         r#"
         SELECT i.id, i.space_id, i.role, i.encrypted_key_package,
                i.encrypted_note, i.key_epoch,
-               s.current_state_start_seq
+               s.current_state_start_seq, i.redeemed_by,
+               i.redemption_role, i.redemption_history_start_seq,
+               i.redemption_current_state_start_seq
         FROM security_space_invites i
         JOIN security_spaces s ON s.id = i.space_id AND s.status = 'active'
         WHERE i.code_hash = $1
           AND i.revoked_at IS NULL
-          AND i.used_count < i.max_uses
-          AND i.expires_at > now()
+          AND (
+              (i.used_count < i.max_uses AND i.expires_at > now())
+              OR (i.used_count > 0 AND i.redeemed_by = $2)
+          )
           AND i.key_epoch = s.current_key_epoch
         FOR UPDATE OF i
         "#,
     )
     .bind(code_hash)
+    .bind(actor_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -213,6 +218,49 @@ pub(crate) async fn redeem_invite_code_tx(
     let current_state_start_seq = u64::try_from(row.try_get::<i64, _>("current_state_start_seq")?)?;
     let encrypted_key_package: Vec<u8> = row.try_get("encrypted_key_package")?;
     let encrypted_note: Option<Vec<u8>> = row.try_get("encrypted_note")?;
+
+    if row.try_get::<Option<Uuid>, _>("redeemed_by")? == Some(actor_id) {
+        // Only a committed response may be replayed. Never recreate membership
+        // or extend history when a removed member presents an old code.
+        let original_role: Option<String> = row.try_get("redemption_role")?;
+        let original_history: Option<i64> = row.try_get("redemption_history_start_seq")?;
+        let original_floor: Option<i64> = row.try_get("redemption_current_state_start_seq")?;
+        let (Some(original_role), Some(original_history), Some(original_floor)) =
+            (original_role, original_history, original_floor)
+        else {
+            // Pre-migration redemptions did not persist an exact response.
+            return Ok(RedeemInviteOutcome::InvalidOrExpired);
+        };
+        let entitled: Option<Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM security_space_members
+            WHERE space_id = $1 AND user_id = $2 AND status = 'active'
+              AND key_epoch = $3 AND history_start_seq <= $4
+              AND (role = $5 OR role IN ('editor', 'owner'))
+            FOR SHARE
+            "#,
+        )
+        .bind(space_id)
+        .bind(actor_id)
+        .bind(key_epoch_i32)
+        .bind(original_history)
+        .bind(&original_role)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if entitled.is_none() {
+            return Ok(RedeemInviteOutcome::InvalidOrExpired);
+        }
+        tx.commit().await?;
+        return Ok(RedeemInviteOutcome::Redeemed(RedeemedInvite {
+            space_id,
+            role: SpaceRole::from_db(&original_role)?,
+            key_epoch,
+            history_start_seq: u64::try_from(original_history)?,
+            current_state_start_seq: u64::try_from(original_floor)?,
+            encrypted_key_package,
+            encrypted_note,
+        }));
+    }
 
     let existing_role: Option<String> = sqlx::query_scalar(
         r#"
@@ -280,12 +328,17 @@ pub(crate) async fn redeem_invite_code_tx(
     let consume = sqlx::query(
         r#"
         UPDATE security_space_invites
-        SET redeemed_by = $2, redeemed_at = now(), used_count = used_count + 1
+        SET redeemed_by = $2, redeemed_at = now(), used_count = used_count + 1,
+            redemption_role = $3, redemption_history_start_seq = $4,
+            redemption_current_state_start_seq = $5
         WHERE id = $1 AND revoked_at IS NULL AND used_count < max_uses
         "#,
     )
     .bind(invite_id)
     .bind(actor_id)
+    .bind(effective_role_value)
+    .bind(persisted_history_start)
+    .bind(i64::try_from(current_state_start_seq)?)
     .execute(&mut *tx)
     .await?;
     ensure!(

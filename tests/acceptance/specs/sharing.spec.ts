@@ -66,7 +66,10 @@ test("@full editor sharing, single-use invites, and reader admission", async ({
     await editor.getByRole("link", { name: "Redeem invite code" }).click();
     await editor.getByPlaceholder("ABCD-EFGH-JKLM-NPQR").fill(editorCode ?? "");
     await editor.getByRole("button", { name: "Redeem Code" }).click();
-    await expect(editor.getByText(/Invite redemption failed:/)).toBeVisible();
+    await expect(editor.getByText(/Invite redeemed for space/)).toBeVisible();
+    await expect(
+      editor.getByText("editor acceptance note", { exact: true }),
+    ).toBeVisible();
 
     await openAppSection(owner, "Spaces");
     await owner.getByRole("link", { name: "Members and access" }).click();
