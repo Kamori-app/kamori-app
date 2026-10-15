@@ -864,11 +864,17 @@ export const recurringIntervalOccursOnDay = (
       : ruleStart;
     options.tzid = "UTC";
     const untilInstant = timezone ? options.until : undefined;
-    if (timezone) options.until = undefined;
-    const recurrence = new RRule(options);
     // A floating wall time and its instant can differ by a timezone offset.
     // Two days cover all IANA offsets and date-line/DST changes at either bound.
     const margin = timezone ? 2 * 86_400_000 : 0;
+    if (untilInstant) {
+      // No occurrence can overlap this day once even the last possible end has
+      // passed. Keep a conservative floating UNTIL as well: an old series with
+      // a long overlapping duration must not enumerate to the queried year.
+      if (untilInstant.getTime() + duration <= dayStart.getTime()) return false;
+      options.until = new Date(untilInstant.getTime() + margin);
+    }
+    const recurrence = new RRule(options);
     return recurrence
       .between(new Date(dayStart.getTime() - duration - margin), new Date(dayEnd.getTime() + margin), true)
       .some((floating) => {
