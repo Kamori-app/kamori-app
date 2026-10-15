@@ -508,7 +508,7 @@ func opsConfigurationFiles(material opsCloudInitMaterial) ([]cloudInitFile, erro
 	if err != nil {
 		return nil, err
 	}
-	opsEnvironment := envLine("VALKEY_PASSWORD", material.valkeyPassword) + envLine("GRAFANA_ADMIN_PASSWORD", material.grafanaAdminPassword)
+	opsEnvironment := composeEnvLine("VALKEY_PASSWORD", material.valkeyPassword) + composeEnvLine("GRAFANA_ADMIN_PASSWORD", material.grafanaAdminPassword)
 	files = append(files,
 		cloudInitFile{path: "/opt/kamori/ops/alertmanager.yml", owner: "root:root", permissions: "0644", content: alertmanagerConfiguration},
 		cloudInitFile{path: "/etc/kamori/secrets/alertmanager-webhook-url", owner: "65534:65534", permissions: "0400", content: alertmanagerWebhookSecret},
@@ -630,14 +630,14 @@ func renderPostgresEnvironment(appPassword, jobsPassword, backupKeyID, backupApp
 	return "POSTGRES_VERSION=16\n" +
 		"POSTGRES_PRIMARY_IP=" + databasePrimaryPrivateIP + "\n" +
 		"POSTGRES_DATA_DIR=/srv/kamori-postgres/postgresql/16/main\n" +
-		envLine("POSTGRES_APP_PASSWORD", appPassword) +
-		envLine("POSTGRES_JOBS_PASSWORD", jobsPassword) +
+		shellEnvLine("POSTGRES_APP_PASSWORD", appPassword) +
+		shellEnvLine("POSTGRES_JOBS_PASSWORD", jobsPassword) +
 		"PGBACKREST_S3_ENDPOINT=" + backblazeEndpoint + "\n" +
 		"PGBACKREST_S3_REGION=" + backblazeRegion + "\n" +
 		"PGBACKREST_S3_BUCKET=" + backblazePostgresBackupBucket + "\n" +
-		envLine("PGBACKREST_S3_KEY_ID", backupKeyID) +
-		envLine("PGBACKREST_S3_APPLICATION_KEY", backupApplicationKey) +
-		envLine("PGBACKREST_CIPHER_PASS", cipherPass)
+		shellEnvLine("PGBACKREST_S3_KEY_ID", backupKeyID) +
+		shellEnvLine("PGBACKREST_S3_APPLICATION_KEY", backupApplicationKey) +
+		shellEnvLine("PGBACKREST_CIPHER_PASS", cipherPass)
 }
 
 func renderBackupEnvironment(replicationKeyID, replicationApplicationKey, drAccessKey, drSecretKey, jobsPassword, drBucketName string) string {
@@ -646,13 +646,13 @@ func renderBackupEnvironment(replicationKeyID, replicationApplicationKey, drAcce
 	return "PRIMARY_S3_ENDPOINT=" + backblazeEndpoint + "\n" +
 		"PRIMARY_S3_REGION=" + backblazeRegion + "\n" +
 		"PRIMARY_S3_BUCKET=" + backblazePrimaryBucket + "\n" +
-		envLine("PRIMARY_S3_KEY_ID", replicationKeyID) +
-		envLine("PRIMARY_S3_APPLICATION_KEY", replicationApplicationKey) +
+		shellEnvLine("PRIMARY_S3_KEY_ID", replicationKeyID) +
+		shellEnvLine("PRIMARY_S3_APPLICATION_KEY", replicationApplicationKey) +
 		"DR_S3_ENDPOINT=" + hetznerObjectEndpoint + "\n" +
 		"DR_S3_REGION=" + hetznerObjectLocation + "\n" +
 		"DR_S3_BUCKET=" + drBucketName + "\n" +
-		envLine("DR_S3_ACCESS_KEY", drAccessKey) +
-		envLine("DR_S3_SECRET_KEY", drSecretKey) +
-		envLine("JOBS_DATABASE_URL", jobsURL) +
+		shellEnvLine("DR_S3_ACCESS_KEY", drAccessKey) +
+		shellEnvLine("DR_S3_SECRET_KEY", drSecretKey) +
+		shellEnvLine("JOBS_DATABASE_URL", jobsURL) +
 		"BLOB_VERIFY_SAMPLE_COUNT=20\n"
 }
