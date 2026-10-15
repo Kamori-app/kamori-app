@@ -929,7 +929,7 @@ async fn final_workspace_offer_and_account_deletion_share_admission() {
 }
 
 #[tokio::test]
-async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
+async fn final_admitted_invite_space_ownership_cannot_escape_account_deletion() {
     use crate::features::invites::repositories::{
         InviteCodeInsert, InviteCodeInsertResult, RedeemInviteOutcome, insert_invite_code,
         redeem_invite_code_tx,
@@ -970,6 +970,25 @@ async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
             .unwrap(),
             InviteCodeInsertResult::Stored(_)
         ));
+        assert!(matches!(
+            redeem_invite_code_tx(&pool, &hash, recipient)
+                .await
+                .unwrap(),
+            RedeemInviteOutcome::Redeemed(_)
+        ));
+        let offer = match create_offer(
+            &pool,
+            old,
+            OwnershipResourceKind::SecuritySpace,
+            envelope.space_id,
+            recipient,
+        )
+        .await
+        .unwrap()
+        {
+            CreateOfferResult::Created(offer) => offer,
+            _ => panic!("fresh invite member can receive a production ownership offer"),
+        };
         let trigger = format!("zz_late_member_{}", recipient.simple());
         let gate_key = i64::from_be_bytes(recipient.as_bytes()[..8].try_into().unwrap());
         if deletion_first {
@@ -1001,27 +1020,7 @@ async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
             }));
             waiting(&pool, &delete_label).await;
         }
-        // In the failing schedule these complete AFTER delete has discovered
-        // every then-visible membership/space and taken its owner account lock.
-        assert!(matches!(
-            redeem_invite_code_tx(&pool, &hash, recipient)
-                .await
-                .unwrap(),
-            RedeemInviteOutcome::Redeemed(_)
-        ));
-        let offer = match create_offer(
-            &pool,
-            old,
-            OwnershipResourceKind::SecuritySpace,
-            envelope.space_id,
-            recipient,
-        )
-        .await
-        .unwrap()
-        {
-            CreateOfferResult::Created(offer) => offer,
-            _ => panic!("fresh invite member can receive a production ownership offer"),
-        };
+        // Ownership acceptance still races deletion after membership admission.
         let accept = tokio::spawn(async move {
             accept_offer(
                 &accept_pool,
@@ -1106,4 +1105,9 @@ async fn final_late_invite_space_ownership_cannot_escape_account_deletion() {
         }
     }
     drop_admission_database(&admin, pool, &schema).await;
+}
+
+mod readiness_contention {
+    use super::*;
+    include!("readiness_contention.rs");
 }

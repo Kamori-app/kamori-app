@@ -465,3 +465,127 @@ async fn native_restore_rejects_account_or_endpoint_mismatch_without_replacing_c
     drop(lease);
     std::fs::remove_file(path).unwrap();
 }
+
+// Production HTTP timeout and full-operation ownership, with an accepted TCP
+// connection that deliberately never sends a response. No timeout override.
+#[tokio::test]
+async fn readiness_slow_http_retains_disposed_owner_and_bounds_queued_engines() {
+    // Other parallel tests intentionally use the same process-global lease.
+    // Give this measured three-engine schedule its own process, retaining the
+    // production coordinator and HTTP client rather than substituting a mutex.
+    const ISOLATED: &str = "KAMORI_ISOLATED_LEASE_MEASUREMENT";
+    if std::env::var_os(ISOLATED).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "frb_api::credential_tests::readiness_slow_http_retains_disposed_owner_and_bounds_queued_engines",
+                "--nocapture",
+            ])
+            .env(ISOLATED, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stdout.contains("running 1 test"), "{stdout} {stderr}");
+        assert!(output.status.success(), "{stdout} {stderr}");
+        assert!(
+            stdout.contains("READINESS native samples=1 timeout_ms=")
+                && stdout.contains("order=foreground,background leaked_permits=0"),
+            "child must finish every measured lease assertion: {stdout} {stderr}"
+        );
+        print!("{stdout}");
+        return;
+    }
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+    use std::time::Instant;
+    let owner = session().await;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let url = format!("http://{}/slow", listener.local_addr().unwrap());
+    let client = transport::mobile_http_client().unwrap();
+    let started = Instant::now();
+    let operation = tokio::spawn(with_mobile_session(owner.clone(), async move {
+        client.get(url).send().await
+    }));
+    let (socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let foreground = mobile_new_session_lease();
+    let background = mobile_new_session_lease();
+    let mut foreground_wait = Box::pin(mobile_acquire_session_lease(foreground.clone()));
+    let mut background_wait = Box::pin(mobile_acquire_session_lease(background.clone()));
+    let queued = Instant::now();
+    {
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            foreground_wait.as_mut().poll(&mut cx),
+            Poll::Pending
+        ));
+        assert!(matches!(
+            background_wait.as_mut().poll(&mut cx),
+            Poll::Pending
+        ));
+    }
+    drop(owner); // Native operation still owns its Arc and permit.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    {
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            foreground_wait.as_mut().poll(&mut cx),
+            Poll::Pending
+        ));
+        assert!(matches!(
+            background_wait.as_mut().poll(&mut cx),
+            Poll::Pending
+        ));
+    }
+    let error = tokio::time::timeout(Duration::from_secs(25), operation)
+        .await
+        .expect("existing 20s HTTP timeout must finish")
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error.is_timeout(),
+        "actual network boundary must time out: {error}"
+    );
+    let http_ms = started.elapsed().as_millis();
+    assert!(
+        http_ms >= 19_000,
+        "exercise real timeout, not an immediate socket error"
+    );
+    tokio::time::timeout(Duration::from_secs(1), &mut foreground_wait)
+        .await
+        .unwrap();
+    let foreground_ms = queued.elapsed().as_millis();
+    drop(foreground_wait);
+    {
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            background_wait.as_mut().poll(&mut cx),
+            Poll::Pending
+        ));
+    }
+    drop(foreground);
+    tokio::time::timeout(Duration::from_secs(1), &mut background_wait)
+        .await
+        .unwrap();
+    let background_ms = queued.elapsed().as_millis();
+    drop(background_wait);
+    drop(background);
+    drop(socket);
+    let final_owner = mobile_new_session_lease();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        mobile_acquire_session_lease(final_owner.clone()),
+    )
+    .await
+    .unwrap();
+    drop(final_owner);
+    println!(
+        "READINESS native samples=1 timeout_ms={http_ms} foreground_wait_ms={foreground_ms} background_wait_ms={background_ms} order=foreground,background leaked_permits=0"
+    );
+}

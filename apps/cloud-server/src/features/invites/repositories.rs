@@ -164,6 +164,21 @@ pub(crate) async fn redeem_invite_code_tx(
     actor_id: Uuid,
 ) -> anyhow::Result<RedeemInviteOutcome> {
     let mut tx = pool.begin().await?;
+    // Membership admission must finish before account deletion discovers its
+    // cleanup set, or wait until deletion commits and reject the missing actor.
+    // Acquire gate 913 before space/invite locks, preserving deletion's lock order.
+    crate::features::auth::repositories::lock_account_security_mutation(&mut tx, actor_id)
+        .await
+        .map_err(|error| anyhow!("account admission failed: {error:?}"))?;
+    let eligible: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL AND suspended_at IS NULL)",
+    )
+    .bind(actor_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !eligible {
+        return Ok(RedeemInviteOutcome::InvalidOrExpired);
+    }
     // Serialize redemption with key rotation and invite creation. Without the
     // space-row lock, a redemption can validate epoch N while a concurrent
     // rotation commits N+1, leaving a newly active member with a stale key.
