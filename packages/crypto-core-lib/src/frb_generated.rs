@@ -27,6 +27,7 @@
 
 // Section: imports
 
+use crate::frb_api::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
@@ -39,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -623992990;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1231785373;
 
 // Section: executor
 
@@ -265,6 +266,44 @@ fn wire__crate__frb_api__generate_x25519_keypair_impl(
         },
     )
 }
+fn wire__crate__frb_api__mobile_acquire_session_lease_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "mobile_acquire_session_lease",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, ()>(
+                    (move || async move {
+                        let output_ok = Ok::<_, ()>({
+                            crate::frb_api::mobile_acquire_session_lease(api_session).await;
+                        })?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__frb_api__mobile_clear_refresh_token_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -287,13 +326,13 @@ fn wire__crate__frb_api__mobile_clear_refresh_token_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
-                transform_result_sse::<_, ()>(
+                transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = Ok::<_, ()>({
-                            crate::frb_api::mobile_clear_refresh_token().await;
-                        })?;
+                        let output_ok =
+                            crate::frb_api::mobile_clear_refresh_token(api_session).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -324,6 +363,7 @@ fn wire__crate__frb_api__mobile_configure_sync_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_cloud_base_url = <String>::sse_decode(&mut deserializer);
             let api_sqlite_path = <String>::sse_decode(&mut deserializer);
             let api_access_token = <String>::sse_decode(&mut deserializer);
@@ -335,6 +375,7 @@ fn wire__crate__frb_api__mobile_configure_sync_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_configure_sync(
+                            api_session,
                             api_cloud_base_url,
                             api_sqlite_path,
                             api_access_token,
@@ -372,12 +413,14 @@ fn wire__crate__frb_api__mobile_create_collection_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_name = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = crate::frb_api::mobile_create_collection(api_name).await?;
+                        let output_ok =
+                            crate::frb_api::mobile_create_collection(api_session, api_name).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -408,6 +451,7 @@ fn wire__crate__frb_api__mobile_create_invite_code_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_collection_id = <String>::sse_decode(&mut deserializer);
             let api_collection_key = <[u8; 32]>::sse_decode(&mut deserializer);
             let api_ttl_minutes = <u32>::sse_decode(&mut deserializer);
@@ -416,6 +460,7 @@ fn wire__crate__frb_api__mobile_create_invite_code_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_create_invite_code(
+                            api_session,
                             api_collection_id,
                             api_collection_key,
                             api_ttl_minutes,
@@ -451,6 +496,7 @@ fn wire__crate__frb_api__mobile_delete_pim_item_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_space_id = <String>::sse_decode(&mut deserializer);
             let api_resource_id = <String>::sse_decode(&mut deserializer);
             let api_projection_id = <String>::sse_decode(&mut deserializer);
@@ -461,6 +507,7 @@ fn wire__crate__frb_api__mobile_delete_pim_item_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_delete_pim_item(
+                            api_session,
                             api_space_id,
                             api_resource_id,
                             api_projection_id,
@@ -498,13 +545,14 @@ fn wire__crate__frb_api__mobile_export_refresh_rotation_request_id_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
-                transform_result_sse::<_, ()>(
+                transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = Ok::<_, ()>(
-                            crate::frb_api::mobile_export_refresh_rotation_request_id().await,
-                        )?;
+                        let output_ok =
+                            crate::frb_api::mobile_export_refresh_rotation_request_id(api_session)
+                                .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -535,12 +583,13 @@ fn wire__crate__frb_api__mobile_export_refresh_token_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
-                transform_result_sse::<_, ()>(
+                transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok =
-                            Ok::<_, ()>(crate::frb_api::mobile_export_refresh_token().await)?;
+                            crate::frb_api::mobile_export_refresh_token(api_session).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -603,6 +652,7 @@ fn wire__crate__frb_api__mobile_import_refresh_token_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_refresh_token = <String>::sse_decode(&mut deserializer);
             let api_rotation_request_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -610,6 +660,7 @@ fn wire__crate__frb_api__mobile_import_refresh_token_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_import_refresh_token(
+                            api_session,
                             api_refresh_token,
                             api_rotation_request_id,
                         )
@@ -644,11 +695,12 @@ fn wire__crate__frb_api__mobile_list_pim_items_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = crate::frb_api::mobile_list_pim_items().await?;
+                        let output_ok = crate::frb_api::mobile_list_pim_items(api_session).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -679,19 +731,51 @@ fn wire__crate__frb_api__mobile_move_collection_to_trash_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_collection_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok =
-                            crate::frb_api::mobile_move_collection_to_trash(api_collection_id)
-                                .await?;
+                        let output_ok = crate::frb_api::mobile_move_collection_to_trash(
+                            api_session,
+                            api_collection_id,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
                 )
             }
+        },
+    )
+}
+fn wire__crate__frb_api__mobile_new_session_lease_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "mobile_new_session_lease",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Ok::<_, ()>(crate::frb_api::mobile_new_session_lease())?;
+                std::result::Result::Ok(output_ok)
+            })())
         },
     )
 }
@@ -717,6 +801,7 @@ fn wire__crate__frb_api__mobile_password_login_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_cloud_base_url = <String>::sse_decode(&mut deserializer);
             let api_username = <String>::sse_decode(&mut deserializer);
             let api_password = <String>::sse_decode(&mut deserializer);
@@ -726,6 +811,7 @@ fn wire__crate__frb_api__mobile_password_login_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_password_login(
+                            api_session,
                             api_cloud_base_url,
                             api_username,
                             api_password,
@@ -762,6 +848,7 @@ fn wire__crate__frb_api__mobile_provision_device_and_spaces_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_cloud_base_url = <String>::sse_decode(&mut deserializer);
             let api_access_token = <String>::sse_decode(&mut deserializer);
             let api_account_master_key = <[u8; 32]>::sse_decode(&mut deserializer);
@@ -774,6 +861,7 @@ fn wire__crate__frb_api__mobile_provision_device_and_spaces_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_provision_device_and_spaces(
+                            api_session,
                             api_cloud_base_url,
                             api_access_token,
                             api_account_master_key,
@@ -812,13 +900,15 @@ fn wire__crate__frb_api__mobile_redeem_invite_code_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_invite_code = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok =
-                            crate::frb_api::mobile_redeem_invite_code(api_invite_code).await?;
+                            crate::frb_api::mobile_redeem_invite_code(api_session, api_invite_code)
+                                .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -849,6 +939,7 @@ fn wire__crate__frb_api__mobile_register_collection_key_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_collection_id = <String>::sse_decode(&mut deserializer);
             let api_key_epoch = <u32>::sse_decode(&mut deserializer);
             let api_sync_start_seq = <u64>::sse_decode(&mut deserializer);
@@ -858,6 +949,7 @@ fn wire__crate__frb_api__mobile_register_collection_key_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_register_collection_key(
+                            api_session,
                             api_collection_id,
                             api_key_epoch,
                             api_sync_start_seq,
@@ -894,6 +986,7 @@ fn wire__crate__frb_api__mobile_revoke_refresh_session_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_cloud_base_url = <String>::sse_decode(&mut deserializer);
             let api_refresh_token = <String>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -901,6 +994,7 @@ fn wire__crate__frb_api__mobile_revoke_refresh_session_impl(
                 transform_result_sse::<_, String>(
                     (move || async move {
                         let output_ok = crate::frb_api::mobile_revoke_refresh_session(
+                            api_session,
                             api_cloud_base_url,
                             api_refresh_token,
                         )
@@ -935,11 +1029,12 @@ fn wire__crate__frb_api__mobile_sync_now_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = crate::frb_api::mobile_sync_now().await?;
+                        let output_ok = crate::frb_api::mobile_sync_now(api_session).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -1003,14 +1098,17 @@ fn wire__crate__frb_api__mobile_unregister_collection_key_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_collection_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok =
-                            crate::frb_api::mobile_unregister_collection_key(api_collection_id)
-                                .await?;
+                        let output_ok = crate::frb_api::mobile_unregister_collection_key(
+                            api_session,
+                            api_collection_id,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -1041,12 +1139,14 @@ fn wire__crate__frb_api__mobile_upsert_pim_item_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session = <RustOpaqueMoi<MobileSessionLease>>::sse_decode(&mut deserializer);
             let api_draft = <crate::frb_api::types::MobilePimDraft>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, String>(
                     (move || async move {
-                        let output_ok = crate::frb_api::mobile_upsert_pim_item(api_draft).await?;
+                        let output_ok =
+                            crate::frb_api::mobile_upsert_pim_item(api_session, api_draft).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -1056,7 +1156,19 @@ fn wire__crate__frb_api__mobile_upsert_pim_item_impl(
     )
 }
 
+// Section: related_funcs
+
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(MobileSessionLease);
+
 // Section: dart2rust
+
+impl SseDecode for RustOpaqueMoi<MobileSessionLease> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
 
 impl SseDecode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1671,6 +1783,13 @@ impl SseDecode for () {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {}
 }
 
+impl SseDecode for usize {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u64::<NativeEndian>().unwrap() as _
+    }
+}
+
 fn pde_ffi_dispatcher_primary_impl(
     func_id: i32,
     port: flutter_rust_bridge::for_generated::MessagePort,
@@ -1698,82 +1817,90 @@ fn pde_ffi_dispatcher_primary_impl(
         }
         5 => wire__crate__frb_api__encrypt_payload_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__frb_api__generate_x25519_keypair_impl(port, ptr, rust_vec_len, data_len),
-        7 => {
+        7 => wire__crate__frb_api__mobile_acquire_session_lease_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        8 => {
             wire__crate__frb_api__mobile_clear_refresh_token_impl(port, ptr, rust_vec_len, data_len)
         }
-        8 => wire__crate__frb_api__mobile_configure_sync_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__frb_api__mobile_create_collection_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__frb_api__mobile_configure_sync_impl(port, ptr, rust_vec_len, data_len),
         10 => {
+            wire__crate__frb_api__mobile_create_collection_impl(port, ptr, rust_vec_len, data_len)
+        }
+        11 => {
             wire__crate__frb_api__mobile_create_invite_code_impl(port, ptr, rust_vec_len, data_len)
         }
-        11 => wire__crate__frb_api__mobile_delete_pim_item_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__frb_api__mobile_export_refresh_rotation_request_id_impl(
+        12 => wire__crate__frb_api__mobile_delete_pim_item_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__frb_api__mobile_export_refresh_rotation_request_id_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        13 => wire__crate__frb_api__mobile_export_refresh_token_impl(
+        14 => wire__crate__frb_api__mobile_export_refresh_token_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__frb_api__mobile_generate_device_secrets_impl(
+        15 => wire__crate__frb_api__mobile_generate_device_secrets_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__frb_api__mobile_import_refresh_token_impl(
+        16 => wire__crate__frb_api__mobile_import_refresh_token_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => wire__crate__frb_api__mobile_list_pim_items_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__frb_api__mobile_move_collection_to_trash_impl(
+        17 => wire__crate__frb_api__mobile_list_pim_items_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__frb_api__mobile_move_collection_to_trash_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__frb_api__mobile_password_login_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__frb_api__mobile_provision_device_and_spaces_impl(
+        20 => wire__crate__frb_api__mobile_password_login_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__frb_api__mobile_provision_device_and_spaces_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        20 => {
+        22 => {
             wire__crate__frb_api__mobile_redeem_invite_code_impl(port, ptr, rust_vec_len, data_len)
         }
-        21 => wire__crate__frb_api__mobile_register_collection_key_impl(
+        23 => wire__crate__frb_api__mobile_register_collection_key_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => wire__crate__frb_api__mobile_revoke_refresh_session_impl(
+        24 => wire__crate__frb_api__mobile_revoke_refresh_session_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__frb_api__mobile_sync_now_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__frb_api__types__mobile_sync_runtime_default_impl(
+        25 => wire__crate__frb_api__mobile_sync_now_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__frb_api__types__mobile_sync_runtime_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__frb_api__mobile_unregister_collection_key_impl(
+        27 => wire__crate__frb_api__mobile_unregister_collection_key_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__frb_api__mobile_upsert_pim_item_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__frb_api__mobile_upsert_pim_item_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1786,6 +1913,7 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
+        19 => wire__crate__frb_api__mobile_new_session_lease_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2232,6 +2360,15 @@ impl flutter_rust_bridge::IntoIntoDart<crate::frb_api::types::MobileSyncRuntime>
     }
 }
 
+impl SseEncode for RustOpaqueMoi<MobileSessionLease> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
 impl SseEncode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2653,6 +2790,16 @@ impl SseEncode for () {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {}
 }
 
+impl SseEncode for usize {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer
+            .cursor
+            .write_u64::<NativeEndian>(self as _)
+            .unwrap();
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 mod io {
     // This file is automatically generated, so please do not edit it.
@@ -2661,6 +2808,7 @@ mod io {
     // Section: imports
 
     use super::*;
+    use crate::frb_api::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -2670,6 +2818,20 @@ mod io {
     // Section: boilerplate
 
     flutter_rust_bridge::frb_generated_boilerplate_io!();
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_dav_bridge_mobile_rust_arc_increment_strong_count_RustOpaque_MobileSessionLease(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<MobileSessionLease>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_dav_bridge_mobile_rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<MobileSessionLease>::decrement_strong_count(ptr as _);
+    }
 }
 #[cfg(not(target_family = "wasm"))]
 pub use io::*;
@@ -2683,6 +2845,7 @@ mod web {
     // Section: imports
 
     use super::*;
+    use crate::frb_api::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -2694,6 +2857,20 @@ mod web {
     // Section: boilerplate
 
     flutter_rust_bridge::frb_generated_boilerplate_web!();
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_MobileSessionLease(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<MobileSessionLease>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<MobileSessionLease>::decrement_strong_count(ptr as _);
+    }
 }
 #[cfg(target_family = "wasm")]
 pub use web::*;

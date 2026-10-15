@@ -546,6 +546,11 @@ export const cloudApi = {
   },
 
   refresh: (baseUrl: string): Promise<RefreshResponse> => {
+    if (typeof navigator === "undefined" || !navigator.locks) {
+      return Promise.reject(new Error(
+        "Safe session refresh requires browser cross-tab coordination (Web Locks).",
+      ));
+    }
     const scope = new URL(baseUrl).origin;
     const existing = refreshInFlight.get(scope);
     if (existing) return existing;
@@ -583,9 +588,8 @@ export const cloudApi = {
         throw error;
       }
     };
-    const pending = (typeof navigator !== "undefined" && navigator.locks
-      ? navigator.locks.request(`kamori-refresh:${scope}`, rotate)
-      : rotate()).finally(() => refreshInFlight.delete(scope));
+    const pending = navigator.locks.request(`kamori-refresh:${scope}`, rotate)
+      .finally(() => refreshInFlight.delete(scope));
     refreshInFlight.set(scope, pending);
     return pending;
   },

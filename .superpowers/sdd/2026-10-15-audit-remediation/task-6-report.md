@@ -56,3 +56,48 @@ Web cross-tab serialization uses Web Locks when present; browsers without it ret
 - this report
 
 Self-review checked matching-account guards before hydration and after the network await, credential-before-projection ordering, opt-ins read after encrypted sync, no calls to projection enable/permission request from the runner, retained revocation queue, bounded retry semantics, native/Dart task identifier agreement, and Android's independent scheduling path. Independent code review and final Android/browser acceptance are owned by the controller.
+
+## Fixround 1 — review remediation
+
+Base: `08a996193bddd83f29e89d0c72de06e39d6fc0e9`. Review: `/private/tmp/kamori-audit-20261015/task-6-review.md`. All three Important findings and the Minor diagnostic-capture finding were reproduced and addressed. The following supersedes the original no-Web-Locks fallback and read-before-replace limitations above. The controller explicitly authorized the narrow Rust/FRB extension and regenerated bindings required for cross-engine coordination; no dependencies were added.
+
+### Corrected behavior and coordination contract
+
+- Web refresh fails closed with a non-401 coordination error when Web Locks are unavailable, before bootstrap, request-ID allocation, or refresh HTTP. Existing authentication is preserved. A regression imports two independent production clients and verifies neither sends a request. Supported browsers retain the existing durable per-generation IDs and genuine revocation 401 behavior.
+- Mobile foreground operations and the entire background hydration → encrypted sync → credential commit → projection sequence acquire one process-global Rust Tokio mutex. This covers the shared native runtime as well as the storage/projection intervals identified by review. Every public controller operation acquires independently; nested implementation helpers are private and unlocked. A second concurrent call on the same controller/bridge queues rather than treating the active lease as reentrancy.
+- The production coordinator is a FRB opaque lease containing an `OwnedMutexGuard` in a once-initialized cell. Dart first creates the empty handle synchronously, attaching its normal FRB NativeFinalizer, then awaits acquisition into that existing handle. This avoids returning a newly acquired opaque resource to an engine that has already shut down. An empty handle cannot execute stateful native operations. Each stateful Rust async API owns a clone of the opaque lease for the complete native Future; Dart `finally` disposes only its own reference. The guard cannot be manually taken/unlocked while a native operation still holds it. Disposal or normal engine teardown therefore cannot expose shared native state while an already-started FRB operation is running. Dropping an owner while acquisition waits also eventually releases the acquired guard without orphaning it.
+- Inspected the pinned Workmanager engines and app manifests: Android creates a `FlutterEngine(applicationContext)` and has no separate `android:process` override; iOS creates another Flutter engine in the same process. These engines share the native library's process-global mutex. The Dart-only queue exists solely in the debug mock/test boundary and is not the production cross-isolate mechanism.
+- Accepted UX tradeoff: logout, account switch, and disable actions can wait for an active network/projection operation. After those awaited actions finish, the old coordinated operation has finished. No timeout releases a lease around an unfinished Future.
+- Scheduling errors now append to existing offline/revocation warnings. The expected fake-provider error is captured and asserted rather than printing a caught stack in successful test output.
+
+### RED → GREEN and lifecycle regression evidence
+
+- Two-client/no-Web-Locks production coordination regression: RED **5 pass / 1 fail**, observing `Session expired. Sign in again.` instead of a coordination error. GREEN **6 pass**, no emitted network request and no auth-clear callback.
+- Queued revocation plus offline provisioning plus scheduling failure: RED lost the revocation warning (`Expected contains revocation`, actual only scheduling warning). GREEN retains all three warnings, the offline snapshot, and the durable revoke queue.
+- Twelve deterministic production runner/controller races: pause after snapshot read, after credential read, or immediately before projection; independently invoke logout, account switch, background disable, or collection disable. RED **all 12 failed** because the foreground action completed during the paused old operation (`Expected false, actual true`). GREEN all 12 queue the mutation and verify final account/token/preferences plus no old provider work after action completion. A separate same-controller sync/logout test proves independent concurrent calls do not bypass acquisition.
+- Rust lease scaffolding without exclusion: RED **2 behavioral failures** at `Poll::Pending` assertions. GREEN four tests prove mutual exclusion/drop release, in-flight native retention after Dart-owner disposal, owner drop while acquisition waits, and rejection of unacquired handles before polling the operation. The retention regression executes the production `with_mobile_session` helper. Initial Rust opaque-path/trait setup errors were compilation setup issues, not behavioral RED evidence.
+- Generated encode/decode ownership was inspected: Dart encodes a cloned opaque reference and the Rust async wrapper owns it through completion. All stateful native APIs carry the lease; independent pure crypto/device-key generation remains outside it.
+
+### Final affected gates
+
+Commands ran from the worktree. Bun was pinned to 1.3.14 as above. Rust commands used `PATH=/Users/yujin/.cargo/bin:$PATH CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197 rustup run 1.97.1 ...`; actual compiler was `rustc 1.97.1 (8bab26f4f 2026-07-14)` and Clippy was 0.1.97. Codegen used the installed `flutter_rust_bridge_codegen` under that toolchain and committed its output.
+
+- `bun run --filter web-frontend check`: exit 0, **0 errors / 0 warnings**; `task6-fixround1-web-check.log`.
+- `bun run --filter web-frontend test:unit`: exit 0, **66 passed / 0 failed**, 145 expectations, 11 files; `task6-fixround1-web-unit.log`.
+- `bun run --filter web-frontend build`: exit 0; `task6-fixround1-web-build.log`. Existing empty `index-server` / `env` chunk notices remain.
+- `cargo test -p crypto-core-lib --features frb`: exit 0, **69 unit + 14 DAV conformance tests passed**, 0 doc tests; `task6-fixround1-rust-frb.log`.
+- `cargo clippy -p crypto-core-lib --features frb --all-targets -- -D warnings`: exit 0; `task6-fixround1-clippy.log`.
+- `cargo fmt --all -- --check` and explicit `rustfmt --edition 2024 --check packages/crypto-core-lib/src/frb_api.rs` (the latter is included source): exit 0. Generated import ordering was formatted after codegen.
+- `flutter analyze --no-pub`: exit 0, **No issues found**; `task6-fixround1-flutter-analyze.log`. An initial analyzer-only run found eight test brace lint findings; corrected before the full suite.
+- `flutter test --no-pub --coverage`: exit 0, **68 tests passed**; `task6-fixround1-flutter-tests.log`. This was the one full Flutter suite in this fixround. Updated raw LCOV copied to `/private/tmp/kamori-audit-20261015/flutter-final.lcov`; this replaces the original report's raw artifact/counts. Normalized metrics remain controller-owned.
+- `git diff --check`: exit 0.
+
+All named logs are under `/private/tmp/kamori-audit-20261015/`. No Android rebuild, browser deployment acceptance, or iOS compilation was duplicated; those remain controller/external gates.
+
+### Scope and evidence limits
+
+Changed in this fixround: the web API and refresh coordination test; mobile controller, background runner, Rust bridge interface/FRB implementation/debug mock, and controller tests; Rust `frb_api.rs`; generated Rust binding and four generated Dart binding files; this report. Controller-owned plan and coverage-metric files are excluded from this commit.
+
+The Rust lifecycle guarantee applies to FRB native in-flight operations retaining the lease. Third-party Contacts/Calendar platform calls do not carry that opaque lease. A provider operation already submitted when its Flutter engine is torn down may finish independently; these tests do not establish abnormal-engine provider atomicity, remote wipe, or an OS transaction spanning plugins. SPEC §9 permits interrupted projection followed by reconciliation, and the controller accepted this precise evidence boundary. Normal awaited operations are serialized and tested against completed foreground mutations. The channel CRUD regression still proves Contacts only; native Calendar CRUD and real provider/scheduler delivery remain physical-device gates. iOS SDK compilation is still blocked by the unaccepted Xcode license. The existing scheduler admission check proves pending-request admission, not delivery.
+
+Self-review additionally checked no reentrant active-bridge bypass, every controller public async shared-state entrypoint, finally-based disposal on early exits/errors, retained native ownership across asynchronous completion, abandoned queued acquisition, absence of new permission prompts, and absence of shared-store mutations outside the coordinated production entrypoints.

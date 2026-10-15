@@ -126,3 +126,31 @@ test("genuinely revoked refresh still clears authentication", async () => {
   })).rejects.toThrow("Session expired");
   expect(cleared).toBe(true);
 });
+
+test('independent tabs without Web Locks fail before bootstrap and preserve authentication', async () => {
+  const first = (await import('../api/cloud.ts?no-locks-first')).cloudApi;
+  const second = (await import('../api/cloud.ts?no-locks-second')).cloudApi;
+  expect(first).not.toBe(second);
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
+  const emitted = [];
+  globalThis.fetch = async (url) => {
+    emitted.push(String(url));
+    return new Response(encode(String(url).endsWith('/auth/csrf')
+      ? { csrf_token: 'shared-A' }
+      : { csrf_token: 'shared-B', access_token: 'rotated' }), { status: 200 });
+  };
+  let cleared = 0;
+  const results = await Promise.allSettled([first, second].map(client => runWithAccessRefreshRetry({
+    getAccessToken: () => 'current-access',
+    operation: async () => { throw { status: 401 }; },
+    refresh: () => client.refresh('https://shared.example'),
+    onRefreshUnauthorized: () => { cleared++; },
+  })));
+  expect(results.map(result => result.status)).toEqual(['rejected', 'rejected']);
+  for (const result of results) {
+    expect(result.reason.message).toContain('coordination');
+    expect(result.reason.status).not.toBe(401);
+  }
+  expect(cleared).toBe(0);
+  expect(emitted).toEqual([]);
+});

@@ -21,6 +21,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     required super.portManager,
   });
 
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_MobileSessionLeasePtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_MobileSessionLeasePtr;
+
+  @protected
+  MobileSessionLease dco_decode_RustOpaque_MobileSessionLease(dynamic raw);
+
   @protected
   String dco_decode_String(dynamic raw);
 
@@ -160,6 +167,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void dco_decode_unit(dynamic raw);
+
+  @protected
+  BigInt dco_decode_usize(dynamic raw);
+
+  @protected
+  MobileSessionLease sse_decode_RustOpaque_MobileSessionLease(
+      SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -321,6 +335,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_usize(SseDeserializer deserializer);
+
+  @protected
+  void sse_encode_RustOpaque_MobileSessionLease(
+      MobileSessionLease self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -490,6 +511,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_usize(BigInt self, SseSerializer serializer);
 }
 
 // Section: wire_class
@@ -505,4 +529,34 @@ class RustLibWire implements BaseWire {
   /// The symbols are looked up in [dynamicLibrary].
   RustLibWire(ffi.DynamicLibrary dynamicLibrary)
       : _lookup = dynamicLibrary.lookup;
+
+  void rust_arc_increment_strong_count_RustOpaque_MobileSessionLease(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_MobileSessionLease(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_MobileSessionLeasePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_dav_bridge_mobile_rust_arc_increment_strong_count_RustOpaque_MobileSessionLease');
+  late final _rust_arc_increment_strong_count_RustOpaque_MobileSessionLease =
+      _rust_arc_increment_strong_count_RustOpaque_MobileSessionLeasePtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_MobileSessionLeasePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_dav_bridge_mobile_rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease');
+  late final _rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease =
+      _rust_arc_decrement_strong_count_RustOpaque_MobileSessionLeasePtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 }

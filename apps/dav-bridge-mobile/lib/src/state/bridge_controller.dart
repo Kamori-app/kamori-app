@@ -78,7 +78,19 @@ class BridgeController extends Notifier<BridgeState> {
   @override
   BridgeState build() => BridgeState.initial();
 
-  Future<void> restorePersistedSession() async {
+  Future<T> _withSession<T>(Future<T> Function() operation) async {
+    final lease = await _rustBridge.acquireSessionLease();
+    try {
+      return await operation();
+    } finally {
+      lease.release();
+    }
+  }
+
+  Future<void> restorePersistedSession() =>
+      _withSession(() => _restorePersistedSessionUnlocked());
+
+  Future<void> _restorePersistedSessionUnlocked() async {
     try {
       try {
         await _retryPendingRevocation();
@@ -147,7 +159,10 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Updates cloud backend base URL for next bridge start.
-  Future<void> updateCloudBaseUrl(String value) async {
+  Future<void> updateCloudBaseUrl(String value) =>
+      _withSession(() => _updateCloudBaseUrlUnlocked(value));
+
+  Future<void> _updateCloudBaseUrlUnlocked(String value) async {
     final normalized = _validatedCloudBaseUrl(value);
     if (normalized == null) {
       state = state.copyWith(
@@ -168,6 +183,14 @@ class BridgeController extends Notifier<BridgeState> {
 
   /// Performs password login and configures offline sync on success.
   Future<void> loginWithPassword({
+    required String username,
+    required String password,
+    String? totpCode,
+  }) =>
+      _withSession(() => _loginWithPasswordUnlocked(
+          username: username, password: password, totpCode: totpCode));
+
+  Future<void> _loginWithPasswordUnlocked({
     required String username,
     required String password,
     String? totpCode,
@@ -227,7 +250,9 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Clears the authenticated session and local token state.
-  Future<void> logout() async {
+  Future<void> logout() => _withSession(() => _logoutUnlocked());
+
+  Future<void> _logoutUnlocked() async {
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       String? serverWarning;
@@ -282,7 +307,9 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Triggers immediate manual sync.
-  Future<void> syncNow() async {
+  Future<void> syncNow() => _withSession(() => _syncNowUnlocked());
+
+  Future<void> _syncNowUnlocked() async {
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       await _hydrateRefreshTokenIntoRuntime();
@@ -302,7 +329,9 @@ class BridgeController extends Notifier<BridgeState> {
     }
   }
 
-  Future<void> loadPimItems() async {
+  Future<void> loadPimItems() => _withSession(() => _loadPimItemsUnlocked());
+
+  Future<void> _loadPimItemsUnlocked() async {
     try {
       await _reloadPimItems();
     } catch (error) {
@@ -314,7 +343,10 @@ class BridgeController extends Notifier<BridgeState> {
     state = state.copyWith(clearError: true);
   }
 
-  Future<bool> savePimItem(PimDraft draft) async {
+  Future<bool> savePimItem(PimDraft draft) =>
+      _withSession(() => _savePimItemUnlocked(draft));
+
+  Future<bool> _savePimItemUnlocked(PimDraft draft) async {
     if (!_canWriteSpace(draft.spaceId)) {
       state = state.copyWith(
         error: 'This space is read-only. Ask an owner for editor access.',
@@ -344,7 +376,10 @@ class BridgeController extends Notifier<BridgeState> {
     }
   }
 
-  Future<void> deletePimItem(PimItem item) async {
+  Future<void> deletePimItem(PimItem item) =>
+      _withSession(() => _deletePimItemUnlocked(item));
+
+  Future<void> _deletePimItemUnlocked(PimItem item) async {
     if (!_canWriteSpace(item.spaceId)) {
       state = state.copyWith(
         error: 'This space is read-only. Ask an owner for editor access.',
@@ -382,7 +417,10 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Creates a server-backed encrypted security space.
-  Future<void> createCollection(String name) async {
+  Future<void> createCollection(String name) =>
+      _withSession(() => _createCollectionUnlocked(name));
+
+  Future<void> _createCollectionUnlocked(String name) async {
     final collectionName = name.trim();
     if (collectionName.isEmpty) {
       state = state.copyWith(error: 'Collection name is required.');
@@ -411,7 +449,10 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Moves an owned collection to the server-side 30-day trash.
-  Future<void> deleteCollection(String collectionId) async {
+  Future<void> deleteCollection(String collectionId) =>
+      _withSession(() => _deleteCollectionUnlocked(collectionId));
+
+  Future<void> _deleteCollectionUnlocked(String collectionId) async {
     final updated = state.collections
         .where((collection) => collection.id != collectionId)
         .toList(growable: false);
@@ -478,6 +519,13 @@ class BridgeController extends Notifier<BridgeState> {
   Future<IssuedInviteCode?> createInviteCode({
     required String collectionId,
     required int ttlMinutes,
+  }) =>
+      _withSession(() => _createInviteCodeUnlocked(
+          collectionId: collectionId, ttlMinutes: ttlMinutes));
+
+  Future<IssuedInviteCode?> _createInviteCodeUnlocked({
+    required String collectionId,
+    required int ttlMinutes,
   }) async {
     CollectionEntry? collection;
     for (final item in state.collections) {
@@ -534,7 +582,10 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Redeems an invite code and stores the collection key locally.
-  Future<RedeemedInvite?> redeemInviteCode(String inviteCode) async {
+  Future<RedeemedInvite?> redeemInviteCode(String inviteCode) =>
+      _withSession(() => _redeemInviteCodeUnlocked(inviteCode));
+
+  Future<RedeemedInvite?> _redeemInviteCodeUnlocked(String inviteCode) async {
     final trimmed = inviteCode.trim();
     if (trimmed.isEmpty) {
       state = state.copyWith(error: 'Invite code is required.');
@@ -594,7 +645,10 @@ class BridgeController extends Notifier<BridgeState> {
       // Scheduling is independent of authentication and offline cache access.
       state = state.copyWith(
         backgroundSyncEnabled: false,
-        error: 'Failed to schedule background sync: $error',
+        error: [
+          if (state.error != null) state.error,
+          'Failed to schedule background sync: $error',
+        ].join('\n'),
       );
       try {
         await _persistSyncRuntime();
@@ -608,7 +662,10 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Enables/disables periodic background sync scheduling.
-  Future<void> setBackgroundSyncEnabled(bool enabled) async {
+  Future<void> setBackgroundSyncEnabled(bool enabled) =>
+      _withSession(() => _setBackgroundSyncEnabledUnlocked(enabled));
+
+  Future<void> _setBackgroundSyncEnabledUnlocked(bool enabled) async {
     state = state.copyWith(backgroundSyncEnabled: enabled, clearError: true);
     if (!state.isAuthenticated) {
       return;
@@ -627,6 +684,15 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   Future<void> setCalendarProjectionEnabled(
+    String collectionId,
+    bool enabled, {
+    bool removeProjectedData = false,
+  }) =>
+      _withSession(() => _setCalendarProjectionEnabledUnlocked(
+          collectionId, enabled,
+          removeProjectedData: removeProjectedData));
+
+  Future<void> _setCalendarProjectionEnabledUnlocked(
     String collectionId,
     bool enabled, {
     bool removeProjectedData = false,
@@ -674,6 +740,15 @@ class BridgeController extends Notifier<BridgeState> {
     String collectionId,
     bool enabled, {
     bool removeProjectedData = false,
+  }) =>
+      _withSession(() => _setContactsProjectionEnabledUnlocked(
+          collectionId, enabled,
+          removeProjectedData: removeProjectedData));
+
+  Future<void> _setContactsProjectionEnabledUnlocked(
+    String collectionId,
+    bool enabled, {
+    bool removeProjectedData = false,
   }) async {
     if (!state.collections.any((collection) => collection.id == collectionId)) {
       state = state.copyWith(error: 'Collection not found.');
@@ -715,7 +790,11 @@ class BridgeController extends Notifier<BridgeState> {
   }
 
   /// Persists rotated credentials across app lifecycle transitions.
-  Future<void> handleLifecycleState(AppLifecycleState lifecycleState) async {
+  Future<void> handleLifecycleState(AppLifecycleState lifecycleState) =>
+      _withSession(() => _handleLifecycleStateUnlocked(lifecycleState));
+
+  Future<void> _handleLifecycleStateUnlocked(
+      AppLifecycleState lifecycleState) async {
     if (!state.isAuthenticated) {
       return;
     }

@@ -35,7 +35,11 @@ Future<bool> runBackgroundSync({
   required RefreshTokenStorage tokenStorage,
   required SystemProjectionService projection,
 }) async {
+  SessionLease? lease;
   try {
+    // The Rust runtime is process-global. Retain the lease through native
+    // network work, secure-store commit and OS projection, not just the check.
+    lease = await bridge.acquireSessionLease();
     final snapshot = await runtimeStorage.read();
     if (snapshot == null || !snapshot.backgroundSyncEnabled) {
       return true;
@@ -130,6 +134,8 @@ Future<bool> runBackgroundSync({
     debugPrint('background sync failed: $error');
     debugPrintStack(stackTrace: stackTrace);
     return false;
+  } finally {
+    lease?.release();
   }
 }
 
