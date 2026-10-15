@@ -273,6 +273,68 @@ test("concurrent tabs keep edits isolated while one tab switches account", async
   expect((await snapshot(page)).state.items.map((item: any) => item.title).sort()).toEqual(["Alice private task", "Alice second task"]);
 });
 
+test("a save waiting on the data-plane lock cannot cross an account switch", async ({ page, context }) => {
+  await open(page); await start(page); await save(page, "Alice committed before switch");
+  const committed = await snapshot(page);
+  expect(committed.queue).toHaveLength(1);
+  // Reopen to leave only the admitted save in the next lock's wait queue.
+  await open(page); await start(page);
+  const blocker = await context.newPage(); await open(blocker);
+  await blocker.evaluate(() => {
+    (window as any).blockHeld = false;
+    void navigator.locks.request("kamori-web-data-plane-v1", async () => {
+      (window as any).blockHeld = true;
+      await new Promise<void>(resolve => { (window as any).releaseBlock = resolve; });
+    });
+  });
+  await expect.poll(() => blocker.evaluate(() => (window as any).blockHeld)).toBe(true);
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New task" });
+  await editor.getByRole("textbox", { name: "Title" }).fill("Alice pending at account switch");
+  await editor.getByRole("button", { name: "Save task" }).click();
+  await expect.poll(() => blocker.evaluate(async () => (await navigator.locks.query()).pending?.length)).toBe(1);
+  // Same shell lifecycle as normal sign-out/sign-in: destroy, lock, unlock, mount.
+  await page.evaluate(args => (window as any).durability.start(args), { endpoint: `${origin}/pim`, account: "bob", space });
+  await blocker.evaluate(() => (window as any).releaseBlock());
+  await expect.poll(() => page.evaluate(() => (window as any).durability.sync.phase)).toBe("error");
+  const bob = await snapshot(page);
+  expect(bob.state.items).toEqual([]);
+  expect(bob.state.operations).toEqual([]);
+  expect(bob.queue).toEqual([]);
+  await expect(page.getByText("Alice pending at account switch", { exact: true })).not.toBeVisible();
+  await start(page, "alice");
+  expect((await snapshot(page)).state).toEqual(committed.state);
+  expect((await snapshot(page)).queue).toEqual(committed.queue);
+});
+
+test("locking and reopening the same vault invalidates a waiting save", async ({ page, context }) => {
+  await open(page); await start(page);
+  const before = await snapshot(page);
+  const blocker = await context.newPage(); await open(blocker);
+  await blocker.evaluate(() => {
+    (window as any).blockHeld = false;
+    void navigator.locks.request("kamori-web-data-plane-v1", async () => {
+      (window as any).blockHeld = true;
+      await new Promise<void>(resolve => { (window as any).releaseBlock = resolve; });
+    });
+  });
+  await expect.poll(() => blocker.evaluate(() => (window as any).blockHeld)).toBe(true);
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New task" });
+  await editor.getByRole("textbox", { name: "Title" }).fill("Old unlock lifetime task");
+  await editor.getByRole("button", { name: "Save task" }).click();
+  await expect.poll(() => blocker.evaluate(async () => (await navigator.locks.query()).pending?.length)).toBe(1);
+  await page.evaluate(async endpoint => {
+    const vault = (window as any).durability.vault;
+    vault.lockWebVault();
+    await vault.unlockOrCreateWebVault(endpoint, "alice", new Uint8Array(32).fill(7));
+  }, `${origin}/pim`);
+  await blocker.evaluate(() => (window as any).releaseBlock());
+  await expect(page.getByRole("button", { name: "Saving…", exact: true })).toHaveCount(0);
+  expect((await snapshot(page)).state).toEqual(before.state);
+  expect((await snapshot(page)).queue).toEqual(before.queue);
+});
+
 test("lost sync acknowledgement is retried idempotently through the production controller", async ({ page }) => {
   await open(page); await start(page);
   online = true; loseAppend = true;

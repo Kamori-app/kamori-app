@@ -252,6 +252,13 @@ const requireMasterKey = (): Uint8Array => {
   return activeMasterKey;
 };
 
+/** Captures this unlock lifetime, including same-account lock/reopen changes. */
+export const captureWebVaultLifetime = (): (() => boolean) => {
+  const masterKey = requireMasterKey();
+  const scope = activeAccountScope;
+  return () => activeMasterKey === masterKey && activeAccountScope === scope;
+};
+
 const normalizeIdentity = (value: unknown): WebDeviceIdentity => {
   const identity = value as WebDeviceIdentity;
   for (const field of [

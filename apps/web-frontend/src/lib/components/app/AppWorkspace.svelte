@@ -17,6 +17,7 @@
     import { appState, type SpaceEntry } from "$lib/stores/app";
     import {
         getActiveWebDevice,
+        captureWebVaultLifetime,
         commitLocalPimOperation,
         listQueuedOperationEnvelopes,
         loadMaterializedPimState,
@@ -140,6 +141,7 @@
     let loadingAction = "";
     let deviceAuthorizationCode = "";
     let dataPlaneTail: Promise<void> = Promise.resolve();
+    let workspaceDestroyed = false;
 
     let deleteModalOpen = false;
     let pendingDeleteCollectionId = "";
@@ -179,9 +181,24 @@
         loadingAction = "";
     };
 
+    const captureWorkspaceLifetime = (): (() => boolean) => {
+        const isVaultCurrent = captureWebVaultLifetime();
+        const username = $appState.currentUsername;
+        const endpoint = $appState.cloudBaseUrl;
+        return () => !workspaceDestroyed && isVaultCurrent() &&
+            $appState.currentUsername === username &&
+            $appState.cloudBaseUrl === endpoint;
+    };
+
     async function runDataPlaneExclusive<T>(
         operation: () => Promise<T>,
     ): Promise<T> {
+        const isCurrent = captureWorkspaceLifetime();
+        const requireCurrent = () => {
+            if (!isCurrent()) {
+                throw new Error("The workspace changed. Reopen the editor and try again.");
+            }
+        };
         const previous = dataPlaneTail;
         let release = () => {};
         dataPlaneTail = new Promise<void>((resolve) => {
@@ -189,15 +206,18 @@
         });
         await previous;
         const runWithCommittedState = async () => {
+            requireCurrent();
             // Another tab may have committed while this tab waited for the lock.
             // Rebase on its durable state before applying this user's operation.
             const materialized = await loadMaterializedPimState();
+            requireCurrent();
             pimItems = materialized.items;
             operationStates = materialized.operations;
             syncCursors = materialized.cursors;
             return operation();
         };
         try {
+            requireCurrent();
             if (navigator.locks) {
                 return await navigator.locks.request(
                     "kamori-web-data-plane-v1",
@@ -2069,6 +2089,7 @@
     }
 
     onMount(() => {
+        const isCurrent = captureWorkspaceLifetime();
         deviceAuthorizationCode =
             new URLSearchParams(window.location.search)
                 .get("device_code")
@@ -2077,23 +2098,29 @@
         void (async () => {
             try {
                 const materialized = await loadMaterializedPimState();
+                if (!isCurrent()) return;
                 pimItems = materialized.items;
                 operationStates = materialized.operations;
                 syncCursors = materialized.cursors;
             } catch (error) {
                 const message =
                     error instanceof Error ? error.message : String(error);
-                setNotice(`${localized("Encrypted offline state could not be opened", "Не удалось открыть зашифрованные офлайн-данные")}: ${message}`);
+                if (isCurrent()) {
+                    setNotice(`${localized("Encrypted offline state could not be opened", "Не удалось открыть зашифрованные офлайн-данные")}: ${message}`);
+                }
             } finally {
-                stopManualSyncRegistration = registerManualSync(() => {
-                    void syncNow();
-                });
-                autoSync.start(window, document);
+                if (isCurrent()) {
+                    stopManualSyncRegistration = registerManualSync(() => {
+                        void syncNow();
+                    });
+                    autoSync.start(window, document);
+                }
             }
         })();
     });
 
     onDestroy(() => {
+        workspaceDestroyed = true;
         autoSync.stop();
         stopManualSyncRegistration();
     });
