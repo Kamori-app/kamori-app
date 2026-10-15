@@ -1,5 +1,8 @@
 #![cfg(all(feature = "local-bridge", feature = "http-reqwest"))]
 
+use crypto_core_lib::operation_envelope::OperationEnvelopeV1;
+use crypto_core_lib::pim::{PimOperationV1, PimResourceKind, PimValue};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crypto_core_lib::local_bridge_runner::{
@@ -565,4 +568,235 @@ fn cleanup_database(database_path: &Path) {
             );
         }
     }
+}
+
+fn queued_operations(bridge: &TestBridge) -> Vec<OperationEnvelopeV1> {
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT envelope FROM operation_outbox ORDER BY rowid")
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .map(|row| rmp_serde::from_slice(&row.unwrap()).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn preserves_first_party_streams_and_kinds_through_conditional_dav_writes() {
+    let bridge = TestBridge::start().await;
+    for (kind, route, suffix) in [
+        (PimResourceKind::Task, "caldav", "ics"),
+        (PimResourceKind::CalendarEvent, "caldav", "ics"),
+        (PimResourceKind::Contact, "carddav", "vcf"),
+    ] {
+        let stream = Uuid::new_v4();
+        let mut fields = BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]);
+        if kind == PimResourceKind::CalendarEvent {
+            fields.insert(
+                "starts_at".into(),
+                PimValue::Record(BTreeMap::from([
+                    ("kind".into(), "utc".into()),
+                    ("utc".into(), "20261015T120000Z".into()),
+                ])),
+            );
+        }
+        let original = bridge
+            .runner
+            .upsert_pim_item(bridge.space_id, stream, kind, fields)
+            .await
+            .unwrap();
+        let path = format!("/{route}/{}/{stream}.{suffix}", bridge.space_id);
+        let get = bridge.send("GET", &path).await;
+        assert_eq!(get.status(), StatusCode::OK);
+        let etag = header_string(&get, ETAG);
+        let updated_payload = get.text().await.unwrap().replace("Original", "Edited");
+        let before = queued_operations(&bridge).len();
+        let update = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(updated_payload.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            update.status(),
+            StatusCode::NO_CONTENT,
+            "first-party {kind:?} update"
+        );
+        let next_etag = header_string(&update, ETAG);
+        assert_eq!(
+            bridge.send("GET", &path).await.text().await.unwrap(),
+            updated_payload
+        );
+        let queued = queued_operations(&bridge);
+        assert_eq!(queued.len(), before + 1);
+        let child = queued.last().unwrap();
+        assert_eq!(child.stream_id, stream);
+        let PimOperationV1::Upsert(value) =
+            PimOperationV1::decode(&child.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("upsert")
+        };
+        assert_eq!(value.dependencies, vec![original]);
+        assert_eq!(value.resource_kind, kind);
+        let retry = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(updated_payload)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(retry.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(queued_operations(&bridge), queued);
+        let deleted = bridge
+            .request("DELETE", &path)
+            .header(IF_MATCH, next_etag)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            bridge.send("GET", &path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let deleted = queued_operations(&bridge).pop().unwrap();
+        assert_eq!(deleted.stream_id, stream);
+        let PimOperationV1::Delete(value) =
+            PimOperationV1::decode(&deleted.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("delete")
+        };
+        assert_eq!(value.dependencies, vec![child.client_op_id]);
+        assert_eq!(value.resource_kind, kind);
+    }
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn rejects_broken_heads_without_persisting_invalid_outbox_operations() {
+    for (method, damage) in ["PUT", "DELETE"]
+        .into_iter()
+        .flat_map(|method| ["missing", "cross-stream", "cycle"].map(|damage| (method, damage)))
+    {
+        let bridge = TestBridge::start().await;
+        let stream = Uuid::new_v4();
+        bridge
+            .runner
+            .upsert_pim_item(
+                bridge.space_id,
+                stream,
+                PimResourceKind::Task,
+                BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+            )
+            .await
+            .unwrap();
+        bridge
+            .runner
+            .upsert_pim_item(
+                bridge.space_id,
+                stream,
+                PimResourceKind::Task,
+                BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+            )
+            .await
+            .unwrap();
+        let path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+        let get = bridge.send("GET", &path).await;
+        let etag = header_string(&get, ETAG);
+        let payload = get.text().await.unwrap();
+        let before = queued_operations(&bridge);
+        let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+        match damage {
+            "missing" => {
+                connection
+                    .execute("DELETE FROM operation_states", [])
+                    .unwrap();
+            }
+            "cross-stream" => {
+                connection.execute("UPDATE operation_states SET stream_id = ?1 WHERE parent_operation_id IS NULL", [Uuid::new_v4().to_string()]).unwrap();
+            }
+            "cycle" => {
+                connection
+                    .execute(
+                        "UPDATE operation_states SET parent_operation_id = client_op_id",
+                        [],
+                    )
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        drop(connection);
+        let response = bridge
+            .request(method, &path)
+            .header(IF_MATCH, etag)
+            .body(payload.clone())
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_server_error());
+        assert_eq!(
+            queued_operations(&bridge),
+            before,
+            "rejected {method} must leave outbox unchanged"
+        );
+        assert_eq!(
+            bridge.send("GET", &path).await.text().await.unwrap(),
+            payload
+        );
+        bridge.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn recreates_a_deleted_first_party_href_in_its_existing_stream() {
+    let bridge = TestBridge::start().await;
+    let stream = Uuid::new_v4();
+    bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+        )
+        .await
+        .unwrap();
+    let path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+    let get = bridge.send("GET", &path).await;
+    let etag = header_string(&get, ETAG);
+    let payload = get.text().await.unwrap();
+    assert_eq!(
+        bridge
+            .request("DELETE", &path)
+            .header(IF_MATCH, etag)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let tombstone = queued_operations(&bridge).pop().unwrap();
+    let recreated = bridge
+        .request("PUT", &path)
+        .header(IF_NONE_MATCH, "*")
+        .body(payload.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(recreated.status(), StatusCode::CREATED);
+    assert_eq!(
+        bridge.send("GET", &path).await.text().await.unwrap(),
+        payload
+    );
+    let child = queued_operations(&bridge).pop().unwrap();
+    assert_eq!(child.stream_id, stream);
+    let PimOperationV1::Upsert(value) =
+        PimOperationV1::decode(&child.open(&[11; 32]).unwrap()).unwrap()
+    else {
+        panic!("upsert")
+    };
+    assert_eq!(value.resource_kind, PimResourceKind::Task);
+    assert_eq!(value.dependencies, vec![tombstone.client_op_id]);
+    bridge.stop().await;
 }

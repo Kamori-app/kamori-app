@@ -9,9 +9,7 @@ const MOBILE_HTTP_CONNECT_TIMEOUT_SECS: u64 = 5;
 const MOBILE_HTTP_REQUEST_TIMEOUT_SECS: u64 = 20;
 
 pub(super) fn mobile_http_client() -> Result<Client, String> {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(MOBILE_HTTP_CONNECT_TIMEOUT_SECS))
-        .timeout(Duration::from_secs(MOBILE_HTTP_REQUEST_TIMEOUT_SECS))
+    mobile_http_client_builder()
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))
 }
@@ -220,4 +218,18 @@ where
         .await?,
         None,
     ))
+}
+
+fn mobile_http_client_builder() -> reqwest::ClientBuilder {
+    crate::native_http::client_builder()
+        .connect_timeout(Duration::from_secs(MOBILE_HTTP_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(MOBILE_HTTP_REQUEST_TIMEOUT_SECS))
+}
+
+#[cfg(test)]
+mod tls_tests {
+    #[tokio::test]
+    async fn mobile_factory_verifies_synthetic_ca_and_hostname() {
+        crate::native_http::tests::assert_https_policy(super::mobile_http_client_builder).await;
+    }
 }

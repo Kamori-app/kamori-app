@@ -1455,14 +1455,31 @@ impl LocalBridgeState {
             }
             None => {}
         }
-        let stream_id = stable_stream_id(space_id, &resource_id);
-        let dependencies: Vec<Uuid> = self
-            .load_resource_head(&collection_id, &resource_id)
+        let (head, head_kind) = self
+            .validated_dav_head(&collection_id, &resource_id, kind)
             .await?
-            .into_iter()
-            .collect();
-        let parent_operation_id = dependencies.first().copied();
+            .unzip();
+        anyhow::ensure!(
+            existing_resource.is_none() || head.is_some(),
+            "existing DAV resource head is missing"
+        );
+        let stream_id = head
+            .as_ref()
+            .map(|state| state.stream_id)
+            .unwrap_or_else(|| stable_stream_id(space_id, &resource_id));
+        let logical_resource_id = head
+            .as_ref()
+            .map(|state| state.logical_resource_id.clone())
+            .unwrap_or_else(|| resource_id.clone());
+        let parent_operation_id = head.as_ref().map(|state| state.client_op_id);
+        let dependencies = parent_operation_id.into_iter().collect();
         let resource_kind = pim_kind(kind, &payload)?;
+        if let Some(head_kind) = head_kind {
+            anyhow::ensure!(
+                resource_kind == head_kind,
+                "DAV resource kind cannot change"
+            );
+        }
         let operation = PimOperationV1::Upsert(PimUpsertV1 {
             schema_version: CURRENT_PIM_SCHEMA_VERSION,
             resource_kind,
@@ -1500,7 +1517,7 @@ impl LocalBridgeState {
             space_seq: 0,
             collection_id: collection_id.clone(),
             stream_id,
-            logical_resource_id: resource_id.clone(),
+            logical_resource_id: logical_resource_id.clone(),
             materialized_resource_id: resource_id.clone(),
             kind,
             payload: Some(payload),
@@ -1509,7 +1526,7 @@ impl LocalBridgeState {
             seed_projection_resource_id: None,
         })
         .await?;
-        self.reconcile_pim_stream(collection_id.clone(), stream_id, resource_id, kind)
+        self.reconcile_pim_stream(collection_id.clone(), stream_id, logical_resource_id, kind)
             .await?;
         drop(materialization_guard);
         let pushed = self.flush_outbox(space_id).await;
@@ -1560,22 +1577,17 @@ impl LocalBridgeState {
         if !if_match.matches(&existing.etag) {
             return Err(DavWriteError::PreconditionFailed.into());
         }
-        let stream_id = stable_stream_id(space_id, &resource_id);
-        let dependencies: Vec<Uuid> = self
-            .load_resource_head(&collection_id, &resource_id)
+        let (head, resource_kind) = self
+            .validated_dav_head(&collection_id, &resource_id, kind)
             .await?
-            .into_iter()
-            .collect();
-        let parent_operation_id = dependencies.first().copied();
+            .ok_or_else(|| anyhow!("existing DAV resource head is missing"))?;
+        let stream_id = head.stream_id;
+        let logical_resource_id = head.logical_resource_id;
+        let parent_operation_id = Some(head.client_op_id);
+        let dependencies = vec![head.client_op_id];
         let operation = PimOperationV1::Delete(PimDeleteV1 {
             schema_version: CURRENT_PIM_SCHEMA_VERSION,
-            resource_kind: match kind {
-                DavResourceKind::Contact => PimResourceKind::Contact,
-                DavResourceKind::Calendar => PimResourceKind::CalendarEvent,
-                DavResourceKind::Note => {
-                    return Err(anyhow!("notes are not part of the MVP DAV projection"));
-                }
-            },
+            resource_kind,
             resource_id: stream_id,
             dependencies,
             projection_resource_id: Some(resource_id.clone()),
@@ -1600,7 +1612,7 @@ impl LocalBridgeState {
             space_seq: 0,
             collection_id: collection_id.clone(),
             stream_id,
-            logical_resource_id: resource_id.clone(),
+            logical_resource_id: logical_resource_id.clone(),
             materialized_resource_id: resource_id.clone(),
             kind,
             payload: None,
@@ -1609,11 +1621,62 @@ impl LocalBridgeState {
             seed_projection_resource_id: None,
         })
         .await?;
-        self.reconcile_pim_stream(collection_id.clone(), stream_id, resource_id, kind)
+        self.reconcile_pim_stream(collection_id.clone(), stream_id, logical_resource_id, kind)
             .await?;
         drop(materialization_guard);
         let _ = self.flush_outbox(space_id).await;
         Ok(true)
+    }
+
+    /// Resolve the selected projection branch and validate its ancestry before queueing.
+    #[cfg(feature = "local-bridge")]
+    async fn validated_dav_head(
+        &self,
+        collection_id: &str,
+        resource_id: &str,
+        kind: DavResourceKind,
+    ) -> Result<Option<(CachedOperationState, PimResourceKind)>> {
+        let Some(operation_id) = self.load_resource_head(collection_id, resource_id).await? else {
+            return Ok(None);
+        };
+        let head = self
+            .load_operation_state(collection_id.to_string(), operation_id)
+            .await?
+            .ok_or_else(|| anyhow!("DAV head operation is missing"))?;
+        anyhow::ensure!(
+            head.kind == kind && head.materialized_resource_id == resource_id,
+            "DAV head does not match projection"
+        );
+        let mut resource_kind = head
+            .payload
+            .as_deref()
+            .map(|payload| pim_kind(kind, payload))
+            .transpose()?;
+        let mut visited = std::collections::HashSet::from([operation_id]);
+        let mut parent = head.parent_operation_id;
+        while let Some(operation_id) = parent {
+            anyhow::ensure!(visited.insert(operation_id), "DAV dependency cycle");
+            let state = self
+                .load_operation_state(collection_id.to_string(), operation_id)
+                .await?
+                .ok_or_else(|| anyhow!("DAV dependency is missing"))?;
+            anyhow::ensure!(
+                state.stream_id == head.stream_id && state.kind == kind,
+                "DAV dependency stream or kind mismatch"
+            );
+            if resource_kind.is_none() {
+                resource_kind = state
+                    .payload
+                    .as_deref()
+                    .map(|payload| pim_kind(kind, payload))
+                    .transpose()?;
+            }
+            parent = state.parent_operation_id;
+        }
+        Ok(Some((
+            head,
+            resource_kind.ok_or_else(|| anyhow!("DAV branch has no resource kind"))?,
+        )))
     }
 
     async fn current_space_key(&self, space_id: Uuid) -> Result<(u32, [u8; 32])> {
@@ -1860,5 +1923,207 @@ mod first_party_pim_tests {
         assert_eq!(child.dependencies, vec![queued[0].client_op_id]);
 
         let _ = std::fs::remove_file(db_path);
+    }
+}
+
+#[cfg(all(test, feature = "local-bridge"))]
+mod dav_identity_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn conditional_http_conflict_edits_and_deletes_replay_in_the_original_stream() {
+        let space = Uuid::new_v4();
+        let stream = Uuid::new_v4();
+        let db = std::env::temp_dir().join(format!("kamori-conflict-{}.sqlite3", Uuid::new_v4()));
+        let config = LocalBridgeConfig::new(db.clone(), "http://127.0.0.1:9", "offline")
+            .with_bind_addr("127.0.0.1:0".parse().unwrap())
+            .with_dav_credentials("dav", "synthetic")
+            .with_device_identity(LocalDeviceIdentity {
+                device_id: Uuid::new_v4(),
+                signing_private_key: [7; 32],
+            });
+        let runner = LocalBridgeRunner::new(config.clone()).unwrap();
+        runner
+            .register_collection_key_epoch(space.to_string(), 1, [11; 32])
+            .await;
+        let root = runner
+            .upsert_pim_item(
+                space,
+                stream,
+                PimResourceKind::Task,
+                BTreeMap::from([("title".into(), PimValue::Text("Root".into()))]),
+            )
+            .await
+            .unwrap();
+        let mut history = runner.state.cache.list_queued_operations().unwrap();
+        for title in ["Branch A", "Branch B"] {
+            let operation = PimOperationV1::Upsert(PimUpsertV1 {
+                schema_version: 1,
+                resource_kind: PimResourceKind::Task,
+                resource_id: stream,
+                dependencies: vec![root],
+                fields: BTreeMap::from([("title".into(), PimValue::Text(title.into()))]),
+                raw_projection: Vec::new(),
+            });
+            let envelope = OperationEnvelopeV1::seal_xchacha(
+                OperationSealContext {
+                    space_id: space,
+                    stream_id: stream,
+                    client_op_id: Uuid::new_v4(),
+                    author_device_id: config.device_identity.as_ref().unwrap().device_id,
+                    key_epoch: 1,
+                    envelope_kind: EnvelopeKind::Operation,
+                },
+                &operation.encode().unwrap(),
+                &[11; 32],
+                &SigningKey::from_bytes(&[7; 32]),
+            )
+            .unwrap();
+            runner
+                .state
+                .apply_pim_operation(space, 1, &envelope, operation)
+                .await
+                .unwrap();
+            history.push(envelope);
+        }
+        runner.start().await.unwrap();
+        let resources = runner
+            .list_cached_resources(space, DavResourceKind::Calendar)
+            .await
+            .unwrap();
+        assert_eq!(resources.len(), 2);
+        let conflict = resources
+            .iter()
+            .find(|r| r.resource_id != format!("{stream}.ics"))
+            .unwrap();
+        let original_head = runner
+            .state
+            .load_resource_head(&space.to_string(), &conflict.resource_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = format!(
+            "http://{}/caldav/{}/{}",
+            runner.local_addr().await.unwrap(),
+            space,
+            conflict.resource_id
+        );
+        let client = reqwest::Client::new();
+        let get = client
+            .get(&path)
+            .basic_auth("dav", Some("synthetic"))
+            .send()
+            .await
+            .unwrap();
+        let etag = get.headers()["etag"].to_str().unwrap().to_owned();
+        let edited = conflict.payload.replace("Branch", "Edited");
+        let put = client
+            .put(&path)
+            .basic_auth("dav", Some("synthetic"))
+            .header("if-match", &etag)
+            .body(edited.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+        let next_etag = put.headers()["etag"].to_str().unwrap().to_owned();
+        assert_eq!(
+            client
+                .get(&path)
+                .basic_auth("dav", Some("synthetic"))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            edited
+        );
+        let queued = runner.state.cache.list_queued_operations().unwrap();
+        let child = queued.last().unwrap();
+        assert_eq!(child.stream_id, stream);
+        let PimOperationV1::Upsert(upsert) =
+            PimOperationV1::decode(&child.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("upsert")
+        };
+        assert_eq!(upsert.dependencies, vec![original_head]);
+        history.push(child.clone());
+        let delete = client
+            .delete(&path)
+            .basic_auth("dav", Some("synthetic"))
+            .header("if-match", next_etag)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(delete.status(), reqwest::StatusCode::NO_CONTENT);
+        assert_eq!(
+            client
+                .get(&path)
+                .basic_auth("dav", Some("synthetic"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::NOT_FOUND
+        );
+        let tombstone = runner
+            .state
+            .cache
+            .list_queued_operations()
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(tombstone.stream_id, stream);
+        let PimOperationV1::Delete(value) =
+            PimOperationV1::decode(&tombstone.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("delete")
+        };
+        assert_eq!(value.resource_kind, PimResourceKind::Task);
+        assert_eq!(value.dependencies, vec![child.client_op_id]);
+        history.push(tombstone);
+        runner.stop().await.unwrap();
+        let mut replica_config = config;
+        let replica_db =
+            std::env::temp_dir().join(format!("kamori-replica-{}.sqlite3", Uuid::new_v4()));
+        replica_config.sqlite_path = replica_db.clone();
+        let replica = LocalBridgeRunner::new(replica_config).unwrap();
+        for (index, envelope) in history.iter().enumerate() {
+            for _ in 0..2 {
+                replica
+                    .state
+                    .apply_pim_operation(
+                        space,
+                        index as u64 + 1,
+                        envelope,
+                        PimOperationV1::decode(&envelope.open(&[11; 32]).unwrap()).unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        let remaining = runner
+            .list_cached_resources(space, DavResourceKind::Calendar)
+            .await
+            .unwrap();
+        let replayed = replica
+            .list_cached_resources(space, DavResourceKind::Calendar)
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(replayed[0].payload, remaining[0].payload);
+        assert_eq!(replayed[0].resource_id, remaining[0].resource_id);
+        assert!(
+            replica
+                .quarantined_stream_ids(space, u64::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        for path in [db, replica_db] {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
