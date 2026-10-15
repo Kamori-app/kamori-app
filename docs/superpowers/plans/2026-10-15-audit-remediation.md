@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Fix every confirmed defect S01–S07, C01–C05, U01–U08, I01–I04 and T01 from the repository audit, with regression evidence and independent reviews.
+**Status:** Complete. All 30 confirmed findings fixed; task and final scoped reviews accepted. Final application source: `69820cd`. Evidence: `docs/audits/2026-10-15-kamori.md` and `docs/audits/reviews/README.md`.
+
+**Goal:** Fix every confirmed defect S01–S10, C01–C05, U01–U10, I01–I04 and T01 from the repository audit, with regression evidence and independent reviews.
 
 **Architecture:** Keep existing feature/service/repository boundaries, encrypted oplog model, durable native credential/cache machinery and platform adapters. Repair violated invariants at their authoritative boundary; avoid unrelated rewrites or new product scope.
 
@@ -111,3 +113,27 @@
 - [x] RED bash round-trip of each sourced environment with dollar, quote, backtick, command-substitution marker, tab/newline/backslash. Assert exact synthetic values and no marker execution; use actual Compose configuration parsing to assert literal values in both `env_file` and `--env-file` substitution paths.
 - [x] RED real-script tests using fake external commands for successful job, failed backup/check, failed replication copy/inventory/hash. Assert ordered running→ok/failed, and exit code preservation.
 - [x] Implement and run go test/coverage, go vet, gofmt check, bash -n for affected assets and CI detector tests. Commit and report.
+
+### Task 8: Resolve all five final review findings in one fix wave
+
+**Files:** mobile background/controller/native adapter; core FRB auth/bridge/cache credential selection and generated bindings; server rotation snapshots, ownership acceptance, blob quota, operation/delete accounting and focused tests/migrations.
+**Interfaces:** Preserve shared mobile session guard, cloud wire schema, signed encrypted oplog, exact retry identity, encrypted PIM/cursors and quotas; reuse existing durable credential machinery.
+**Evidence:** Read /private/tmp/kamori-audit-20261015/final-review.md when available; all probes are complete and the reviewer confirmed the full five-finding set below. Logs: /private/tmp/kamori-audit-20261015/final-probes/. Full source-line report is being written; read it before completing implementation.
+
+**Requirements:**
+- U09: Native configure with SQLCipher current T2/predecessor T1 and imported secure T0 restores/sends T0; provisioning POST /auth/refresh triggers server account-wide reuse revoke. Restore must reconcile durable generation and globals before any refresh/provisioning, never rewind to unsupported stale token or use a new request ID for old lineage. Preserve current/predecessor/pending exact retry. Distinguish explicit fresh signin, which atomically replaces only credentials preserving PIM/cursors. Unsupported/ambiguous older restore fails before network, keeps encrypted cache/data and exposes fresh-signin requirement. Match account/vault/endpoint and preserve unrelated sessions.
+- U10: Cold background configures before import, leaving runner without refresh; expired access never refreshes and overwrites global refresh with None. Fix actual native initialization/import ordering and shared state, not only fake Dart expectations. Cold job refreshes, exports/persists new token/request ID before projection; failure preserves credentials. Retain lease/opt-in/no-prompt behavior.
+- S08: Rotation snapshot takes author-device FOR SHARE then accounting-user UPDATE, opposite recovery user→device. Actual PostgreSQL deadlock reproduced. Establish consistent ordering while retaining authorization/revocation/signature/epoch, quotas and idempotency.
+- S09: Ownership accept takes recipient user before quota advisory731, opposite blob reservation 731→user. Actual deadlock reproduced. Consistent ordering across affected consumers must preserve old/new owner quotas and reservations.
+- S10: Per-space deletion trigger takes owner after first space; bulk account cascade then waits second space held by append, which waits owner. Actual deadlock reproduced. Repair deletion/accounting/append ordering; preserve direct op/space/workspace/account cascade quota release and historical drift repair. Do not merely retry deadlock/500 or raise timeouts. New migration versions unique; do not edit baseline migration history.
+- Read final report Minor/Declined-to-judge and await controller triage if applicable. No unrelated rewrite/dependencies.
+
+- [x] Add RED actual native/cache regressions for U09/U10 (real SQLCipher + production globals/FRB orchestration, synthetic HTTP boundaries): T0/T2, current/predecessor/pending exact retry, fresh signin preserving PIM/cursors, cold expired access.
+- [x] Add deterministic PostgreSQL RED regressions for all three schedules with actual production functions/handlers, observed lock waits and correct final quotas/auth. Retain previous append/cascade/migration cases.
+- [x] Implement all five fixes and regenerate committed FRB bindings if API changes. Keep native lease lifetime correct.
+- [x] Run affected pinned server/core/FRB suites on controller DB plus fmt/strict Clippy; Flutter analyze/test for Dart changes. Report RED/GREEN commands/output for every finding. Controller refreshed workspace coverage, Android and acceptance; server-only residual fixes require refreshed Rust/browser gates, preserving exact Flutter/Android provenance.
+- [x] Commit only implementation/tests/generated files, exclude controller docs/plan/metrics. Write .superpowers/sdd/2026-10-15-audit-remediation/task-8-report.md. No subagents. This is the single final fix wave: resolve the complete set before returning.
+
+**Residual S10 after scoped review:** Existing row prelocks do not prevent late workspace creation/ownership admission. Both team/personal workspace creation and workspace-offer acceptance must share deletion's existing account-security913 gate before resource locks; source/recipient gates sorted for acceptance, immutable identities and owner eligibility revalidated. Personal ensure/create/membership is one transaction. New-user atomic signup is not existing-account admission. Require production RED/GREEN for late team/personal creation plus space/append, offer/delete, and creation-first inclusion. Keep existing cleanup atomicity and all prior fixes. Higher-priority explicit user fix-all/persistence requires finishing this proven residual, not parking it at the process cap.
+
+**Admission completeness clarification:** A recipient may redeem an invite after deletion discovery, then create/accept a security-space ownership offer. Apply both sorted source/recipient913 gates before offer locks to ALL ownership acceptance kinds, preserving quota731 ordering; add the actual production late-redemption→offer→accept versus delete RED/GREEN. This is the same residual S10; invite behavior need not change for this proven cycle.

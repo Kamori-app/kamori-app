@@ -1,11 +1,11 @@
 {
-  "revision": "dab0ba8d6353490d0b80828b96f0b59e852e4bf4",
+  "revision": "c170d8051b448b7bc4ee28821147464e0fc7d96c",
   "toolchain": "Flutter 3.47.0 / Dart 3.13.0",
   "scope": "flutter test --coverage; only reported/imported Dart files",
   "note": "Line coverage only; branch coverage not measured. Denominator is reported files, not whole repository.",
   "totals": {
-    "LF": 4565,
-    "LH": 1049,
+    "LF": 4577,
+    "LH": 1055,
     "FNF": 0,
     "FNH": 0
   },
@@ -22,8 +22,8 @@
     },
     {
       "path": "lib/src/services/background_sync_service.dart",
-      "LF": 78,
-      "LH": 59
+      "LF": 79,
+      "LH": 60
     },
     {
       "path": "lib/src/rust/gen/crypto.dart",
@@ -32,7 +32,7 @@
     },
     {
       "path": "lib/src/rust/gen/frb_generated.dart",
-      "LF": 1104,
+      "LF": 1109,
       "LH": 0
     },
     {
@@ -47,7 +47,7 @@
     },
     {
       "path": "lib/src/rust/gen/frb_api/types.dart",
-      "LF": 291,
+      "LF": 293,
       "LH": 0
     },
     {
@@ -82,8 +82,8 @@
     },
     {
       "path": "lib/src/state/bridge_controller.dart",
-      "LF": 540,
-      "LH": 450
+      "LF": 544,
+      "LH": 454
     },
     {
       "path": "lib/src/state/bridge_state.dart",
@@ -103,7 +103,7 @@
     {
       "path": "lib/src/ui/app_root.dart",
       "LF": 23,
-      "LH": 20
+      "LH": 21
     },
     {
       "path": "lib/src/ui/auth_screen.dart",

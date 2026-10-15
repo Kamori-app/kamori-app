@@ -1,9 +1,9 @@
 {
-  "revision": "dab0ba8d6353490d0b80828b96f0b59e852e4bf4",
+  "revision": "69820cd4ff61361d56a42f1b048a890043b1ddd5",
   "toolchain": "Rust 1.97.1; cargo-llvm-cov 0.9.1",
   "scope": "workspace with crypto-core-lib/frb; PostgreSQL integration tests enabled",
   "excluded": "frb_generated|integration_tests|/tests/|build.rs",
-  "note": "Line/region/function coverage; branch coverage not measured. Inline test modules may be included.",
+  "note": "Line/region/function coverage; branch coverage not measured. Inline/other test modules outside filename exclusions may be included; new lock_regressions.rs contributes 1504/1552 lines.",
   "totals": {
     "branches": {
       "count": 0,
@@ -12,19 +12,19 @@
       "percent": 0
     },
     "functions": {
-      "count": 2621,
-      "covered": 1260,
-      "percent": 48.07325448302175
+      "count": 2698,
+      "covered": 1423,
+      "percent": 52.742772424017794
     },
     "instantiations": {
-      "count": 4491,
-      "covered": 1666,
-      "percent": 37.09641505232688
+      "count": 4573,
+      "covered": 1871,
+      "percent": 40.914060791602886
     },
     "lines": {
-      "count": 26759,
-      "covered": 14806,
-      "percent": 55.33091670092305
+      "count": 28473,
+      "covered": 17564,
+      "percent": 61.68651002704316
     },
     "mcdc": {
       "count": 0,
@@ -33,10 +33,10 @@
       "percent": 0
     },
     "regions": {
-      "count": 37307,
-      "covered": 20650,
-      "notcovered": 16657,
-      "percent": 55.35154260594527
+      "count": 39396,
+      "covered": 23895,
+      "notcovered": 15501,
+      "percent": 60.65336582394152
     }
   },
   "files": [
@@ -1729,24 +1729,24 @@
         },
         "functions": {
           "count": 20,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 6,
+          "percent": 30.0
         },
         "instantiations": {
           "count": 20,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 6,
+          "percent": 30.0
         },
         "lines": {
           "count": 497,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 112,
+          "percent": 22.535211267605636
         },
         "regions": {
           "count": 533,
-          "covered": 0,
-          "notcovered": 533,
-          "percent": 0.0
+          "covered": 117,
+          "notcovered": 416,
+          "percent": 21.951219512195124
         }
       }
     },
@@ -2309,14 +2309,14 @@
         },
         "lines": {
           "count": 254,
-          "covered": 248,
-          "percent": 97.63779527559055
+          "covered": 249,
+          "percent": 98.03149606299213
         },
         "regions": {
           "count": 319,
-          "covered": 273,
-          "notcovered": 46,
-          "percent": 85.57993730407524
+          "covered": 274,
+          "notcovered": 45,
+          "percent": 85.8934169278997
         }
       }
     },
@@ -2431,6 +2431,44 @@
           "covered": 0,
           "notcovered": 18,
           "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/lock_regressions.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 69,
+          "covered": 64,
+          "percent": 92.7536231884058
+        },
+        "instantiations": {
+          "count": 69,
+          "covered": 64,
+          "percent": 92.7536231884058
+        },
+        "lines": {
+          "count": 1552,
+          "covered": 1504,
+          "percent": 96.90721649484536
+        },
+        "regions": {
+          "count": 1793,
+          "covered": 1715,
+          "notcovered": 78,
+          "percent": 95.64974902398215
         }
       }
     },
@@ -2575,14 +2613,14 @@
         },
         "lines": {
           "count": 24,
-          "covered": 22,
-          "percent": 91.66666666666666
+          "covered": 23,
+          "percent": 95.83333333333334
         },
         "regions": {
           "count": 32,
-          "covered": 29,
-          "notcovered": 3,
-          "percent": 90.625
+          "covered": 31,
+          "notcovered": 1,
+          "percent": 96.875
         }
       }
     },
@@ -2640,25 +2678,25 @@
           "percent": 0.0
         },
         "functions": {
-          "count": 16,
-          "covered": 7,
-          "percent": 43.75
+          "count": 17,
+          "covered": 8,
+          "percent": 47.05882352941176
         },
         "instantiations": {
-          "count": 16,
-          "covered": 7,
-          "percent": 43.75
+          "count": 17,
+          "covered": 8,
+          "percent": 47.05882352941176
         },
         "lines": {
-          "count": 405,
-          "covered": 220,
-          "percent": 54.32098765432099
+          "count": 445,
+          "covered": 320,
+          "percent": 71.91011235955057
         },
         "regions": {
-          "count": 460,
-          "covered": 230,
-          "notcovered": 230,
-          "percent": 50.0
+          "count": 524,
+          "covered": 328,
+          "notcovered": 196,
+          "percent": 62.59541984732826
         }
       }
     },
@@ -2831,24 +2869,24 @@
         },
         "functions": {
           "count": 34,
-          "covered": 8,
-          "percent": 23.52941176470588
+          "covered": 12,
+          "percent": 35.294117647058826
         },
         "instantiations": {
           "count": 34,
-          "covered": 8,
-          "percent": 23.52941176470588
+          "covered": 12,
+          "percent": 35.294117647058826
         },
         "lines": {
-          "count": 865,
-          "covered": 103,
-          "percent": 11.907514450867051
+          "count": 869,
+          "covered": 379,
+          "percent": 43.613348676639816
         },
         "regions": {
-          "count": 1020,
-          "covered": 104,
-          "notcovered": 916,
-          "percent": 10.196078431372548
+          "count": 1026,
+          "covered": 403,
+          "notcovered": 623,
+          "percent": 39.278752436647174
         }
       }
     },
@@ -3030,15 +3068,15 @@
           "percent": 25.0
         },
         "lines": {
-          "count": 356,
-          "covered": 212,
-          "percent": 59.55056179775281
+          "count": 366,
+          "covered": 223,
+          "percent": 60.92896174863388
         },
         "regions": {
-          "count": 287,
-          "covered": 143,
-          "notcovered": 144,
-          "percent": 49.82578397212544
+          "count": 314,
+          "covered": 168,
+          "notcovered": 146,
+          "percent": 53.503184713375795
         }
       }
     },
@@ -3173,24 +3211,24 @@
         },
         "functions": {
           "count": 6,
-          "covered": 3,
-          "percent": 50.0
+          "covered": 4,
+          "percent": 66.66666666666666
         },
         "instantiations": {
           "count": 6,
-          "covered": 3,
-          "percent": 50.0
+          "covered": 4,
+          "percent": 66.66666666666666
         },
         "lines": {
           "count": 55,
-          "covered": 36,
-          "percent": 65.45454545454545
+          "covered": 40,
+          "percent": 72.72727272727273
         },
         "regions": {
           "count": 91,
-          "covered": 67,
-          "notcovered": 24,
-          "percent": 73.62637362637363
+          "covered": 71,
+          "notcovered": 20,
+          "percent": 78.02197802197803
         }
       }
     },
@@ -3248,25 +3286,25 @@
           "percent": 0.0
         },
         "functions": {
-          "count": 17,
-          "covered": 0,
-          "percent": 0.0
+          "count": 19,
+          "covered": 8,
+          "percent": 42.10526315789473
         },
         "instantiations": {
-          "count": 17,
-          "covered": 0,
-          "percent": 0.0
+          "count": 19,
+          "covered": 8,
+          "percent": 42.10526315789473
         },
         "lines": {
-          "count": 297,
-          "covered": 0,
-          "percent": 0.0
+          "count": 320,
+          "covered": 126,
+          "percent": 39.375
         },
         "regions": {
-          "count": 277,
-          "covered": 0,
-          "notcovered": 277,
-          "percent": 0.0
+          "count": 318,
+          "covered": 128,
+          "notcovered": 190,
+          "percent": 40.25157232704403
         }
       }
     },
@@ -3515,24 +3553,24 @@
         },
         "functions": {
           "count": 11,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 2,
+          "percent": 18.181818181818183
         },
         "instantiations": {
           "count": 11,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 2,
+          "percent": 18.181818181818183
         },
         "lines": {
-          "count": 198,
-          "covered": 0,
-          "percent": 0.0
+          "count": 211,
+          "covered": 58,
+          "percent": 27.488151658767773
         },
         "regions": {
-          "count": 224,
-          "covered": 0,
-          "notcovered": 224,
-          "percent": 0.0
+          "count": 253,
+          "covered": 50,
+          "notcovered": 203,
+          "percent": 19.76284584980237
         }
       }
     },
@@ -4394,19 +4432,19 @@
         },
         "instantiations": {
           "count": 98,
-          "covered": 22,
-          "percent": 22.448979591836736
+          "covered": 34,
+          "percent": 34.69387755102041
         },
         "lines": {
           "count": 88,
-          "covered": 84,
-          "percent": 95.45454545454545
+          "covered": 85,
+          "percent": 96.5909090909091
         },
         "regions": {
           "count": 160,
-          "covered": 150,
-          "notcovered": 10,
-          "percent": 93.75
+          "covered": 151,
+          "notcovered": 9,
+          "percent": 94.375
         }
       }
     },
@@ -4427,24 +4465,24 @@
         },
         "functions": {
           "count": 34,
-          "covered": 1,
-          "percent": 2.941176470588235
+          "covered": 7,
+          "percent": 20.588235294117645
         },
         "instantiations": {
           "count": 68,
-          "covered": 1,
-          "percent": 1.4705882352941175
+          "covered": 7,
+          "percent": 10.294117647058822
         },
         "lines": {
-          "count": 230,
-          "covered": 1,
-          "percent": 0.43478260869565216
+          "count": 236,
+          "covered": 33,
+          "percent": 13.983050847457626
         },
         "regions": {
-          "count": 354,
-          "covered": 1,
-          "notcovered": 353,
-          "percent": 0.2824858757062147
+          "count": 371,
+          "covered": 41,
+          "notcovered": 330,
+          "percent": 11.05121293800539
         }
       }
     },
@@ -4464,25 +4502,25 @@
           "percent": 0.0
         },
         "functions": {
-          "count": 74,
-          "covered": 0,
-          "percent": 0.0
+          "count": 79,
+          "covered": 12,
+          "percent": 15.18987341772152
         },
         "instantiations": {
-          "count": 148,
-          "covered": 0,
-          "percent": 0.0
+          "count": 158,
+          "covered": 12,
+          "percent": 7.59493670886076
         },
         "lines": {
-          "count": 572,
-          "covered": 0,
-          "percent": 0.0
+          "count": 621,
+          "covered": 157,
+          "percent": 25.28180354267311
         },
         "regions": {
-          "count": 971,
-          "covered": 0,
-          "notcovered": 971,
-          "percent": 0.0
+          "count": 1064,
+          "covered": 238,
+          "notcovered": 826,
+          "percent": 22.36842105263158
         }
       }
     },
@@ -4541,24 +4579,24 @@
         },
         "functions": {
           "count": 38,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 3,
+          "percent": 7.894736842105263
         },
         "instantiations": {
           "count": 76,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 3,
+          "percent": 3.9473684210526314
         },
         "lines": {
-          "count": 365,
-          "covered": 0,
-          "percent": 0.0
+          "count": 377,
+          "covered": 91,
+          "percent": 24.13793103448276
         },
         "regions": {
-          "count": 544,
-          "covered": 0,
-          "notcovered": 544,
-          "percent": 0.0
+          "count": 557,
+          "covered": 117,
+          "notcovered": 440,
+          "percent": 21.005385996409338
         }
       }
     },
@@ -4617,24 +4655,24 @@
         },
         "functions": {
           "count": 23,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 16,
+          "percent": 69.56521739130434
         },
         "instantiations": {
           "count": 46,
-          "covered": 0,
-          "percent": 0.0
+          "covered": 16,
+          "percent": 34.78260869565217
         },
         "lines": {
-          "count": 88,
-          "covered": 0,
-          "percent": 0.0
+          "count": 93,
+          "covered": 45,
+          "percent": 48.38709677419355
         },
         "regions": {
-          "count": 128,
-          "covered": 0,
-          "notcovered": 128,
-          "percent": 0.0
+          "count": 134,
+          "covered": 63,
+          "notcovered": 71,
+          "percent": 47.01492537313434
         }
       }
     },
@@ -4655,24 +4693,24 @@
         },
         "functions": {
           "count": 34,
-          "covered": 3,
-          "percent": 8.823529411764707
+          "covered": 13,
+          "percent": 38.23529411764706
         },
         "instantiations": {
           "count": 318,
-          "covered": 3,
-          "percent": 0.9433962264150944
+          "covered": 17,
+          "percent": 5.345911949685535
         },
         "lines": {
           "count": 215,
-          "covered": 10,
-          "percent": 4.651162790697675
+          "covered": 89,
+          "percent": 41.3953488372093
         },
         "regions": {
           "count": 322,
-          "covered": 13,
-          "notcovered": 309,
-          "percent": 4.037267080745342
+          "covered": 107,
+          "notcovered": 215,
+          "percent": 33.22981366459628
         }
       }
     },
@@ -4693,24 +4731,24 @@
         },
         "functions": {
           "count": 121,
-          "covered": 112,
-          "percent": 92.56198347107438
+          "covered": 113,
+          "percent": 93.38842975206612
         },
         "instantiations": {
           "count": 215,
-          "covered": 174,
-          "percent": 80.93023255813954
+          "covered": 175,
+          "percent": 81.3953488372093
         },
         "lines": {
           "count": 1901,
-          "covered": 1781,
-          "percent": 93.68753287743293
+          "covered": 1784,
+          "percent": 93.8453445554971
         },
         "regions": {
           "count": 2702,
-          "covered": 2400,
-          "notcovered": 302,
-          "percent": 88.82309400444115
+          "covered": 2405,
+          "notcovered": 297,
+          "percent": 89.00814211695041
         }
       }
     },
@@ -4731,24 +4769,24 @@
         },
         "functions": {
           "count": 35,
-          "covered": 20,
-          "percent": 57.14285714285714
+          "covered": 32,
+          "percent": 91.42857142857143
         },
         "instantiations": {
           "count": 122,
-          "covered": 35,
-          "percent": 28.688524590163933
+          "covered": 58,
+          "percent": 47.540983606557376
         },
         "lines": {
           "count": 228,
-          "covered": 138,
-          "percent": 60.526315789473685
+          "covered": 215,
+          "percent": 94.29824561403511
         },
         "regions": {
           "count": 337,
-          "covered": 181,
-          "notcovered": 156,
-          "percent": 53.70919881305638
+          "covered": 299,
+          "notcovered": 38,
+          "percent": 88.72403560830861
         }
       }
     },
@@ -4807,24 +4845,24 @@
         },
         "functions": {
           "count": 212,
-          "covered": 125,
-          "percent": 58.9622641509434
+          "covered": 142,
+          "percent": 66.98113207547169
         },
         "instantiations": {
-          "count": 488,
-          "covered": 199,
-          "percent": 40.77868852459016
+          "count": 486,
+          "covered": 226,
+          "percent": 46.50205761316872
         },
         "lines": {
           "count": 1893,
-          "covered": 1265,
-          "percent": 66.82514527205494
+          "covered": 1345,
+          "percent": 71.05124141574221
         },
         "regions": {
           "count": 2685,
-          "covered": 1783,
-          "notcovered": 902,
-          "percent": 66.40595903165736
+          "covered": 1913,
+          "notcovered": 772,
+          "percent": 71.24767225325884
         }
       }
     },
@@ -4849,9 +4887,9 @@
           "percent": 100.0
         },
         "instantiations": {
-          "count": 30,
-          "covered": 22,
-          "percent": 73.33333333333333
+          "count": 32,
+          "covered": 27,
+          "percent": 84.375
         },
         "lines": {
           "count": 73,

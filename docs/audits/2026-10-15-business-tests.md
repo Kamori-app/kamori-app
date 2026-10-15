@@ -24,3 +24,18 @@
 | Локальные закрытые файлы не передаются Docker builder — I03 | `.dockerignore`: root/nested SECRETS.md, .aws и audit scratch; отдельная реальная COPY/context absence проверка | Только имена/наличие; содержимое, git history и ротация неизвестных секретов не исследовались |
 
 Пути `auth/...`, `invites/...`, `operations/...` относятся к `apps/cloud-server/src/features/`. Число тестов и line/statement coverage не заменяют проверку этих инвариантов. Двойники заменяют границы ОС/сети, а не основную production-оркестрацию.
+
+## Дополнительные находки итогового ревью
+
+| Находка | Production-path regression | Результат |
+|---|---|---|
+| U09/U10 | core frb_api/credential_tests.rs: native_restore_rejects_token_older_than_predecessor_before_network; native_predecessor_restore_reconciles_globals_and_pending_attempt; native_cold_configure_then_import_refreshes_with_imported_attempt; native_pending_attempt_survives_import_failure_and_direct_transport_retry | Real SQLCipher + FRB globals + synthetic HTTP: unsupported T0 не отправляется; predecessor/global access+token и pending ID согласованы; cold access refresh/retry/export работает |
+| U09 identity/fresh signin | native_fresh_signin_replaces_only_credentials_preserving_pim_and_cursor; native_restore_rejects_account_or_endpoint_mismatch_without_replacing_cache | Contact row и cursor 23 сохранены; foreign account/endpoint не меняет cache; full-operation lease сохранена |
+| S08 | operations/lock_regressions.rs: final_rotation_and_recovery_serialize_in_both_orders | Полные revoke_member_and_rotate/apply_account_recovery_reset; epoch 1/282 bytes или epoch 2/564 bytes, active sessions/devices отозваны, deadlock отсутствует |
+| S09 | final_blob_reservation_and_ownership_accept_serialize | Полные store_blob/accept_offer, точные old/new owner counters |
+| S10 | final_multispace_account_delete_and_append_serialize; final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease | Полные delete_user/append и production maintenance в отдельной схеме; несколько владельцев/пространств, 2 queued objects, concurrent upload lease сохраняет metadata и 1024-byte charge |
+| S10, полнота admission | final_late_team_workspace_cannot_escape_account_deletion; final_late_personal_workspace_cannot_escape_account_deletion; final_workspace_admission_first_is_included_in_account_deletion; final_workspace_offer_and_account_deletion_share_admission; final_late_invite_space_ownership_cannot_escape_account_deletion | Настоящие create/ensure, invite redeem, create/accept offer и delete_user; оба порядка, точное ожидание account913; удалённый recipient не получает владение, нормальные 401/blocker, counters 282/564 |
+
+Все пять исходных ошибок показали настоящий RED до production-исправлений; ошибки подготовки fixtures не считались RED. GREEN на 69820cd: 151 server +75 core/FRB +14 DAV +18 desktop =258; Flutter 70; Android real FRB три ABI; browser acceptance 9/9. U09/U10/S08/S09 прошли scoped re-review; остаточное S10 review также принято, spec и quality PASS. [Заключения](reviews/README.md).
+
+Native harness один раз выявил нестабильность собственных accepted TCP sockets. Отдельный std-only probe подтвердил immediate WouldBlock; явный blocking mode исправил harness без ослабления assertions. Матрица 6 тестов прошла пять раз подряд, затем полный core/workspace. Пять повторов выполнялись из-за конкретного сбоя, не вместо выяснения причины.

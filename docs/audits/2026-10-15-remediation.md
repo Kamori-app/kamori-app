@@ -31,7 +31,7 @@ rustup run 1.97.1 cargo clippy -p cloud-server --all-targets -- -D warnings
 
 RED воспроизвёл неидемпотентный retry, двойной учёт удалённых данных, deadlock двух разных операций и deadlock миграции с append. GREEN: **142 passed**, fmt/strict Clippy чистые; SQLx проверяет чистую установку и обновление с уже применённой `003`; миграционные тесты используют изолированные схемы/реальные ledger и locks. Browser sharing acceptance: **1 passed, 26,4 s**, проверены editor/reader и расшифровка note точного повтора. Независимое ревью и повторное ревью миграции пройдены.
 
-Проверочная БД после исправления ещё не выпущенной `002`: `kamori_audit_fix1`. Старый тестовый ledger не переписывался. Перед финальным acceptance требуется обновить только disposable БД проекта `kamori-audit-20261015`, поскольку старый контейнерный запуск содержит предыдущий checksum этой новой миграции. Production не затрагивался.
+Проверочная БД после исправления ещё не выпущенной `002`: `kamori_audit_fix1`. Старый тестовый ledger не переписывался. Перед финальным acceptance пересоздана только disposable БД проекта `kamori-audit-20261015`: старый контейнерный запуск содержал предыдущий checksum этой новой миграции. Production не затрагивался.
 
 ## DAV и native HTTPS
 
@@ -95,4 +95,40 @@ EXIT handlers обоих job scripts записывают один failed termin
 
 Android release на dab0ba8 с реальным FRB: **102,5 MB**, три ABI содержат настоящую libcrypto_core_lib.so; стандартный Cargokit сам задаёт NDK ranlib, ручные overrides не нужны. Flutter 3.47.0 предупреждает о будущем KGP compatibility в двух pinned plugins; сборка успешна, warning не подавлялся. iOS SDK exit 69 остаётся внешним лицензионным ограничением.
 
-Финальные Rust **243**, web **66**, Flutter **68**, admin **4** passed; строгие линтеры/typechecks проходят. Промежуточные цифры выше сохранены с указанием этапа. Машинные [метрики](coverage-metrics/README.md), [матрица инвариантов](2026-10-15-business-tests.md) и [десять решений](2026-10-15-decisions.md) сохраняют результаты после удаления рабочего SDD scratch. Итоговое whole-branch review ещё выполняется.
+Перед дополнительной волной Rust **243**, web **66**, Flutter **68**, admin **4** passed; строгие линтеры/typechecks проходят. Промежуточные цифры выше сохранены с указанием этапа. Машинные [метрики](coverage-metrics/README.md), [матрица инвариантов](2026-10-15-business-tests.md) и [десять решений](2026-10-15-decisions.md) сохраняют результаты после удаления рабочего SDD scratch. Следующий раздел фиксирует дополнительные находки whole-branch review.
+
+## Дополнительная волна по итоговому ревью
+
+Коммит c170d80 реализовал U09/U10 и S08–S10. Actual native probes обнаружили replay secure T0 при durable T2/T1 и cold configure-before-import без refresh; PostgreSQL probes — snapshot/recovery, blob/ownership и multi-space cascade/append deadlocks. Эти случаи отсутствовали в прежних успешных gates.
+
+Native restore теперь использует scoped durable RefreshCredentialStore до provisioning, согласует access/refresh/pending request ID с globals, отклоняет неподтверждённый старый токен до сети. Explicit fresh signin меняет только credentials, сохраняет contact row/cursor; account/endpoint mismatch не подменяет cache. Cold background импортирует credential до configure, а native import независимо перестраивает runner; missing credential не меняет предыдущую сессию. Шесть production-native/SQLCipher/HTTP регрессий прошли.
+
+Snapshot rotation блокирует owner до signer device; ownership acceptance берёт space, quota731, затем отсортированные accounts с NO KEY UPDATE и повторной проверкой recipient. Account deletion блокирует полный видимый workspace/space set, затем counters; maintenance совместно блокирует purge/expired-pending ресурсы. Три SQL RED показали настоящий 40P01 через production functions; четыре GREEN теста включают оба порядка recovery/rotation и mixed-owner cleanup с renewal upload lease.
+
+Первый вариант разделения maintenance на транзакции был дважды отклонён automatic approval review; команды не выполнились. Применён разрешённый вариант с неизменными single transaction, gate44200619, delete predicates и metadata/object-queue atomicity. Он прошёл isolated-schema test; approval blocker снят без production cleanup и без запроса разрешения у пользователя.
+
+Native HTTP harness сам выявил intermittent WouldBlock: принятый socket сохранял nonblocking mode. Отдельный std-only probe показал immediate WouldBlock вместо read timeout; явный blocking mode устранил причину без ослабления assertions. Матрица 6 тестов прошла пять раз подряд, затем полный workspace.
+
+На c170d80: **146 server +75 core/FRB +14 DAV +18 desktop =253 passed**, 0 failed/skipped/warnings; workspace strict Clippy/fmt чистые. Flutter **70**/analyze чистые; LCOV **1055/4577 (23,05%)**. LLVM **16464/27506 (59,86%)**, functions **1376/2656 (51,81%)**; в raw aggregate входит новый test-only lock_regressions.rs (627/636), поэтому прирост не объявляется чистым production coverage.
+
+Повторный Android release с реальным FRB: **102,6 MB**, три ABI проверены. Полный fresh-DB/rebuilt-images browser acceptance: **9/9 passed, 1,2 минуты**. Web/Go исходники не менялись: их отдельные snapshots сохраняют прежние revisions.
+
+Scoped re-review подтвердил F1–F4 (U09/U10/S08/S09), но оставил F5/S10 открытым: новый workspace может быть создан после prelock и попасть в последующий неограниченный cascade. Actual SQL reproduction дал deadlock; существующий two-space тест создавал оба space заранее. Работа продолжена узким исправлением admission через общий account gate913, с новыми production-регрессиями team/personal/offer. Остаточное исправление и его отдельные доказательства приведены ниже.
+
+
+## Остаточный S10: полнота набора при позднем admission
+
+Коммиты `9960315`, `69820cd`. Первый scoped re-review не принял S10: FK KEY SHARE допускает создание нового workspace после обнаружения deletion set. Новый production RED воспроизвёл deadlock через team и personal create, настоящий create_space с device package и signed append; отдельные случаи проверили workspace ownership transfer и creation-first. Личный workspace, его lookup/create и membership теперь находятся в одной транзакции с account-security gate913. Team creation берёт тот же gate до resource/user locks и после ожидания проверяет существование/eligibility владельца.
+
+Именная проверка полноты затем доказала ещё одну цепочку той же ошибки: late invite redemption → create_offer → security-space accept_offer после deletion discovery. Actual RED дал PostgreSQL deadlock в accept_offer. Поэтому source/recipient gates913 в UUID-порядке распространяются на **оба** вида ownership acceptance до offer/resource locks; offer identity/expiry, текущий owner, активное membership и eligibility проверяются повторно. Subsequent space→quota731→ordered user locks сохраняют S09. Invite redemption, maintenance transaction boundaries и cleanup predicates не менялись. Signup с атомарным новым user/workspace не является admission существующего удаляемого аккаунта.
+
+Final focused matrix: **10 passed**, full server: **151 passed**, 0 ignored/failed; strict server Clippy/fmt чистые. Тесты наблюдают ожидание точного advisory913, а не произвольный FK wait. Deletion-first даёт нормальный отказ creator/acceptor; acceptance-first сохраняет ожидаемый deletion blocker. Точные operation totals 282/564 и отсутствие владельца, успешно удалённого конкурентно, проверены. Схемы fixtures изолированы: глобальный test-only DDL не мешает параллельным deliberate phase gates. Никаких production hooks, timeout increases или deadlock retries не добавлено.
+
+На final source `69820cd` повторены workspace LLVM + реальная PostgreSQL: **151 server +75 core/FRB +14 DAV +18 desktop =258 passed**; full workspace/all-targets FRB Clippy/fmt чистые. LLVM **17564/28473 (61,69%)**, functions **1423/2698 (52,74%)**; test-only lock_regressions.rs составляет **1504/1552** строк и явно учитывается при интерпретации. Flutter/Android исходники после c170d80 не менялись: их завершённые gates и точная provenance сохранены.
+
+Независимое residual review ограничено `c170d80..69820cd`, находкой F5/S10 и регрессиями именно этого исправления; U09/U10/S08/S09 уже приняты предыдущим scoped review. Итоговое заключение: **F5/S10 ADDRESSED, spec PASS, quality PASS**, новых Critical/Important регрессий не найдено. F1–F4 остаются принятыми. Fresh disposable DB, пересборка cloud/web/admin и **9/9 Chromium passed (1,2 минуты)** на 69820cd. [Все независимые заключения](reviews/README.md) сохранены в репозитории.
+
+
+Контрольный source-trace в residual review закрыл подозрение о create_space с явным чужим workspace_id: deletion блокирует workspace при любом существующем membership, включая revoked, до следующего SELECT spaces; create_space держит workspace/member SHARE до commit. Победивший creator виден последующему discovery; победивший deletion отзывает eligibility. Production late external-workspace membership writer не найден: space invites создают security_space_members, а workspace insert paths уже защищены admission или atomic signup. Это проверка именованного пути, не заявление о произвольном SQL.
+
+Все восемь задач плана завершены, все 30 подтверждённых находок исправлены и приняты независимыми ревью. Пятнадцать решений с ценой ошибки архивированы отдельно. Основной checkout остался чистым на `8124892`; исправления сохранены коммитами в managed detached worktree. Deploy, push, merge, изменение реальных credentials и принятие лицензии Xcode не выполнялись. Собственные disposable контейнеры, volumes и два Rust build cache удалены после успешных проверок; APK, сырые локальные логи и нормализованные метрики сохранены. SDD scratch удаляется после коммита архива, managed worktree остаётся на месте.
