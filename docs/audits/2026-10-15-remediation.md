@@ -14,7 +14,7 @@ RED: шесть auth-регрессий создавали новую актив
 
 ```sh
 export PATH=/Users/yujin/.cargo/bin:$PATH
-export KAMORI_DATABASE_URL=postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit
+export KAMORI_DATABASE_URL=postgres://kamori:kamori-audit-local@127.0.0.1:55439/kamori_audit_fix1
 export CARGO_TARGET_DIR=/private/tmp/kamori-audit-target-197
 rustup run 1.97.1 cargo test -p cloud-server
 rustup run 1.97.1 cargo fmt --all -- --check
@@ -22,3 +22,13 @@ rustup run 1.97.1 cargo clippy -p cloud-server --all-targets -- -D warnings
 ```
 
 Миграции `202610150001`, `202610150003` должны применяться перед согласованной заменой серверных бинарников; старые незавершённые ephemeral grants/pending recovery starts потребуется начать заново. Полный браузерный WebAuthn race test не выполнен. Конкурентные refresh/passkey-registration проверки остаются отдельным пробелом, перечисленным для итогового ревью.
+
+## Приглашения, квоты и конкурентные записи
+
+Коммиты `e49312f`, `2422144`; закрыты S01–S03. Успешное принятие приглашения сохраняет исходную роль и cursor floors вместе с потреблением кода; точный повтор возвращает исходные ciphertext и метаданные без изменения членства/use count. Отзыв, смена epoch и удаление членства исключают replay. Старые использованные приглашения без записанных метаданных остаются неповторяемыми: потерянный до обновления ответ может потребовать нового приглашения.
+
+Новая миграция `202610150002` освобождает charge удаляемого пространства и пересчитывает существующий дрейф, включая пустые аккаунты. Она берёт EXCLUSIVE table lock до DDL/пересчёта, закрывая найденную ревью гонку с row-locking append. Runtime append блокирует space → owner → member/device без SHARE→UPDATE upgrade.
+
+RED воспроизвёл неидемпотентный retry, двойной учёт удалённых данных, deadlock двух разных операций и deadlock миграции с append. GREEN: **142 passed**, fmt/strict Clippy чистые; SQLx проверяет чистую установку и обновление с уже применённой `003`; миграционные тесты используют изолированные схемы/реальные ledger и locks. Browser sharing acceptance: **1 passed, 26,4 s**, проверены editor/reader и расшифровка note точного повтора. Независимое ревью и повторное ревью миграции пройдены.
+
+Проверочная БД после исправления ещё не выпущенной `002`: `kamori_audit_fix1`. Старый тестовый ledger не переписывался. Перед финальным acceptance требуется обновить только disposable БД проекта `kamori-audit-20261015`, поскольку старый контейнерный запуск содержит предыдущий checksum этой новой миграции. Production не затрагивался.
