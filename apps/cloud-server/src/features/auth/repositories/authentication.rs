@@ -52,7 +52,7 @@ pub(crate) async fn session_authentication_binding(
     Ok(binding)
 }
 
-/// Serialize account deletion, device revocation and recovery before either
+/// Serialize workspace admission, account deletion, device revocation and recovery before either
 /// space/key-package or account row locks. Deletion must retain its existing
 /// space-before-account quota order; this lock prevents security mutations from
 /// holding the account while waiting for a key package deletion already holds.

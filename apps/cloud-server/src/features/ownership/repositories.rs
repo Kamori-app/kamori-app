@@ -263,6 +263,29 @@ pub(crate) async fn accept_offer(
     account_operation_storage_limit: i64,
 ) -> anyhow::Result<AcceptOfferResult> {
     let mut tx = pool.begin().await?;
+    // Workspace ownership is admission into the recipient's deletion set.
+    // Read immutable identity first, then lock both accounts in UUID order
+    // before the offer/resource. Source deletion also cancels this offer.
+    let identity: Option<(String, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT resource_kind, resource_id, current_owner_id FROM ownership_transfer_offers WHERE id=$1 AND target_user_id=$2 AND accepted_at IS NULL AND cancelled_at IS NULL",
+    )
+    .bind(transfer_id)
+    .bind(actor_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((expected_kind, expected_resource, expected_owner)) = identity else {
+        tx.rollback().await?;
+        return Ok(AcceptOfferResult::NotFound);
+    };
+    if expected_kind == OwnershipResourceKind::Workspace.as_db() {
+        let mut accounts = [expected_owner, actor_id];
+        accounts.sort_unstable();
+        for account in accounts {
+            crate::features::auth::repositories::lock_account_security_mutation(&mut tx, account)
+                .await
+                .map_err(|(_, error)| anyhow::anyhow!(error.0.message))?;
+        }
+    }
     let offer = sqlx::query(
         r#"
         SELECT resource_kind, resource_id, current_owner_id, expires_at > now() AS unexpired
@@ -280,6 +303,13 @@ pub(crate) async fn accept_offer(
         tx.rollback().await?;
         return Ok(AcceptOfferResult::NotFound);
     };
+    if offer.try_get::<String, _>("resource_kind")? != expected_kind
+        || offer.try_get::<Uuid, _>("resource_id")? != expected_resource
+        || offer.try_get::<Uuid, _>("current_owner_id")? != expected_owner
+    {
+        tx.rollback().await?;
+        return Ok(AcceptOfferResult::NoLongerValid);
+    }
     if !offer.try_get::<bool, _>("unexpired")? {
         sqlx::query("UPDATE ownership_transfer_offers SET cancelled_at = now() WHERE id = $1")
             .bind(transfer_id)
@@ -302,9 +332,11 @@ pub(crate) async fn accept_offer(
                   ON target.workspace_id = workspace.id
                  AND target.user_id = $3 AND target.status = 'active'
                 JOIN users recipient ON recipient.id = target.user_id
+                JOIN users owner ON owner.id = workspace.owner_user_id
                 WHERE workspace.id = $1 AND workspace.owner_user_id = $2
                   AND workspace.kind = 'team' AND workspace.deleted_at IS NULL
                   AND recipient.deleted_at IS NULL AND recipient.suspended_at IS NULL
+                  AND owner.deleted_at IS NULL AND owner.suspended_at IS NULL
                 FOR UPDATE OF workspace, recipient
                 "#,
             )

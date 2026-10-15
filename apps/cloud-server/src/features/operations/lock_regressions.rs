@@ -516,3 +516,434 @@ async fn final_maintenance_mixed_owner_purge_preserves_concurrent_upload_lease()
         .await
         .unwrap();
 }
+
+// Trigger DDL must not contend with another concurrency test's deliberately
+// paused transaction. Each admission scenario owns a migrated synthetic schema.
+async fn admission_database() -> Option<(PgPool, PgPool, String)> {
+    let admin = test_pool().await?;
+    let schema = format!("admission_{}", Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&admin)
+        .await
+        .unwrap();
+    let pool = admission_pool(&schema, "admission-observer", 2).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    Some((admin, pool, schema))
+}
+async fn admission_pool(schema: &str, label: &str, connections: u32) -> PgPool {
+    let url = std::env::var("KAMORI_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    PgPoolOptions::new()
+        .max_connections(connections)
+        .connect_with(
+            options
+                .options([("search_path", schema)])
+                .application_name(label),
+        )
+        .await
+        .unwrap()
+}
+async fn drop_admission_database(admin: &PgPool, pool: PgPool, schema: &str) {
+    pool.close().await;
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(admin)
+        .await
+        .unwrap();
+}
+
+async fn admit_workspace(
+    pool: &PgPool,
+    owner: Uuid,
+    personal: bool,
+) -> Result<Uuid, crate::features::common::ApiError> {
+    use crate::features::workspaces::repositories::{
+        create_team_workspace_for_owner, ensure_personal_workspace_for_user,
+    };
+    if personal {
+        ensure_personal_workspace_for_user(pool, owner).await
+    } else {
+        create_team_workspace_for_owner(pool, owner, &[1]).await
+    }
+}
+
+async fn delete_account(
+    pool: &PgPool,
+    owner: Uuid,
+) -> Result<bool, crate::features::common::ApiError> {
+    let mut tx = pool.begin().await.unwrap();
+    let result = crate::features::users::repositories::delete_user(
+        &mut tx,
+        AuthenticationBinding {
+            user_id: owner,
+            generation: 0,
+            session_id: None,
+        },
+    )
+    .await;
+    if result.is_ok() {
+        tx.commit().await.unwrap();
+    } else {
+        tx.rollback().await.unwrap();
+    }
+    result
+}
+
+// Observe admission itself: a generic blocked connection could instead be
+// waiting for a late FK/user lock, which would not protect candidate discovery.
+async fn waits_for_admission(pool: &PgPool, label: &str, owner: Uuid) -> bool {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid WHERE a.application_name=$1 AND NOT l.granted AND l.locktype='advisory' AND l.classid=((hashtextextended($2,913)>>32)&4294967295)::oid AND l.objid=(hashtextextended($2,913)&4294967295)::oid)")
+        .bind(label).bind(owner.to_string()).fetch_one(pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn final_late_team_workspace_cannot_escape_account_deletion() {
+    late_workspace_admission(false).await;
+}
+#[tokio::test]
+async fn final_late_personal_workspace_cannot_escape_account_deletion() {
+    late_workspace_admission(true).await;
+}
+async fn late_workspace_admission(personal: bool) {
+    let Some((admin, pool, schema)) = admission_database().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let (workspace, mut envelope) = operation_fixture(&pool, owner).await;
+    // Leave no personal workspace, so ensure must exercise its insert path.
+    sqlx::query("UPDATE workspaces SET kind='team' WHERE id=$1")
+        .bind(workspace)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let label = format!("late-create-{owner}");
+    let delete_label = format!("late-delete-{owner}");
+    let create_pool = admission_pool(&schema, &label, 1).await;
+    let delete_pool = admission_pool(&schema, &delete_label, 1).await;
+    let append_label = format!("late-append-{owner}");
+    let append_pool = admission_pool(&schema, &append_label, 1).await;
+    let trigger = format!("zz_admission_gate_{}", owner.simple());
+    let gate_key = i64::from_be_bytes(owner.as_bytes()[..8].try_into().unwrap());
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.owner_user_id = '{owner}'::uuid THEN PERFORM pg_advisory_xact_lock({gate_key}); END IF; RETURN OLD; END; $$; CREATE TRIGGER {trigger} BEFORE DELETE ON security_spaces FOR EACH ROW EXECUTE FUNCTION {trigger}();"))).execute(&pool).await.unwrap();
+    let mut gate = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(gate_key)
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let deletion = tokio::spawn(async move { delete_account(&delete_pool, owner).await });
+    waiting(&pool, &delete_label).await;
+    let mut creation =
+        tokio::spawn(async move { admit_workspace(&create_pool, owner, personal).await });
+    let early = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            tokio::select! {
+                result = &mut creation => break Some(result.unwrap()),
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    if waits_for_admission(&pool, &label, owner).await { break None; }
+                }
+            }
+        }
+    })
+    .await
+    .expect("creation must complete or reach the admission gate");
+    let mut append = None;
+    let blocked = early.is_none();
+    // On the old implementation exercise the complete reachable cycle, using
+    // real workspace/space creation and signed append, not hand-written locks.
+    if let Some(Ok(late_workspace)) = &early {
+        use crate::features::spaces::{
+            dto::CreateSpaceRequest,
+            repositories::{CreateSpaceResult, create_space},
+        };
+        envelope.space_id = Uuid::new_v4();
+        envelope.client_op_id = Uuid::new_v4();
+        envelope.sign(&SigningKey::from_bytes(&[17; 32]));
+        let result = create_space(
+            &pool,
+            owner,
+            *late_workspace,
+            &CreateSpaceRequest {
+                workspace_id: Some(*late_workspace),
+                space_id: envelope.space_id,
+                encrypted_metadata: vec![1],
+                device_key_packages: vec![DeviceKeyPackage {
+                    device_id: envelope.author_device_id,
+                    key_epoch: 1,
+                    encrypted_key_package: vec![1],
+                }],
+                encrypted_recovery_key_package: vec![2; 49],
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, CreateSpaceResult::Created(_)));
+        append = Some(tokio::spawn(async move {
+            append_operation(&append_pool, owner, &envelope, 1_000_000, 1_000_000).await
+        }));
+        waiting(&pool, &append_label).await;
+    }
+    gate.commit().await.unwrap();
+    let deletion = tokio::time::timeout(Duration::from_secs(15), deletion)
+        .await
+        .unwrap()
+        .unwrap();
+    let creation = if let Some(result) = early {
+        result
+    } else {
+        creation.await.unwrap()
+    };
+    let append = if let Some(append) = append {
+        Some(append.await.unwrap())
+    } else {
+        None
+    };
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP TRIGGER {trigger} ON security_spaces; DROP FUNCTION {trigger}();"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_user_id=$1")
+            .bind(owner)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let deleted: bool = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM users WHERE id=$1")
+        .bind(owner)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    drop_admission_database(&admin, pool, &schema).await;
+    assert!(deletion.expect("production delete must not deadlock"));
+    if let Some(append) = append {
+        append.expect("production append must not deadlock");
+    }
+    assert!(
+        blocked,
+        "workspace creation must wait before admitting a new cascade"
+    );
+    assert_eq!(
+        creation.unwrap_err().0,
+        axum::http::StatusCode::UNAUTHORIZED
+    );
+    assert!(deleted);
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn final_workspace_admission_first_is_included_in_account_deletion() {
+    let Some((admin, pool, schema)) = admission_database().await else {
+        return;
+    };
+    for (personal, existing) in [(false, false), (true, false), (true, true)] {
+        let owner = Uuid::new_v4();
+        let (workspace, _) = operation_fixture(&pool, owner).await;
+        if !existing {
+            sqlx::query("UPDATE workspaces SET kind='team' WHERE id=$1")
+                .bind(workspace)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let (table, owner_column) = if existing {
+            ("workspace_members", "user_id")
+        } else {
+            ("workspaces", "owner_user_id")
+        };
+        let trigger = format!("admit_first_{}", owner.simple());
+        let gate_key = i64::from_be_bytes(owner.as_bytes()[..8].try_into().unwrap());
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.{owner_column} = '{owner}'::uuid THEN PERFORM pg_advisory_xact_lock({gate_key}); END IF; RETURN NEW; END; $$; CREATE TRIGGER {trigger} AFTER INSERT ON {table} FOR EACH ROW EXECUTE FUNCTION {trigger}();"))).execute(&pool).await.unwrap();
+        let create_label = format!("first-create-{owner}");
+        let delete_label = format!("after-create-delete-{owner}");
+        let create_pool = admission_pool(&schema, &create_label, 1).await;
+        let delete_pool = admission_pool(&schema, &delete_label, 1).await;
+        let mut gate = pool.begin().await.unwrap();
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(gate_key)
+            .execute(&mut *gate)
+            .await
+            .unwrap();
+        let creation =
+            tokio::spawn(async move { admit_workspace(&create_pool, owner, personal).await });
+        waiting(&pool, &create_label).await;
+        let deletion = tokio::spawn(async move { delete_account(&delete_pool, owner).await });
+        waiting(&pool, &delete_label).await;
+        let admission_wait = waits_for_admission(&pool, &delete_label, owner).await;
+        gate.commit().await.unwrap();
+        let (creation, deletion) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(creation, deletion)
+        })
+        .await
+        .unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "DROP TRIGGER {trigger} ON {table}; DROP FUNCTION {trigger}();"
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_user_id=$1")
+                .bind(owner)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        clean(&pool, owner).await;
+        creation
+            .unwrap()
+            .expect("creation winning admission completes its membership atomically");
+        assert!(
+            deletion
+                .unwrap()
+                .expect("delete after creation must not deadlock")
+        );
+        assert!(
+            admission_wait,
+            "deletion must await complete workspace and membership admission"
+        );
+        assert_eq!(remaining, 0);
+    }
+    drop_admission_database(&admin, pool, &schema).await;
+}
+
+#[tokio::test]
+async fn final_workspace_offer_and_account_deletion_share_admission() {
+    let Some((admin, pool, schema)) = admission_database().await else {
+        return;
+    };
+    for deletion_first in [true, false] {
+        let old = Uuid::new_v4();
+        let recipient = Uuid::new_v4();
+        let (workspace, _) = operation_fixture(&pool, old).await;
+        operation_fixture(&pool, recipient).await;
+        sqlx::query("UPDATE workspaces SET kind='team' WHERE id=$1")
+            .bind(workspace)
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (user, role) in [(old, "owner"), (recipient, "member")] {
+            sqlx::query(
+                "INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES($1,$2,$3,$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(workspace)
+            .bind(user)
+            .bind(role)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let offer = match create_offer(
+            &pool,
+            old,
+            OwnershipResourceKind::Workspace,
+            workspace,
+            recipient,
+        )
+        .await
+        .unwrap()
+        {
+            CreateOfferResult::Created(offer) => offer,
+            _ => panic!("valid workspace transfer fixture"),
+        };
+        let accept_label = format!("admit-offer-{recipient}");
+        let delete_label = format!("delete-offer-{recipient}");
+        let accept_pool = admission_pool(&schema, &accept_label, 1).await;
+        let delete_pool = admission_pool(&schema, &delete_label, 1).await;
+        let trigger = format!("zz_offer_gate_{}", recipient.simple());
+        let gate_key = i64::from_be_bytes(recipient.as_bytes()[..8].try_into().unwrap());
+        if deletion_first {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.owner_user_id = '{recipient}'::uuid THEN PERFORM pg_advisory_xact_lock({gate_key}); END IF; RETURN OLD; END; $$; CREATE TRIGGER {trigger} BEFORE DELETE ON security_spaces FOR EACH ROW EXECUTE FUNCTION {trigger}();"))).execute(&pool).await.unwrap();
+        }
+        let mut gate = pool.begin().await.unwrap();
+        if deletion_first {
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(gate_key)
+                .execute(&mut *gate)
+                .await
+                .unwrap();
+        } else {
+            sqlx::query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE")
+                .bind(workspace)
+                .execute(&mut *gate)
+                .await
+                .unwrap();
+        }
+        let accept = async move {
+            accept_offer(
+                &accept_pool,
+                recipient,
+                offer.transfer_id,
+                1_000_000,
+                1_000_000,
+            )
+            .await
+        };
+        let delete = async move { delete_account(&delete_pool, recipient).await };
+        let (accept, delete, admission_wait) = if deletion_first {
+            let delete = tokio::spawn(delete);
+            waiting(&pool, &delete_label).await;
+            let accept = tokio::spawn(accept);
+            waiting(&pool, &accept_label).await;
+            let admission_wait = waits_for_admission(&pool, &accept_label, recipient).await;
+            (accept, delete, admission_wait)
+        } else {
+            let accept = tokio::spawn(accept);
+            waiting(&pool, &accept_label).await;
+            let delete = tokio::spawn(delete);
+            waiting(&pool, &delete_label).await;
+            let admission_wait = waits_for_admission(&pool, &delete_label, recipient).await;
+            (accept, delete, admission_wait)
+        };
+        gate.commit().await.unwrap();
+        let (accept, delete) = tokio::time::timeout(Duration::from_secs(15), async {
+            tokio::join!(accept, delete)
+        })
+        .await
+        .unwrap();
+        if deletion_first {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+                "DROP TRIGGER {trigger} ON security_spaces; DROP FUNCTION {trigger}();"
+            )))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let owner: Uuid = sqlx::query_scalar("SELECT owner_user_id FROM workspaces WHERE id=$1")
+            .bind(workspace)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // Remove the transferred workspace before its former space owner.
+        clean(&pool, recipient).await;
+        clean(&pool, old).await;
+        let accept = accept
+            .unwrap()
+            .expect("workspace transfer must not deadlock against account deletion");
+        let delete = delete
+            .unwrap()
+            .expect("account deletion must not deadlock against workspace transfer");
+        assert!(
+            admission_wait,
+            "workspace admission must precede offer and resource locks"
+        );
+        if deletion_first {
+            assert!(delete);
+            assert!(matches!(
+                accept,
+                AcceptOfferResult::NotFound | AcceptOfferResult::NoLongerValid
+            ));
+            assert_eq!(owner, old);
+        } else {
+            assert!(matches!(accept, AcceptOfferResult::Accepted));
+            assert!(
+                !delete,
+                "new shared workspace ownership must block account deletion"
+            );
+            assert_eq!(owner, recipient);
+        }
+    }
+    drop_admission_database(&admin, pool, &schema).await;
+}
