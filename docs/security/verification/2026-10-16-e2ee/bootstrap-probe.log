@@ -1,0 +1,19 @@
+Command: CARGO_TARGET_DIR=/private/tmp/kamori-e2ee-vv-20261016/target rustup run 1.97.1 cargo test --locked --offline --manifest-path docs/security/verification/2026-10-16-e2ee/bootstrap-probe/Cargo.toml --lib -- --nocapture
+Toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14)
+
+   Compiling kamori-e2ee-design-probe v0.0.0 (/Users/yujin/Development/kamori-app/kamori-app/kamori-app/docs/security/verification/2026-10-16-e2ee/bootstrap-probe)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/lib.rs (/private/tmp/kamori-e2ee-vv-20261016/target/debug/deps/kamori_e2ee_design_probe-e9c26005a147ff85)
+
+running 6 tests
+test tests::library_accepts_empty_bundle_so_application_needs_length_guard ... ok
+test tests::mandatory_psk_rejects_api_replacement_using_public_key_only ... ok
+test tests::authenticated_return_rejects_different_public_transcript ... ok
+test tests::mandatory_psk_rejects_wrong_pairing_secret ... ok
+test tests::base_accepts_attacker_selected_root_without_recipient_substitution ... ok
+test tests::matching_out_of_band_psk_accepts_honest_return ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+Exit status: 0
