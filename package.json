@@ -32,7 +32,9 @@
     "acceptance:reset": "bash scripts/acceptance.sh reset",
     "acceptance:logs": "bash scripts/acceptance.sh logs",
     "acceptance:smoke": "bash scripts/acceptance.sh smoke",
-    "acceptance:full": "bash scripts/acceptance.sh full"
+    "acceptance:full": "bash scripts/acceptance.sh full",
+    "wasm:build": "bun scripts/web-crypto-wasm.mjs build",
+    "wasm:check": "bun scripts/web-crypto-wasm.mjs check"
   },
   "devDependencies": {
     "turbo": "^2.11.8"

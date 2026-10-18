@@ -6,10 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "bun ../../scripts/web-crypto-wasm.mjs check && vite build",
     "preview": "vite preview",
     "sync": "svelte-kit sync",
-    "check": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json && tsc --noEmit --project src/service-worker/tsconfig.json",
+    "check": "bun ../../scripts/web-crypto-wasm.mjs check && svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json && tsc --noEmit --project src/service-worker/tsconfig.json",
     "lint": "bun run check",
     "test:unit": "bun test src/lib",
     "test": "bun run check && bun run test:unit && bun run test:ui",

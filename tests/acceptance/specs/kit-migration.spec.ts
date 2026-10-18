@@ -53,9 +53,21 @@ test('@smoke @full Kit route state follows workspace, settings, history and shar
 });
 
 test('@smoke @full built module worker precaches assets, restores offline shell and cleans only old shell caches', async ({ page, context }) => {
-  const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error' && !/401|Unauthorized/.test(message.text())) errors.push(message.text()); });
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  let intentionallyOffline = false;
+  const csrfBootstrapUrl = new URL('/auth/csrf', process.env.KAMORI_ACCEPTANCE_API_URL ?? 'http://127.0.0.1:18080').href;
+  page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    // This signed-out test has no refresh cookie. Exempt only the observed
+    // browser resource error for the API's unauthenticated CSRF bootstrap.
+    if (message.location().url === csrfBootstrapUrl &&
+      text === 'Failed to load resource: the server responded with a status of 401 (Unauthorized)') return;
+    if (intentionallyOffline && text === 'Failed to load resource: net::ERR_INTERNET_DISCONNECTED') return;
+    consoleErrors.push(text);
+  });
   await page.goto('/app');
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
@@ -74,6 +86,7 @@ test('@smoke @full built module worker precaches assets, restores offline shell 
   expect(shell.paths.some(path => path.endsWith('.wasm'))).toBe(true);
   // Controlled navigation puts /app into the network-first navigation cache.
   await page.reload();
+  intentionallyOffline = true;
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole('region', { name: 'Sign in' })).toBeVisible();
@@ -82,6 +95,7 @@ test('@smoke @full built module worker precaches assets, restores offline shell 
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Create account' })).toBeVisible();
   await context.setOffline(false);
+  intentionallyOffline = false;
   await page.goto('/app');
   // Reinstall the actual built worker to run its install/activate lifecycle with
   // stale version and unrelated caches present, without changing generated JS.
@@ -95,6 +109,7 @@ test('@smoke @full built module worker precaches assets, restores offline shell 
   await expect.poll(() => page.evaluate(() => caches.keys())).not.toContain('kamori-shell-obsolete-version');
   expect(await page.evaluate(() => caches.keys())).toContain('unrelated-application-cache');
   expect(await page.evaluate(() => caches.keys())).toContain(shell.name);
-  // Offline reload can log expected failed network requests; CSP/JS failures cannot.
-  expect(errors.filter(error => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|net::ERR_FAILED/.test(error))).toEqual([]);
+  // Uncaught exceptions always fail, including during intentional offline work.
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });

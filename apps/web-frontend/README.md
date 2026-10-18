@@ -267,34 +267,32 @@ Default dev URL:
 
 The web app uses generated bindings from `packages/crypto-core-lib` with `feature = "wasm"`.
 
-One-time setup:
+Use the Rust version in `rust-toolchain.toml` and the exact `wasm-bindgen`
+version in `Cargo.lock` (currently 1.99.0 and 0.2.127):
 
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.127
+rustup target add wasm32-unknown-unknown --toolchain 1.99.0
+cargo +1.99.0 install wasm-bindgen-cli --version 0.2.127 --locked
 ```
 
-From repository root:
+From the repository root, with the selected toolchain first in `PATH`:
 
 ```bash
-CARGO_TARGET_DIR=/tmp/kamori-wasm-target \
-  cargo build -p crypto-core-lib --release --target wasm32-unknown-unknown --features wasm --no-default-features
-
-wasm-bindgen \
-  --target web \
-  --out-dir apps/web-frontend/src/lib/wasm/crypto-core-lib \
-  /tmp/kamori-wasm-target/wasm32-unknown-unknown/release/crypto_core_lib.wasm
+export PATH="$(rustup which --toolchain 1.99.0 rustc | xargs dirname):$PATH"
+CARGO_TARGET_DIR=/tmp/kamori-wasm-target bun run wasm:build
+bun run wasm:check
 ```
 
-The `wasm-bindgen-cli` version must exactly match the `wasm-bindgen` version
-resolved in `Cargo.lock`. Keep the generated browser artifact on the release
-profile: debug generation makes the shipped WASM several times larger.
+The canonical build verifies the actual Rust/Cargo and wasm-bindgen versions,
+uses the locked release WASM feature build, stages generated outputs, then writes
+`src/lib/wasm/crypto-core-lib/manifest.json`. Commit the manifest and all four
+`crypto_core_lib*` generated files together. Do not edit the manifest by hand.
 
-Generated files:
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib.js`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib.d.ts`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm.d.ts`
+Ordinary web `check` and `build` (including the Docker build) reject missing or
+stale artifacts. The manifest hashes the Cargo graph, toolchain, generator, core
+Rust sources and generated outputs, including added/deleted files. It detects
+unintentional staleness; it is not a cryptographic build attestation. Guard tests
+run in frontend CI with `node --test scripts/web-crypto-wasm.test.mjs`.
 
 ## Quality and Test Commands
 

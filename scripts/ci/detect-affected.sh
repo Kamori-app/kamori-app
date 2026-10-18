@@ -61,13 +61,13 @@ else
     esac
 
     case "$file" in
-      Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/cloud-server/*|packages/crypto-core-lib/*|apps/dav-bridge-desktop/src-tauri/*|scripts/cargo-*.sh)
+      Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/config|.cargo/config.toml|apps/cloud-server/*|packages/crypto-core-lib/*|apps/dav-bridge-desktop/src-tauri/*|scripts/cargo-*.sh)
         rust=true
         ;;
     esac
 
     case "$file" in
-      scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|turbo.json|apps/*/package.json|packages/*/package.json|tests/*/package.json|apps/web-frontend/*|apps/admin-frontend/*|apps/dav-bridge-desktop/*)
+      Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/config|.cargo/config.toml|packages/crypto-core-lib/*|apps/*/Cargo.toml|apps/*/*/Cargo.toml|packages/*/Cargo.toml|scripts/web-crypto-wasm.mjs|scripts/web-crypto-wasm.test.mjs|scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|turbo.json|apps/*/package.json|packages/*/package.json|tests/*/package.json|apps/web-frontend/*|apps/admin-frontend/*|apps/dav-bridge-desktop/*)
         frontend=true
         ;;
       tests/acceptance/ui-gates.config.ts|tests/acceptance/specs/uiHost.ts|tests/acceptance/specs/*-ui.spec.ts|tests/acceptance/fixtures/uiGates.bundle.mjs|tests/acceptance/fixtures/*Ui.js|tests/acceptance/specs/pim-recurrence.spec.ts|tests/acceptance/fixtures/calendarCorpus.js|tests/acceptance/fixtures/taskEditor.bundle.mjs)
@@ -83,7 +83,7 @@ else
         android=true
         ios=true
         ;;
-      apps/dav-bridge-mobile/rust_builder/*|packages/crypto-core-lib/*|flutter_rust_bridge.yaml|Cargo.toml|Cargo.lock|rust-toolchain.toml)
+      apps/dav-bridge-mobile/rust_builder/*|packages/crypto-core-lib/*|flutter_rust_bridge.yaml|Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/config|.cargo/config.toml)
         android=true
         ios=true
         ;;
@@ -96,7 +96,7 @@ else
     esac
 
     case "$file" in
-      scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|apps/*/package.json|packages/*/package.json|tests/*/package.json|Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/cloud-server/*|apps/web-frontend/*|apps/admin-frontend/*|packages/crypto-core-lib/*|deploy/cloud-server/*|deploy/edge/*|tests/acceptance/*|scripts/acceptance.sh)
+      apps/*/Cargo.toml|apps/*/*/Cargo.toml|packages/*/Cargo.toml|scripts/web-crypto-wasm.mjs|scripts/web-crypto-wasm.test.mjs|scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|apps/*/package.json|packages/*/package.json|tests/*/package.json|Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/config|.cargo/config.toml|apps/cloud-server/*|apps/web-frontend/*|apps/admin-frontend/*|packages/crypto-core-lib/*|deploy/cloud-server/*|deploy/edge/*|tests/acceptance/*|scripts/acceptance.sh)
         server=true
         ;;
     esac

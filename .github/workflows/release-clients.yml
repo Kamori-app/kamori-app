@@ -190,6 +190,7 @@ jobs:
         if: matrix.platform == 'linux'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          draft: true
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
             Kamori.flatpak
@@ -265,6 +266,7 @@ jobs:
       - name: Attach Android artifacts
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          draft: true
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
             apps/dav-bridge-mobile/build/app/outputs/bundle/release/app-release.aab
@@ -352,6 +354,7 @@ jobs:
       - name: Attach signed iOS IPA
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          draft: true
           tag_name: ${{ env.RELEASE_TAG }}
           files: apps/dav-bridge-mobile/build/ios/ipa/*.ipa
       - name: Remove iOS signing material

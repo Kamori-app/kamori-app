@@ -139,3 +139,22 @@ corpus=$(printf '%s\n' \
 for corpus_input in tests/fixtures/pim/zoned-exceptions.ics tests/fixtures/pim/custom-contact.vcf tests/fixtures/pim/corpus.json; do
   assert_case "shared PIM corpus: $corpus_input" "$corpus" "$corpus_input"
 done
+
+# Browser crypto artifacts depend on the Rust graph and generator inputs.
+crypto_shared=$(printf '%s\n' \
+  'rust=true' \
+  'frontend=true' \
+  'mobile=false' \
+  'android=true' \
+  'ios=true' \
+  'server=true' \
+  'infrastructure=false')
+for crypto_input in Cargo.toml Cargo.lock rust-toolchain.toml packages/crypto-core-lib/src/recovery.rs packages/crypto-core-lib/build.rs; do
+  assert_case "browser WASM input: $crypto_input" "$crypto_shared" "$crypto_input"
+done
+for guard_input in scripts/web-crypto-wasm.mjs scripts/web-crypto-wasm.test.mjs; do
+  assert_case "browser WASM tooling: $guard_input" "$web" "$guard_input"
+done
+assert_case "cloud manifest also affects WASM graph" "${cloud/frontend=false/frontend=true}" apps/cloud-server/Cargo.toml
+assert_case "Cargo configuration" "$crypto_shared" .cargo/config.toml
+assert_case "desktop workspace manifest" "${cloud/frontend=false/frontend=true}" apps/dav-bridge-desktop/src-tauri/Cargo.toml
