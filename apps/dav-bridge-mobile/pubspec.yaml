@@ -11,15 +11,15 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  flutter_riverpod: ^3.4.2
-  workmanager: ^0.10.9
+  flutter_riverpod: ^3.4.3
+  workmanager: ^0.10.10
   uuid: ^4.6.0
   # 11.x requires compile SDK 37; Android target SDK remains Flutter-managed.
-  flutter_secure_storage: ^11.0.0
-  flutter_contacts: ^2.3.1
+  flutter_secure_storage: ^11.2.0
+  flutter_contacts: ^2.6.0
   device_calendar_plus: ^0.8.0
   rrule: ^0.2.18
-  timezone: ^0.11.1
+  timezone: ^0.11.2
 
   collection: any
   crypto: ^3.0.6
@@ -28,8 +28,8 @@ dependencies:
     path: rust_builder
 dev_dependencies:
   # Select real native scheduling adapters independently of the test host OS.
-  workmanager_android: 0.10.8
-  workmanager_apple: 0.9.10
+  workmanager_android: 0.10.9
+  workmanager_apple: 0.9.11
   # Exercise the installed calendar provider channel without native OS access.
   device_calendar_plus_android: 0.7.1
   integration_test:

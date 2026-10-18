@@ -34,11 +34,11 @@
 **Inputs:** pr-115/128/4/5/8 JSON/diffs and mobile-review.md in reviewartifactdirectory. Exactsourceheads are in initial-snapshot.json.
 **Produces:** Updated actionSHA pins and seven Flutter dependencies, Gradle9.7.0 + AGP9.3.1 + Kotlin2.4.10 together; preserve builtInKotlin/newDsl compatibility flags, matching realWorkmanager adapter pins and productionFRB.
 
-- [ ] Apply only relevant originalPRdeltas against currentmain, resolve context without reverting prioraudit fixes.
-- [ ] Verify actual nativeadapter/interface lock consistency and no dropped application dependency; preserve explicit testadapterregistration.
-- [ ] Run Flutter pub resolution/analyze/test, focused scheduling paths and Androidtoolchain compatibility check. Save exactcommands/versions/outputs; finalcombinedAndroid/iOS nativepackage gates run in CI.
-- [ ] Review changed action upstream contracts relevant to current inputs; do not weaken permissions/security/release controls. Record unexecuted release-only paths honestly.
-- [ ] Self-review, scopedcommit and taskreport. No push/branchswitch.
+- [x] Apply only relevant originalPRdeltas against currentmain, resolve context without reverting prioraudit fixes.
+- [x] Verify actual nativeadapter/interface lock consistency and no dropped application dependency; preserve explicit testadapterregistration.
+- [x] Run Flutter pub resolution/analyze/test, focused scheduling paths and Androidtoolchain compatibility check. Save exactcommands/versions/outputs; finalcombinedAndroid/iOS nativepackage gates run in CI.
+- [x] Review changed action upstream contracts relevant to current inputs; do not weaken permissions/security/release controls. Record unexecuted release-only paths honestly.
+- [x] Self-review, scopedcommit and taskreport. No push/branchswitch.
 
 ### Task 2: Upgrade Rust graph/compiler and repair DAV XML compatibility
 
