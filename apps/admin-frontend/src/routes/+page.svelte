@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { adminApi, type AuditEntry, type Dashboard, type RuntimeSetting } from "$lib/api";
+  import { adminApi, type AuditEntry, type Dashboard, type RuntimeSetting } from "#lib/api.ts";
   import {
     parseCreationOptions,
     parseRequestOptions,
     serializeAssertion,
     serializeAttestation,
-  } from "$lib/webauthn";
+  } from "#lib/webauthn.ts";
 
   const baseUrl =
     (import.meta.env.VITE_KAMORI_API_BASE_URL as string | undefined)?.trim() ||

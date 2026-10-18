@@ -1,15 +1,17 @@
 <script lang="ts">
-    import { page } from "$app/stores";
+    import { page as pageState } from "$app/state";
+    import { toStore } from "svelte/store";
+    const page = toStore(() => ({ url: pageState.url }));
     import { replaceState } from "$app/navigation";
-    import { locale, setLocale, type AppLocale } from "$lib/i18n";
+    import { locale, setLocale, type AppLocale } from "#lib/i18n.ts";
 
     export let value: AppLocale | undefined = undefined;
     export let onSelect: ((value: AppLocale) => void) | undefined = undefined;
 
     $: selected = value ?? $locale;
 
-    const hrefFor = (next: AppLocale): string => {
-        const url = new URL($page.url);
+    const hrefFor = (next: AppLocale, currentHref: string): string => {
+        const url = new URL(currentHref);
         url.searchParams.set("lang", next);
         return `${url.pathname}${url.search}${url.hash}`;
     };
@@ -32,14 +34,14 @@
 
 <div class="locale-switch" role="group" aria-label="Language / Язык">
     <a
-        href={hrefFor("en")}
+        href={hrefFor("en", $page.url.href)}
         class:active={selected === "en"}
         aria-current={selected === "en" ? "true" : undefined}
         on:click={(event) => select(event, "en")}>EN</a
     >
     <span aria-hidden="true">/</span>
     <a
-        href={hrefFor("ru")}
+        href={hrefFor("ru", $page.url.href)}
         class:active={selected === "ru"}
         aria-current={selected === "ru" ? "true" : undefined}
         on:click={(event) => select(event, "ru")}>RU</a

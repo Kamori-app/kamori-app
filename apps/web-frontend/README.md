@@ -210,7 +210,7 @@ Layers:
 - Generated Rust wasm-bindgen artifacts in `src/lib/wasm/crypto-core-lib/`.
 
 Current adapter:
-- `@sveltejs/adapter-node` in [`svelte.config.js`](./svelte.config.js).
+- `@sveltejs/adapter-node` in [`vite.config.ts`](./vite.config.ts).
 
 ## API Dependencies
 
@@ -329,3 +329,30 @@ Release checklist:
 1. Build the app in CI (`bun run --filter web-frontend build`).
 2. Verify CORS policy on `cloud-server` allows web origin.
 3. Validate auth + invite-code flows against production backend.
+
+
+### Production frontend runtime
+
+The web and admin images build with Bun 1.4.3 and run on Node 24 LTS using
+[`scripts/frontend-server.mjs`](../../scripts/frontend-server.mjs). SvelteKit 3
+configuration lives in each application's Vite plugin. The launcher preserves
+runtime `ORIGIN` overrides used by production and acceptance: use an absolute
+HTTP(S) origin with no credentials, path, query or fragment. It overwrites private
+origin headers before the adapter sees a request and retains the client's
+`Origin` header for SvelteKit CSRF checks. Without `ORIGIN`, adapter proxy headers
+remain configurable.
+
+The launcher supports `HOST`, `PORT`, `BODY_SIZE_LIMIT`, `ADDRESS_HEADER`,
+`XFF_DEPTH`, `PROTOCOL_HEADER`, `HOST_HEADER`, `PORT_HEADER`, `SHUTDOWN_TIMEOUT`
+(default 30 seconds), `KEEP_ALIVE_TIMEOUT` and `HEADERS_TIMEOUT` (seconds).
+SIGTERM/SIGINT drain requests, close idle connections and emit `sveltekit:shutdown`;
+the shutdown deadline closes remaining connections. Unix sockets, systemd socket
+activation and `IDLE_TIMEOUT` are not supported by this launcher; checked-in
+container deployments use TCP. The web shell uses absolute paths so its cached
+`/app` document can hydrate at an uncached deep URL while offline.
+
+After building both frontends, run `node --test scripts/frontend-server.test.mjs`
+for real HTTP origin, body-limit and lifecycle checks (also run in frontend CI).
+`tests/acceptance/specs/kit-migration.spec.ts` runs against production images in
+both PR smoke and full acceptance to cover the real router and module worker.
+The web `check` script separately typechecks `src/service-worker/tsconfig.json`.

@@ -2,7 +2,7 @@
     import {
         dismissNotification,
         notificationStore,
-    } from "$lib/stores/notifications";
+    } from "#lib/stores/notifications.ts";
 
     const tone = {
         success: "border-moss/40 bg-[#eef5ea]",

@@ -1,6 +1,6 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { writable } from "svelte/store";
-import { normalizeCloudBaseUrl } from "$lib/endpoint";
+import { normalizeCloudBaseUrl } from "#lib/endpoint.ts";
 
 /** In-memory encrypted-space descriptor hydrated from the vault/cloud. */
 export interface SpaceEntry {

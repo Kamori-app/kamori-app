@@ -10,7 +10,7 @@
     export let embedded = false;
     export let width: "lg" | "2xl" | "3xl" = "lg";
     import { onDestroy } from "svelte";
-    import { locale } from "$lib/i18n";
+    import { locale } from "#lib/i18n.ts";
 
     let bodyOverflowBeforeOpen: string | null = null;
 

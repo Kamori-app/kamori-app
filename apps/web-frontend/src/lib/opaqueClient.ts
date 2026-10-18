@@ -20,8 +20,8 @@ import initOpaqueWasm, {
   unwrap_account_master_key,
   verify_operation_envelope,
   wrap_account_master_key,
-} from "$lib/wasm/crypto-core-lib/crypto_core_lib.js";
-import { normalizeByteArray } from "$lib/binary";
+} from "#lib/wasm/crypto-core-lib/crypto_core_lib.js";
+import { normalizeByteArray } from "#lib/binary.ts";
 
 /**
  * Browser-side OPAQUE helpers backed by generated wasm-bindgen exports.

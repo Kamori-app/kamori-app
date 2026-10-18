@@ -67,7 +67,7 @@ else
     esac
 
     case "$file" in
-      package.json|bun.lock|bunfig.toml|turbo.json|apps/*/package.json|packages/*/package.json|tests/*/package.json|apps/web-frontend/*|apps/admin-frontend/*|apps/dav-bridge-desktop/*)
+      scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|turbo.json|apps/*/package.json|packages/*/package.json|tests/*/package.json|apps/web-frontend/*|apps/admin-frontend/*|apps/dav-bridge-desktop/*)
         frontend=true
         ;;
       tests/acceptance/ui-gates.config.ts|tests/acceptance/specs/uiHost.ts|tests/acceptance/specs/*-ui.spec.ts|tests/acceptance/fixtures/uiGates.bundle.mjs|tests/acceptance/fixtures/*Ui.js|tests/acceptance/specs/pim-recurrence.spec.ts|tests/acceptance/fixtures/calendarCorpus.js|tests/acceptance/fixtures/taskEditor.bundle.mjs)
@@ -96,7 +96,7 @@ else
     esac
 
     case "$file" in
-      package.json|bun.lock|bunfig.toml|apps/*/package.json|packages/*/package.json|tests/*/package.json|Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/cloud-server/*|apps/web-frontend/*|apps/admin-frontend/*|packages/crypto-core-lib/*|deploy/cloud-server/*|deploy/edge/*|tests/acceptance/*|scripts/acceptance.sh)
+      scripts/frontend-server.mjs|scripts/frontend-server.test.mjs|package.json|bun.lock|bunfig.toml|apps/*/package.json|packages/*/package.json|tests/*/package.json|Cargo.toml|Cargo.lock|rust-toolchain.toml|apps/cloud-server/*|apps/web-frontend/*|apps/admin-frontend/*|packages/crypto-core-lib/*|deploy/cloud-server/*|deploy/edge/*|tests/acceptance/*|scripts/acceptance.sh)
         server=true
         ;;
     esac

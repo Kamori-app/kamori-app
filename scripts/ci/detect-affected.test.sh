@@ -82,6 +82,8 @@ all=$(printf '%s\n' \
   'infrastructure=true')
 
 assert_case "documentation only" "$none" docs/README.md
+assert_case "frontend server launcher" "$web" scripts/frontend-server.mjs
+assert_case "frontend server contracts" "$web" scripts/frontend-server.test.mjs
 assert_case "web application" "$web" apps/web-frontend/src/routes/+page.svelte
 
 # These external inputs drive the desktop/admin default browser gates. A PR

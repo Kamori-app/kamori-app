@@ -1,6 +1,8 @@
-import type { AppLocale } from "$lib/i18n";
+import type { AppLocale } from "#lib/i18n.ts";
 
-export const load = ({ url }: { url: URL }) => {
+import type { PageLoad } from "./$types";
+
+export const load: PageLoad = ({ url }) => {
     const requested = url.searchParams.get("lang");
     const requestedLocale: AppLocale | null =
         requested === "en" || requested === "ru" ? requested : null;

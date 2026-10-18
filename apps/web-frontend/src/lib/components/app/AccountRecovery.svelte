@@ -1,26 +1,26 @@
 <script lang="ts">
     import { decode } from "@msgpack/msgpack";
-    import { cloudApi } from "$lib/api/cloud";
-    import { tokenStore } from "$lib/auth/tokenStore";
+    import { cloudApi } from "#lib/api/cloud.ts";
+    import { tokenStore } from "#lib/auth/tokenStore.ts";
     import {
         deriveDataRecoveryVerifier,
         lockWebVault,
         resetWebCredentialsAfterRecovery,
         storeSpaceKey,
         unlockWebVaultForRecovery,
-    } from "$lib/cryptoVault";
-    import { locale } from "$lib/i18n";
+    } from "#lib/cryptoVault.ts";
+    import { locale } from "#lib/i18n.ts";
     import {
         opaqueSignupFinish,
         opaqueSignupStart,
         recoveryPhraseToMasterKey,
         unwrapSpaceKeyFromAccountRecovery,
         wrapAccountMasterKey,
-    } from "$lib/opaqueClient";
-    import { appState } from "$lib/stores/app";
-    import { notify } from "$lib/stores/notifications";
-    import Button from "$lib/components/ui/Button.svelte";
-    import Input from "$lib/components/ui/Input.svelte";
+    } from "#lib/opaqueClient.ts";
+    import { appState } from "#lib/stores/app.ts";
+    import { notify } from "#lib/stores/notifications.ts";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Input from "#lib/components/ui/Input.svelte";
 
     export let onComplete: () => void = () => {};
     export let onCancel: () => void = () => {};

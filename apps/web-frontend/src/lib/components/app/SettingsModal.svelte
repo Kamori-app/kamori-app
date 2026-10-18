@@ -11,8 +11,8 @@
         type SpaceMemberSummary,
         type SpaceSummary,
         type WorkspaceMember,
-    } from "$lib/api/cloud";
-    import { runWithAccessRefreshRetry } from "$lib/auth/session-flow.js";
+    } from "#lib/api/cloud.ts";
+    import { runWithAccessRefreshRetry } from "#lib/auth/session-flow.js";
     import {
         generateQrSvg,
         masterKeyToRecoveryPhrase,
@@ -24,36 +24,36 @@
         wrapSpaceKeyForDevice,
         decryptVaultBytes,
         encryptVaultBytes,
-    } from "$lib/opaqueClient";
+    } from "#lib/opaqueClient.ts";
     import {
         getActiveWebDevice,
         deleteWebVaultAccount,
         loadSpaceKey,
         lockWebVault,
         withActiveMasterKey,
-    } from "$lib/cryptoVault";
-    import { tokenStore } from "$lib/auth/tokenStore";
-    import { normalizeCloudBaseUrl } from "$lib/endpoint";
-    import { appState } from "$lib/stores/app";
-    import Button from "$lib/components/ui/Button.svelte";
-    import Input from "$lib/components/ui/Input.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
-    import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
-    import { locale } from "$lib/i18n";
-    import { notify } from "$lib/stores/notifications";
+    } from "#lib/cryptoVault.ts";
+    import { tokenStore } from "#lib/auth/tokenStore.ts";
+    import { normalizeCloudBaseUrl } from "#lib/endpoint.ts";
+    import { appState } from "#lib/stores/app.ts";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Input from "#lib/components/ui/Input.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
+    import LocaleSwitch from "#lib/components/LocaleSwitch.svelte";
+    import { locale } from "#lib/i18n.ts";
+    import { notify } from "#lib/stores/notifications.ts";
     import {
         buildDefaultPasskeyLabel,
         parseCreationOptions,
         serializeAttestationCredential,
         toUtf8Bytes,
-    } from "$lib/webauthn";
+    } from "#lib/webauthn.ts";
     import {
         decodePasskeyLabel,
         encodePasskeyLabel,
         normalizePasskeyName,
         PASSKEY_NAME_MAX_LENGTH,
-    } from "$lib/passkeyLabels";
-    import { downloadRecoveryKitFile } from "$lib/recoveryKitFile";
+    } from "#lib/passkeyLabels.ts";
+    import { downloadRecoveryKitFile } from "#lib/recoveryKitFile.ts";
 
     const ruCopy: Record<string, string> = {
         "Web Settings": "Настройки веб-приложения", "Cloud Base URL": "Адрес сервиса Kamori", "Save Settings": "Сохранить настройки",

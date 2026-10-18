@@ -1,6 +1,6 @@
 [toolchain]
 channel = "1.99.0"
-components = ["clippy", "rustfmt", "rust-src"]
+components = ["clippy", "rustfmt", "rust-src", "llvm-tools"]
 targets = [
   "wasm32-unknown-unknown",
   "aarch64-linux-android",

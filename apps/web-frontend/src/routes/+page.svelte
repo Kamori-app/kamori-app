@@ -1,9 +1,9 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { replaceState } from "$app/navigation";
-    import BrandMark from "$lib/components/BrandMark.svelte";
-    import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
-    import { locale, setLocale, type AppLocale } from "$lib/i18n";
+    import BrandMark from "#lib/components/BrandMark.svelte";
+    import LocaleSwitch from "#lib/components/LocaleSwitch.svelte";
+    import { locale, setLocale, type AppLocale } from "#lib/i18n.ts";
 
     const webAppUrl =
         (import.meta.env.VITE_KAMORI_WEB_APP_URL as string | undefined)?.trim() ||

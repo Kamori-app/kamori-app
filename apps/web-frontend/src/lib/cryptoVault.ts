@@ -1,4 +1,4 @@
-import { browser } from "$app/environment";
+import { browser } from "$app/env";
 import { decode, encode } from "@msgpack/msgpack";
 
 import {
@@ -6,13 +6,13 @@ import {
   encryptVaultBytes,
   generateWebDeviceIdentity,
   type WebDeviceIdentity,
-} from "$lib/opaqueClient";
-import type { OperationEnvelopeV1 } from "$lib/opaqueClient";
+} from "#lib/opaqueClient.ts";
+import type { OperationEnvelopeV1 } from "#lib/opaqueClient.ts";
 import type {
   MaterializedOperationState,
   MaterializedPimItem,
   MaterializedPimState,
-} from "$lib/pim";
+} from "#lib/pim.ts";
 
 const DATABASE_NAME = "kamori-web-vault";
 const DATABASE_VERSION = 7;

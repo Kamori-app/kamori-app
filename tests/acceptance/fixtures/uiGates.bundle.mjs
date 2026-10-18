@@ -18,7 +18,7 @@ const bundle = await Bun.build({
       }));
     }
     build.onResolve({ filter: /^@tauri-apps\/api\// }, ({ path }) => ({ path: requireApp.resolve(path) }));
-    build.onResolve({ filter: /^\$lib\// }, ({ path }) => {
+    build.onResolve({ filter: /^(?:\$lib|#lib)\// }, ({ path }) => {
       let resolved = resolve(lib, path.slice(5));
       if (!extname(resolved)) resolved += ".ts";
       if (!existsSync(resolved) && resolved.endsWith(".js")) resolved = resolved.slice(0, -3) + ".ts";
@@ -26,7 +26,8 @@ const bundle = await Bun.build({
     });
     build.onResolve({ filter: /^\$app\// }, ({ path }) => ({ path, namespace: "shell" }));
     build.onLoad({ filter: /.*/, namespace: "shell" }, ({ path }) => ({
-      contents: path === "$app/environment" ? "export const browser = true;" :
+      contents: ["$app/environment", "$app/env"].includes(path) ? "export const browser = true;" :
+        path === "$app/state" ? "export const page = {url: new URL(location.href)};" :
         'import { readable } from "svelte/store"; export const page = readable({url: new URL(location.href)});',
       loader: "js", resolveDir: resolve(lib, ".."),
     }));
