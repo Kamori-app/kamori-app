@@ -103,3 +103,17 @@ Population ruling (SDD ledger): original46baseline is5production+41mounted, not9
 ## Controller integration
 
 After everytaskreview gate, continue sequentially; parallelagents mayresearch read-onlyonly. Finalreview on baseline0db47ae..HEAD, mostcapablemodel; resolve findings in one scopedfixwave. PublishmainPR with explicitbase/main and original12PRsupersession map. Await actualfinalhead all9CIjobs and bothsecurityjobs, fix new failures untilgreen. Merge onlyexpectedreviewedhead; update localmain fastforward, verify content/effectivepins and actualpostmergeallmatrix/fullacceptance. Close original12 as superseded aftermerge and103/104 asunsupported, with reviewablePRbodyreason/link; confirm finalqueue state. No deployment. Archiveownedplanworkspace/evidence and finish cleanmain.
+
+
+### Task 7: Integrate the fresh post-merge Dependabot queue
+
+First integration PR131 is merged at main be7ec731f69819e7ad400d17f83db7fab9499fb7; its current-main verification remains independently mandatory. Original14 PRs are closed, and fresh incompatible direct-TypeScript PR132 is closed with its exact-head CI failure. Newly generated PRs133/134/135/136 require a bounded follow-up, in visible fix/dependabot-followup-updates from that main. The branch exception and cost are recorded in the SDD ledger.
+
+**Files:** only exact reviewed Kotlin/AGP/Gradle configuration and Action pins plus necessary proved compatibility repairs, this plan and current audit. No Rust/dependency-graph/app-runtime/E2EE redesign.
+**Produces:** reviewed latest four proposals applied together where compatible, with exact-head native/action-contract proof and an explicit main PR.
+
+- [x] Read-only review exact four heads/diffs and official contracts/compatibility; record actual current PR CI and any bounded support caveats.
+- [x] Apply approved exact versions/pins together, preserving mandatory native flags, release draft boundaries and all other behavior. Validate concrete inputs/behavior of upgraded Actions without running a real release/deployment.
+- [x] Run appropriate focused configuration/native checks, source-preservation evidence and meaningful regression tests only for actual compatibility repairs; no implementation-shaped tests for version-only changes. Existing current-app results remain source-qualified.
+- [x] Update audit with four new dispositions and effective current pins, self-review and scoped commit/report; independent task/follow-up diff review before publication.
+- [ ] Publish explicit main PR, await affected exact-head CI/security, merge expected reviewed head and verify current-main affected checks. Close superseded four only after equivalent changes land; refresh queue and preserve all existing resources.
