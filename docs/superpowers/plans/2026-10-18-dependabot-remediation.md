@@ -69,13 +69,13 @@
 **Inputs:** javascript-review.md and forthcoming tagged-source migration notes javascript-migration-design.txt in fixartifactdirectory. These are concrete compatibility requirements, not approval to redesign productflows.
 **Produces:** SvelteKit3.1/adapter6 and all requestedcompatible JSupdates, TypeScript6 JSAPI plusupdated7nativealias, effectiveVite8.3.4/PostCSS8.5.30, Bun1.4.3 everywhere active.
 
-- [ ] Reproduce original checker/Kitconfig errors with actualnewdependencies. Preserve TS6 installation required by checker and7alias; do not satisfy update by deleting checks.
-- [ ] Implement taggedKit3 flat plugin configuration, explicitlegacy$lib alias if retainingimports, correctpage-store/reactivity/tsconfig/serviceworker replacement. Preserve SSR/routing/offline output and authentication flows.
-- [ ] Preserve deployment/acceptance runtimeorigin and CSRF semantics under adapter6; use documented configuration contract and meaningfulactualHTTP/browser tests with differing configuredorigin and hostileOrigin negativecontrols.
-- [ ] Reconcile cookieoverride to compatibleaudited2.x; devalue at least5.9.3 and satisfyingKitrequiredrange; preserve source-map-js1.2.2. Make requested Vite/PostCSS versions effective. No arbitrary override removal or auditignore.
-- [ ] Upgrade bothfrontendBunbuilderimages, packageManager, activeCI/release/devinstructions to1.4.3. Retain productionNode24LTS. Installtask-localBun, frozeninstall and unchangedproductionaudit.
-- [ ] Run allthreefrontend checks/unit/mountedUI/builds, relevant serviceworker/origin/SSR and actualproductionimage/browser checks. Add meaningful regression tests only at changed behavior seams, retain oldoffline/auth tests.
-- [ ] Self-review, scopedcommit/report with effectiveversionmanifest and exactevidence; no push/switch.
+- [x] Reproduce original checker/Kitconfig errors with actualnewdependencies. Preserve TS6 installation required by checker and7alias; do not satisfy update by deleting checks.
+- [x] Implement taggedKit3 flat plugin configuration, explicitlegacy$lib alias if retainingimports, correctpage-store/reactivity/tsconfig/serviceworker replacement. Preserve SSR/routing/offline output and authentication flows.
+- [x] Preserve deployment/acceptance runtimeorigin and CSRF semantics under adapter6; use documented configuration contract and meaningfulactualHTTP/browser tests with differing configuredorigin and hostileOrigin negativecontrols.
+- [x] Reconcile cookieoverride to compatibleaudited2.x; devalue at least5.9.3 and satisfyingKitrequiredrange; preserve source-map-js1.2.2. Make requested Vite/PostCSS versions effective. No arbitrary override removal or auditignore.
+- [x] Upgrade bothfrontendBunbuilderimages, packageManager, activeCI/release/devinstructions to1.4.3. Retain productionNode24LTS. Installtask-localBun, frozeninstall and unchangedproductionaudit.
+- [x] Run allthreefrontend checks/unit/mountedUI/builds, relevant serviceworker/origin/SSR and actualproductionimage/browser checks. Add meaningful regression tests only at changed behavior seams, retain oldoffline/auth tests.
+- [x] Self-review, scopedcommit/report with effectiveversionmanifest and exactevidence; no push/switch.
 
 ### Task 5: Upgrade edge image and prevent EOL Node proposals
 
