@@ -12,8 +12,7 @@ use crypto_core_lib::{
 };
 use opaque_ke::{ClientLogin, ClientLoginFinishParameters, CredentialResponse};
 use rand_core::OsRng;
-use tauri::{AppHandle, State};
-use tauri_plugin_opener::OpenerExt;
+use tauri::State;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -713,7 +712,6 @@ pub async fn password_login(
 /// Starts device authorization and opens the trusted web origin in the system browser.
 #[tauri::command]
 pub async fn browser_login_start(
-    app: AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<BrowserLoginStartResponse, String> {
     let base = state.cloud_base_url().await;
@@ -739,14 +737,23 @@ pub async fn browser_login_start(
         flow_id: response.flow_id,
         hpke_private_key: Zeroizing::new(bootstrap_identity.private_key),
     });
-    if let Err(error) = app
-        .opener()
-        .open_url(&response.verification_uri, None::<&str>)
-    {
+    launch_browser_login(state.inner(), &response.verification_uri, |url| {
+        open::that_detached(url)
+    })
+    .await?;
+    Ok(response)
+}
+
+async fn launch_browser_login(
+    state: &DesktopState,
+    verification_uri: &str,
+    launch: impl FnOnce(&str) -> std::io::Result<()>,
+) -> Result<(), String> {
+    if let Err(error) = launch(verification_uri) {
         state.pending_browser_login.lock().await.take();
         return Err(to_ui_error(error));
     }
-    Ok(response)
+    Ok(())
 }
 
 /// Polls one external-browser authorization without exposing tokens to the browser URL.
@@ -880,6 +887,53 @@ mod tests {
     use super::*;
     use crypto_core_lib::local_bridge_runner::LocalBridgeConfig;
     use std::io::{Read, Write};
+
+    #[tokio::test]
+    async fn failed_browser_launch_propagates_error_and_drops_pending_private_key() {
+        let state = DesktopState::new("https://api.kamori.app", ":memory:");
+        *state.pending_browser_login.lock().await = Some(PendingBrowserLogin {
+            flow_id: Uuid::new_v4(),
+            hpke_private_key: Zeroizing::new([42; 32]),
+        });
+        let error = launch_browser_login(
+            &state,
+            "https://portal.kamori.app/device?code=synthetic",
+            |url| {
+                assert_eq!(url, "https://portal.kamori.app/device?code=synthetic");
+                Err(std::io::Error::other("synthetic launch denied"))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "synthetic launch denied");
+        assert!(state.pending_browser_login.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn successful_browser_launch_keeps_pending_flow_for_polling() {
+        let state = DesktopState::new("https://api.kamori.app", ":memory:");
+        let flow_id = Uuid::new_v4();
+        *state.pending_browser_login.lock().await = Some(PendingBrowserLogin {
+            flow_id,
+            hpke_private_key: Zeroizing::new([42; 32]),
+        });
+        launch_browser_login(
+            &state,
+            "https://portal.kamori.app/device?code=synthetic",
+            |url| {
+                assert_eq!(url, "https://portal.kamori.app/device?code=synthetic");
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        let pending = state.pending_browser_login.lock().await;
+        assert_eq!(pending.as_ref().unwrap().flow_id, flow_id);
+        assert_eq!(
+            pending.as_ref().unwrap().hpke_private_key.as_ref(),
+            &[42; 32]
+        );
+    }
 
     #[tokio::test]
     async fn nonempty_cloud_spaces_decode_in_direct_and_runner_paths() {

@@ -194,6 +194,13 @@ pub async fn apply_window_preferences(
     Ok(())
 }
 
+/// Opens only the application's corresponding-source license page.
+#[tauri::command]
+pub fn open_license() -> Result<(), String> {
+    open::that_detached("https://github.com/Kamori-app/kamori-app/blob/main/LICENSE.md")
+        .map_err(super::common::to_ui_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

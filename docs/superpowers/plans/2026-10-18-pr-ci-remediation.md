@@ -56,6 +56,21 @@
 - [ ] Run affected frontend checks/tests/builds, Rust workspace/FRB checks as appropriate to the real source delta, and meaningful native boundary regression tests for any backend changes. Report unavailable environment checks honestly; GitHub CI remains final Linux/platform evidence.
 - [ ] Self-review and commit task changes with exact evidence report. No push from worker.
 
+### Task 3: Restore public reproducible S3 acceptance fixtures
+
+**Files:** tests/acceptance/compose.yaml and README.md; tests/release-readiness/restore/Dockerfile, run.py and README.md for the same active fixture pins. Historical evidence-2026-10-15.json remains unchanged. Workflow change only if a distinct proven orchestration defect requires it.
+**Inputs:** /private/tmp/kamori-pr-fixes-20261018/container-diagnosis.md and containers-ci.log.
+**Produces:** Public digest-pinned MinIO fixture and init client that work without registry credentials.
+
+- [ ] Confirm existing quay.io server and mc pins fail anonymous pull; distinguish registry authorization from application or bucket permissions.
+- [ ] Replace both acceptance-only image references with ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9 after independently confirming report manifest/layer evidence.
+- [ ] Replace the same active MinIO server constant in restore/run.py and mc build-stage image in restore/Dockerfile, preserving /usr/bin/mc COPY and existing restore behavior. Keep historical source-qualified manifests unchanged.
+- [ ] Keep service names, server command, init shell/mc script, bucket permissions, synthetic credentials, ports and volume declarations unchanged. The image embeds the existing RELEASE.2025-08-13T08-35-41Z mc client and provides /bin/sh, sleep and bash.
+- [ ] Document community rebuild source/provenance, upstream security-release change, immutable multiarch digest and acceptance-only scope. Do not imply official MinIO provenance, production certification or security scanning not performed.
+- [ ] Exercise anonymous pull, init, S3 put/get and private bucket behavior on an isolated owned fixture namespace; use only synthetic data. Confirm failures remain failures; preserve init status gating.
+- [ ] Run affected acceptance smoke/full suite once on final package inputs if available, or rely on actual new GitHub run and state which evidence came from it. Verify the restore tooling image still builds/copies the same mc binary and run its focused orchestration controls; do not falsely reattribute historical full PITR evidence to this update.
+- [ ] Clean up only exact owned containers/volumes/network; retain user caches/images. Self-review, scoped commit and report with observed commands/results.
+
 ## Integration and acceptance
 
 Controller independently reviews each task against its brief and diff; scoped fixes receive scoped rereview. After task review, inspect any additional failed jobs and fix the actual root cause in a new bounded task if needed.

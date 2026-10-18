@@ -12,7 +12,6 @@ pub fn run() {
     let app_state = DesktopState::new("https://api.kamori.app", FIXED_SQLITE_CACHE_PATH);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -36,6 +35,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::window::configure_backend,
+            commands::window::open_license,
             commands::window::apply_window_preferences,
             commands::auth::password_login,
             commands::auth::restore_session,

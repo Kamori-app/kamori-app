@@ -1,6 +1,6 @@
 //! Shared command helpers and request payload models.
 use crypto_core_lib::local_bridge_runner::LocalBridgeConfig;
-use keyring::{Entry, Error as KeyringError};
+use keyring_core::{Entry, Error as KeyringError};
 use opaque_ke::{
     Ristretto255, argon2::Argon2, ciphersuite::CipherSuite, key_exchange::tripledh::TripleDh,
 };
@@ -8,7 +8,7 @@ use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use sha2_opaque::Sha512;
-use std::path::Path;
+use std::{path::Path, sync::LazyLock};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -213,11 +213,38 @@ fn scoped_keychain_account(prefix: &str, cloud_base_url: &str, username: &str) -
     format!("{prefix}:{}", hex_encode(&Sha256::digest(scope.as_bytes())))
 }
 
+// Match the previous keyring wrapper: initialize once, and expose NoDefaultStore
+// on constructor failure. Never substitute a mock or unencrypted store.
+static CREDENTIAL_STORE: LazyLock<keyring_core::Result<()>> = LazyLock::new(|| {
+    #[cfg(target_os = "macos")]
+    let store = apple_native_keyring_store::keychain::Store::new()?;
+    #[cfg(target_os = "windows")]
+    let store = windows_native_keyring_store::Store::new()?;
+    #[cfg(target_os = "linux")]
+    let store = dbus_secret_service_keyring_store::Store::new()?;
+    keyring_core::set_default_store(store);
+    Ok(())
+});
+
+fn secure_entry(service: &str, account: &str) -> keyring_core::Result<Entry> {
+    entry_after_store_init(&CREDENTIAL_STORE, || Entry::new(service, account))
+}
+
+fn entry_after_store_init<T>(
+    status: &keyring_core::Result<()>,
+    create: impl FnOnce() -> keyring_core::Result<T>,
+) -> keyring_core::Result<T> {
+    if status.is_err() {
+        return Err(KeyringError::NoDefaultStore);
+    }
+    create()
+}
+
 pub(super) fn load_or_create_device_secrets(
     cloud_base_url: &str,
     username: &str,
 ) -> Result<DesktopDeviceSecrets, String> {
-    let entry = Entry::new(
+    let entry = secure_entry(
         "app.kamori.desktop.device",
         &scoped_keychain_account("device", cloud_base_url, username),
     )
@@ -249,7 +276,7 @@ pub(super) fn store_account_master_key_secure(
     username: &str,
     master_key: &[u8; 32],
 ) -> Result<(), String> {
-    Entry::new(
+    secure_entry(
         "app.kamori.desktop.account-master",
         &scoped_keychain_account("account-master", cloud_base_url, username),
     )
@@ -262,7 +289,7 @@ pub(super) fn load_account_master_key_secure(
     cloud_base_url: &str,
     username: &str,
 ) -> Result<[u8; 32], String> {
-    let value = Entry::new(
+    let value = secure_entry(
         "app.kamori.desktop.account-master",
         &scoped_keychain_account("account-master", cloud_base_url, username),
     )
@@ -278,7 +305,7 @@ pub(super) fn load_or_create_dav_credentials(
     cloud_base_url: &str,
     username: &str,
 ) -> Result<(String, String), String> {
-    let entry = Entry::new(
+    let entry = secure_entry(
         "app.kamori.desktop.dav",
         &scoped_keychain_account("dav", cloud_base_url, username),
     )
@@ -304,7 +331,7 @@ pub(super) fn rotate_dav_credentials(
     cloud_base_url: &str,
     username: &str,
 ) -> Result<(String, String), String> {
-    let entry = Entry::new(
+    let entry = secure_entry(
         "app.kamori.desktop.dav",
         &scoped_keychain_account("dav", cloud_base_url, username),
     )
@@ -329,7 +356,7 @@ pub(super) fn load_or_create_sqlite_key(sqlite_path: &str) -> Result<String, Str
     let account_digest = Sha256::digest(sqlite_path.as_bytes());
     let account = format!("sqlite-cache-key:{}", hex_encode(&account_digest));
 
-    let entry = Entry::new(KEYCHAIN_SERVICE, &account)
+    let entry = secure_entry(KEYCHAIN_SERVICE, &account)
         .map_err(|error| format!("failed to initialize system keychain entry: {error}"))?;
 
     match entry.get_password() {
@@ -364,7 +391,7 @@ fn refresh_token_account(cloud_base_url: &str) -> String {
 fn refresh_token_entry(cloud_base_url: &str) -> Result<Entry, String> {
     const KEYCHAIN_SERVICE: &str = "app.kamori.davbridge.refresh-token";
     let account = refresh_token_account(cloud_base_url);
-    Entry::new(KEYCHAIN_SERVICE, &account)
+    secure_entry(KEYCHAIN_SERVICE, &account)
         .map_err(|error| format!("failed to initialize refresh token keychain entry: {error}"))
 }
 
@@ -407,7 +434,7 @@ fn decode_refresh_credential(value: &str) -> Result<Option<StoredRefreshCredenti
 fn session_username_entry(cloud_base_url: &str) -> Result<Entry, String> {
     const KEYCHAIN_SERVICE: &str = "app.kamori.davbridge.session-username";
     let account = refresh_token_account(cloud_base_url);
-    Entry::new(KEYCHAIN_SERVICE, &account)
+    secure_entry(KEYCHAIN_SERVICE, &account)
         .map_err(|error| format!("failed to initialize session username keychain entry: {error}"))
 }
 
@@ -542,6 +569,45 @@ pub(super) fn reveal_main_window(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_store_does_not_construct_or_fall_back_to_an_entry() {
+        let error = entry_after_store_init::<()>(
+            &Err(KeyringError::NoStorageAccess(Box::new(
+                std::io::Error::other("synthetic locked store"),
+            ))),
+            || panic!("entry construction must not run without a native store"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, KeyringError::NoDefaultStore));
+    }
+
+    #[test]
+    fn initialized_store_preserves_entry_errors() {
+        assert!(matches!(
+            entry_after_store_init::<()>(&Ok(()), || Err(KeyringError::Invalid(
+                "service".into(), "synthetic rejected service".into()
+            ))),
+            Err(KeyringError::Invalid(field, reason))
+                if field == "service" && reason == "synthetic rejected service"
+        ));
+    }
+
+    #[test]
+    fn credential_account_namespace_remains_compatible() {
+        assert_eq!(
+            scoped_keychain_account("device", " HTTPS://API.KAMORI.APP ", " Alice "),
+            "device:a894bfd2f63eb7c7dbb07fcefc4822d11d25174a6d06919c4957112818bac23d"
+        );
+        assert_ne!(
+            scoped_keychain_account("dav", "https://api.kamori.app", "alice"),
+            scoped_keychain_account("dav", "https://api.kamori.app", "bob")
+        );
+        assert_ne!(
+            scoped_keychain_account("dav", "https://api.kamori.app", "alice"),
+            scoped_keychain_account("dav", "https://other.kamori.app", "alice")
+        );
+    }
 
     #[test]
     fn endpoint_join_is_stable() {
