@@ -25,6 +25,12 @@ use crate::{
     },
 };
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ReauthGrant {
+    action: String,
+    binding: crate::features::auth::repositories::AuthenticationBinding,
+}
+
 use super::support::{hash_account_recovery_code, normalize_recovery_code};
 
 pub(crate) async fn start(
@@ -55,6 +61,7 @@ pub(crate) async fn start(
             &principal.username,
             &payload.opaque_start_request,
             Some(&password_file),
+            Some(user.auth_generation),
         )
         .await
         .map_err(|_| bad_request("invalid OPAQUE reauthentication request"))?;
@@ -62,7 +69,15 @@ pub(crate) async fn start(
         .state_store
         .put(
             &reauth_flow_key(opaque.flow_id),
-            payload.action.as_str().as_bytes(),
+            &rmp_serde::to_vec_named(&ReauthGrant {
+                action: payload.action.as_str().to_owned(),
+                binding: crate::features::auth::repositories::AuthenticationBinding {
+                    user_id: user.id,
+                    generation: user.auth_generation,
+                    session_id: Some(principal.session_id),
+                },
+            })
+            .map_err(internal_error)?,
             Duration::from_secs(5 * 60),
         )
         .await
@@ -89,7 +104,7 @@ pub(crate) async fn finish(
     if user.id != principal.user_id {
         return Err(unauthenticated("session identity mismatch"));
     }
-    state
+    let proof = state
         .opaque
         .login_finish(
             &principal.username,
@@ -99,13 +114,21 @@ pub(crate) async fn finish(
         .await
         .map_err(|_| unauthenticated("password reauthentication failed"))?;
 
+    if proof.auth_generation != Some(user.auth_generation) {
+        return Err(unauthenticated("authentication credentials have changed"));
+    }
     let expected_action = state
         .state_store
         .take(&reauth_flow_key(payload.opaque_flow_id))
         .await
         .map_err(internal_error)?
         .ok_or_else(|| unauthenticated("reauthentication flow expired or was already used"))?;
-    if expected_action.as_slice() != payload.action.as_str().as_bytes() {
+    let grant: ReauthGrant = rmp_serde::from_slice(&expected_action).map_err(internal_error)?;
+    if grant.action != payload.action.as_str()
+        || grant.binding.user_id != user.id
+        || grant.binding.generation != user.auth_generation
+        || grant.binding.session_id != Some(principal.session_id)
+    {
         return Err(unauthenticated("reauthentication action mismatch"));
     }
 
@@ -146,6 +169,8 @@ pub(crate) async fn finish(
         }
     }
 
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    grant.binding.lock(&mut tx).await?;
     let reauth_token = state
         .issue_reauth_token(principal.user_id, &principal.username, principal.session_id)
         .map_err(internal_error)?;
@@ -153,11 +178,12 @@ pub(crate) async fn finish(
         .state_store
         .put(
             &reauth_token_key(&reauth_token),
-            payload.action.as_str().as_bytes(),
+            &rmp_serde::to_vec_named(&grant).map_err(internal_error)?,
             Duration::from_secs(5 * 60),
         )
         .await
         .map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(ReauthFinishResponse { reauth_token })
 }
 
@@ -167,7 +193,7 @@ pub(crate) async fn consume_reauth_token(
     user_id: Uuid,
     username: &str,
     expected_action: ReauthAction,
-) -> Result<(), ApiError> {
+) -> Result<crate::features::auth::repositories::AuthenticationBinding, ApiError> {
     let proof = state
         .validate_token(token)
         .map_err(|_| unauthenticated("fresh reauthentication is required"))?;
@@ -183,44 +209,26 @@ pub(crate) async fn consume_reauth_token(
         .session_id
         .filter(|session_id| !session_id.is_nil())
         .ok_or_else(|| unauthenticated("reauthentication proof has no session binding"))?;
-    if state.account_state_checks_enabled {
-        let active: bool = sqlx::query_scalar(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM refresh_tokens rt
-                JOIN devices d
-                  ON d.id = rt.device_id AND d.user_id = rt.user_id
-                JOIN users u ON u.id = rt.user_id
-                WHERE rt.id = $1 AND rt.user_id = $2
-                  AND rt.revoked_at IS NULL AND rt.expires_at > now()
-                  AND d.status = 'active'
-                  AND u.deleted_at IS NULL AND u.suspended_at IS NULL
-            )
-            "#,
-        )
-        .bind(proof_session_id)
-        .bind(user_id)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(internal_error)?;
-        if !active {
-            return Err(unauthenticated(
-                "reauthentication session is no longer active",
-            ));
-        }
-    }
     let action = state
         .state_store
         .take(&reauth_token_key(token))
         .await
         .map_err(internal_error)?
         .ok_or_else(|| unauthenticated("reauthentication proof expired or was already used"))?;
-    if action.as_slice() != expected_action.as_str().as_bytes() {
+    let grant: ReauthGrant = rmp_serde::from_slice(&action).map_err(internal_error)?;
+    if grant.action != expected_action.as_str()
+        || grant.binding.user_id != user_id
+        || grant.binding.session_id != Some(proof_session_id)
+    {
         return Err(unauthenticated(
             "reauthentication proof has the wrong scope",
         ));
     }
-    Ok(())
+    // Consumers retain this binding through their durable mutation transaction.
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    grant.binding.lock(&mut tx).await?;
+    tx.commit().await.map_err(internal_error)?;
+    Ok(grant.binding)
 }
 
 fn reauth_flow_key(flow_id: Uuid) -> String {

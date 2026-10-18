@@ -27,6 +27,13 @@ dependencies:
   crypto_core_lib:
     path: rust_builder
 dev_dependencies:
+  # Select real native scheduling adapters independently of the test host OS.
+  workmanager_android: 0.10.8
+  workmanager_apple: 0.9.10
+  # Exercise the installed calendar provider channel without native OS access.
+  device_calendar_plus_android: 0.7.1
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0

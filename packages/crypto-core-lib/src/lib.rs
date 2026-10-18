@@ -5,6 +5,8 @@ mod frb_generated;
 
 pub mod account_keys;
 mod crypto;
+#[cfg(feature = "http-reqwest")]
+pub mod native_http;
 pub mod operation_envelope;
 pub mod pim;
 pub mod recovery;

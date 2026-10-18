@@ -1,0 +1,140 @@
+{
+  "base_source_sha": "4f91081bf0254926a141749b57a449faa5141755",
+  "implementation_source": "Task 7 changes in the commit containing this artifact; native production source unchanged",
+  "measurement_date": "2026-10-15",
+  "environment": {
+    "host": "macOS 26.6.2 (25G83), arm64",
+    "rust": "1.97.1",
+    "postgres": "18.6 Debian aarch64",
+    "isolation": "read committed",
+    "max_connections": 100,
+    "shared_buffers": "128MB",
+    "deadlock_timeout": "1s",
+    "build_load": "Android build completed; iOS build had not begun; no concurrent parent DB suite"
+  },
+  "workload": {
+    "workers": 16,
+    "groups": 4,
+    "accounts": 12,
+    "initial_spaces": 12,
+    "transactions": 300,
+    "elapsed_ms": 480,
+    "outcomes": {
+      "accepted": 64,
+      "duplicate": 64,
+      "conflicting_duplicate": 64,
+      "blob_needs_upload": 64,
+      "ownership_offer_created": 4,
+      "ownership_accepted": 4,
+      "workspace_admitted": 32,
+      "account_deleted": 4,
+      "deadlocks": 0,
+      "internal_errors": 0
+    },
+    "final_operation_bytes": 18048,
+    "final_blob_bytes": 16384,
+    "sequences_per_written_space": {
+      "spaces": 4,
+      "count": 16,
+      "first": 1,
+      "last": 16
+    },
+    "latency_us": {
+      "append_with_retries": {
+        "samples": 192,
+        "min": 871,
+        "p50": 2662,
+        "p95": 10016,
+        "p99": 325612,
+        "max": 326362
+      },
+      "blob": {
+        "samples": 64,
+        "min": 2809,
+        "p50": 4066,
+        "p95": 319356,
+        "p99": 326057,
+        "max": 326057
+      },
+      "ownership": {
+        "samples": 8,
+        "min": 13560,
+        "p50": 15498,
+        "p95": 328209,
+        "p99": 328209,
+        "max": 328209
+      },
+      "admission_delete": {
+        "samples": 36,
+        "min": 1723,
+        "p50": 3859,
+        "p95": 317887,
+        "p99": 318160,
+        "max": 318160
+      }
+    }
+  },
+  "repair": {
+    "accounts": 1,
+    "spaces": 4,
+    "historical_signed_appends": 4000,
+    "ciphertext_bytes_per_operation": 4096,
+    "historical_account_bytes": 17504000,
+    "seed_ms": 8303,
+    "migration_ms": 34,
+    "concurrent_writer_ms": 23,
+    "release_to_both_complete_ms": 14,
+    "blockers": {
+      "migration_pid": 1020,
+      "gate_pid": 1018,
+      "writer_pid": 1021
+    },
+    "final_rows": 4001,
+    "unique_sequences": 4001,
+    "max_space_sequence": 1001,
+    "final_operation_bytes": 17508376
+  },
+  "native": {
+    "samples": 1,
+    "configured_request_timeout_seconds": 20,
+    "observed_timeout_ms": 20004,
+    "foreground_wait_ms": 20002,
+    "background_wait_ms": 20002,
+    "order": [
+      "foreground",
+      "background"
+    ],
+    "leaked_permits": 0,
+    "owner_disposed_while_request_in_flight": true
+  },
+  "confirmed_defect": {
+    "name": "late invite redemption after account membership cleanup",
+    "red_log": "late-invite-red3.log",
+    "red": {
+      "redeemed": true,
+      "deleted": true,
+      "active_memberships": 1,
+      "delete_pid": 994,
+      "gate_pid": 993,
+      "redeem_pid": 995
+    },
+    "green": {
+      "redeemed": false,
+      "deleted": true,
+      "active_memberships": 0,
+      "delete_pid": 1026,
+      "gate_pid": 1025,
+      "redeem_pid": 1027
+    },
+    "fix": "Existing recipient account913 admission before invite/space locks, then active recipient recheck"
+  },
+  "logs": "/private/tmp/kamori-readiness-20261015/contention",
+  "limits": [
+    "One finite local sample, not a throughput or latency SLA",
+    "Real production repository transactions; synthetic dedicated fixtures; blob reservation excludes object upload",
+    "Repair timings include deterministic gate observation; release-to-complete separately recorded",
+    "Native timeout sample uses production HTTP client and session wrapper with a loopback server that never responds",
+    "Full-suite timing is verification under concurrent native build load, not the baseline above",
+    "Native measurement test runs in an isolated process to exclude unrelated test lease waiters; no production runtime redesign"
+  ]
+}

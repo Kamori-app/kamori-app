@@ -65,19 +65,23 @@ pub(crate) async fn register(
     enrollment_request.extend_from_slice(&request.hpke_public_key);
     enrollment_request.extend_from_slice(request.platform.as_db_value().as_bytes());
     enrollment_request.extend_from_slice(Sha256::digest(&request.encrypted_name).as_slice());
-    crate::features::auth::services::device_enrollment::bind_request(
+    let binding = crate::features::auth::services::device_enrollment::bind_request(
         state,
         &request.enrollment_token,
         user_id,
+        principal.session_id,
         &enrollment_request,
     )
     .await?;
-    let device = repositories::upsert_device(&state.pool, user_id, principal.session_id, &request)
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    let device = repositories::upsert_device(&mut tx, user_id, principal.session_id, &request)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| {
             conflict("device id is already bound to different keys, another account, or revoked")
         })?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(RegisterDeviceResponse { device })
 }
 
@@ -99,7 +103,7 @@ pub(crate) async fn revoke(
     request: RevokeDeviceRequest,
 ) -> Result<RevokeDeviceResponse, ApiError> {
     let principal = crate::features::common::authorize_principal(state, headers).await?;
-    crate::features::auth::services::consume_reauth_token(
+    let binding = crate::features::auth::services::consume_reauth_token(
         state,
         &request.reauth_token,
         principal.user_id,
@@ -108,8 +112,12 @@ pub(crate) async fn revoke(
     )
     .await?;
     let user_id = principal.user_id;
-    let revoked = repositories::revoke_device(&state.pool, user_id, device_id)
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    crate::features::auth::repositories::lock_account_security_mutation(&mut tx, user_id).await?;
+    binding.lock(&mut tx).await?;
+    let revoked = repositories::revoke_device(&mut tx, user_id, device_id)
         .await
         .map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(RevokeDeviceResponse { revoked })
 }

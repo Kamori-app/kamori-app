@@ -1,0 +1,3 @@
+# Deliberately public synthetic TLS fixtures, never application credentials.
+!*.pem
+!*.der

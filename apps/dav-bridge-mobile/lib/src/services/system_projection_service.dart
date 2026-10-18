@@ -92,6 +92,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
     String collectionId,
     List<PimItem> items,
   ) async {
+    await _rejectUnsupportedRecurrenceSets(items, {collectionId});
     final status = await _calendar.requestPermissions(
       level: CalendarAccessLevel.full,
     );
@@ -167,7 +168,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
           .toList(growable: false);
       for (final key in keys) {
         final id = mapping[key];
-        if (id != null && await FlutterContacts.get(id) != null) {
+        if (id != null && await _findContact(id) != null) {
           await FlutterContacts.delete(id);
         }
         mapping.remove(key);
@@ -182,21 +183,96 @@ class NativeSystemProjectionService implements SystemProjectionService {
   @override
   Future<void> projectEnabled(List<PimItem> items) async {
     final settings = await readSettings();
-    if (settings.calendarCollectionIds.isNotEmpty) {
-      await _projectCalendar(items, settings.calendarCollectionIds);
+    await _runIndependentProjections([
+      for (final collectionId in settings.calendarCollectionIds)
+        () => _projectCalendar(items, {collectionId}),
+      for (final collectionId in settings.contactsCollectionIds)
+        () => _projectContacts(items, {collectionId}),
+    ]);
+  }
+
+  // Complete independent work before surfacing one original error. Provider or
+  // storage failures take precedence over a permanent unsupported-set refusal;
+  // subsequent reconciliation retries retain the original mapping/error path.
+  Future<void> _runIndependentProjections(
+      Iterable<Future<void> Function()> projections) async {
+    Object? failure;
+    StackTrace? failureStack;
+    for (final project in projections) {
+      try {
+        await project();
+      } catch (error, stack) {
+        if (failure == null ||
+            (failure is FormatException && error is! FormatException)) {
+          failure = error;
+          failureStack = stack;
+        }
+      }
     }
-    if (settings.contactsCollectionIds.isNotEmpty) {
-      await _projectContacts(items, settings.contactsCollectionIds);
+    if (failure != null) Error.throwWithStackTrace(failure, failureStack!);
+  }
+
+  bool _hasUnsupportedRecurrenceSet(PimItem item) =>
+      item.recurrenceExdates.isNotEmpty ||
+      item.recurrenceRdates.isNotEmpty ||
+      item.recurrenceOverrides.isNotEmpty ||
+      item.recurrenceUnsupported.isNotEmpty;
+
+  // The pinned calendar provider can write RRULE only. Refuse a lossy set,
+  // removing any prior owned master so the OS does not keep showing false dates.
+  Future<void> _rejectUnsupportedRecurrenceSets(
+    List<PimItem> items,
+    Set<String> collectionIds,
+  ) async {
+    final unsupported = items
+        .where((item) =>
+            item.kind == PimItemKind.calendarEvent &&
+            !item.conflict &&
+            collectionIds.contains(item.spaceId) &&
+            _hasUnsupportedRecurrenceSet(item))
+        .toList();
+    if (unsupported.isEmpty) return;
+    final mapping = await _readMap(_eventMapKey);
+    final calendarId = await _read(_calendarIdKey);
+    for (final item in unsupported) {
+      final key = _itemKey(item);
+      final eventId = mapping[key];
+      if (eventId == null) continue;
+      final existing = await _calendar.getEvent(eventId);
+      if (existing != null) {
+        if (calendarId == null ||
+            existing.calendarId != calendarId ||
+            existing.description?.startsWith(_descriptionPrefix) != true) {
+          throw StateError(
+              'Cannot remove an unverified system calendar copy of “${item.title}”.');
+        }
+        await _calendar.deleteEvent(eventId: eventId);
+      }
+      // Persist only after provider success. If storage fails, a later run sees
+      // the missing provider event and retries this mapping removal safely.
+      mapping.remove(key);
+      await _writeMap(_eventMapKey, mapping);
     }
+    throw FormatException(
+        'Cannot project “${unsupported.first.title}”: imported recurrence exceptions are not supported by the system calendar. Previous owned system copies were removed; original calendar data remains in Kamori.');
   }
 
   Future<void> _projectCalendar(
     List<PimItem> items,
     Set<String> enabledCollectionIds,
   ) async {
-    final calendarId = await _getOrCreateCalendarId();
+    await _runIndependentProjections([
+      () => _rejectUnsupportedRecurrenceSets(items, enabledCollectionIds),
+      () => _projectSupportedCalendar(items, enabledCollectionIds),
+    ]);
+  }
+
+  Future<void> _projectSupportedCalendar(
+    List<PimItem> items,
+    Set<String> enabledCollectionIds,
+  ) async {
     final mapping = await _readMap(_eventMapKey);
-    final events = items
+    final calendarItems = items
         .where(
           (item) =>
               item.kind == PimItemKind.calendarEvent &&
@@ -204,12 +280,17 @@ class NativeSystemProjectionService implements SystemProjectionService {
               enabledCollectionIds.contains(item.spaceId),
         )
         .toList(growable: false);
+    final events = calendarItems
+        .where((item) => !_hasUnsupportedRecurrenceSet(item))
+        .toList();
     for (final item in events) {
       final rule = item.recurrenceRule;
       if (rule == null || rule.isEmpty) continue;
       _parseSystemRecurrence(item);
     }
-    final activeKeys = events.map(_itemKey).toSet();
+    // Failed unsupported cleanup must never become an ordinary stale deletion
+    // that bypasses ownership checks or drops its durable retry mapping.
+    final activeKeys = calendarItems.map(_itemKey).toSet();
 
     final managedKeys = mapping.keys
         .where(
@@ -227,6 +308,8 @@ class NativeSystemProjectionService implements SystemProjectionService {
       await _writeMap(_eventMapKey, mapping);
     }
 
+    if (events.isEmpty) return;
+    final calendarId = await _getOrCreateCalendarId();
     for (final item in events) {
       final start = item.startsAt?.toDateTime();
       final explicitEnd = item.endsAt?.toDateTime();
@@ -348,7 +431,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
         .toSet();
     for (final staleKey in managedKeys.difference(activeKeys)) {
       final contactId = mapping[staleKey];
-      if (contactId != null && await FlutterContacts.get(contactId) != null) {
+      if (contactId != null && await _findContact(contactId) != null) {
         await FlutterContacts.delete(contactId);
       }
       mapping.remove(staleKey);
@@ -431,7 +514,7 @@ class NativeSystemProjectionService implements SystemProjectionService {
         continue;
       }
 
-      final existing = await FlutterContacts.get(
+      final existing = await _findContact(
         existingId,
         properties: const {
           ContactProperty.name,
@@ -474,6 +557,19 @@ class NativeSystemProjectionService implements SystemProjectionService {
       }
     }
     await _writeMap(_contactMapKey, mapping);
+  }
+
+  Future<Contact?> _findContact(
+    String id, {
+    Set<ContactProperty>? properties,
+  }) async {
+    // iOS unifiedContact throws for a deleted ID. An ID-filtered query returns
+    // an empty list instead, while permission and provider errors still escape.
+    final contacts = await FlutterContacts.getAll(
+      filter: ContactFilter.ids([id]),
+      properties: properties,
+    );
+    return contacts.isEmpty ? null : contacts.single;
   }
 
   Future<String> _getOrCreateCalendarId() async {

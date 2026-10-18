@@ -66,7 +66,7 @@ pub(crate) async fn password_change_finish(
         .await
         .map_err(|_| bad_request("invalid OPAQUE password-change finish"))?;
 
-    consume_reauth_token(
+    let binding = consume_reauth_token(
         state,
         &payload.reauth_token,
         user_id,
@@ -75,14 +75,17 @@ pub(crate) async fn password_change_finish(
     )
     .await?;
 
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
     update_user_password_file_and_revoke_refresh_sessions(
-        &state.pool,
+        &mut tx,
         user_id,
         &password_file_bytes,
         &payload.encrypted_master_key,
     )
     .await?;
 
+    tx.commit().await.map_err(internal_error)?;
     Ok(PasswordChangeFinishResponse { changed: true })
 }
 
@@ -103,7 +106,7 @@ pub(crate) async fn account_recovery_start(
     .await?;
     let recovery_verifier_hash = hash_data_recovery_verifier(&payload.recovery_verifier)
         .map_err(|_| unauthenticated("invalid recovery credentials"))?;
-    let Some(user_id) =
+    let Some((user_id, auth_generation)) =
         find_user_for_data_recovery(&state.pool, &username, &recovery_verifier_hash).await?
     else {
         return Err(unauthenticated("invalid recovery credentials"));
@@ -122,6 +125,7 @@ pub(crate) async fn account_recovery_start(
         &state.pool,
         &token_hash,
         user_id,
+        auth_generation,
         OffsetDateTime::now_utc()
             + Duration::seconds(state.config.jwt_account_recovery_ttl_seconds.max(1)),
     )

@@ -160,12 +160,27 @@ pub(crate) async fn deletion_status(
     })
 }
 
-pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<bool> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 913))")
-        .bind(user_id.to_string())
-        .execute(&mut *tx)
-        .await?;
+pub(crate) async fn delete_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    binding: crate::features::auth::repositories::AuthenticationBinding,
+) -> Result<bool, crate::features::common::ApiError> {
+    use crate::features::common::internal_error;
+    let user_id = binding.user_id;
+    crate::features::auth::repositories::lock_account_security_mutation(tx, user_id).await?;
+    // Freeze creation/ownership eligibility before discovering the complete
+    // cascade set. Shared memberships are also mutated later in this operation.
+    sqlx::query(
+        "SELECT w.id FROM workspaces w WHERE w.owner_user_id = $1 OR EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id = w.id AND m.user_id = $1) ORDER BY w.id FOR UPDATE OF w",
+    ).bind(user_id).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    let locked_spaces: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT s.id FROM security_spaces s WHERE s.owner_user_id = $1 OR EXISTS (SELECT 1 FROM workspaces w WHERE w.id = s.workspace_id AND w.owner_user_id = $1) OR EXISTS (SELECT 1 FROM security_space_members m WHERE m.space_id = s.id AND m.user_id = $1) ORDER BY s.id FOR UPDATE OF s",
+    ).bind(user_id).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    // All space locks precede every per-row accounting trigger. Sort owner
+    // counters too: a workspace cascade can include multiple owners.
+    sqlx::query(
+        "SELECT u.id FROM users u WHERE u.id = $1 OR u.id IN (SELECT s.owner_user_id FROM security_spaces s JOIN workspaces w ON w.id = s.workspace_id WHERE s.id = ANY($2) AND (s.owner_user_id = $1 OR w.owner_user_id = $1)) ORDER BY u.id FOR NO KEY UPDATE OF u",
+    ).bind(user_id).bind(&locked_spaces).fetch_all(&mut **tx).await.map_err(internal_error)?;
+    // Re-evaluate blockers under the retained workspace and space locks.
     let blockers = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -204,10 +219,10 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(internal_error)?;
     if blockers {
-        tx.rollback().await?;
         return Ok(false);
     }
     sqlx::query(
@@ -228,12 +243,13 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .execute(&mut **tx)
+    .await
+    .map_err(internal_error)?;
     sqlx::query(
         r#"
         DELETE FROM security_spaces space
-        WHERE space.owner_user_id = $1
+        WHERE space.id = ANY($2) AND space.owner_user_id = $1
           AND NOT EXISTS (
               SELECT 1 FROM security_space_members member
               WHERE member.space_id = space.id
@@ -242,27 +258,32 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .bind(&locked_spaces)
+    .execute(&mut **tx)
+    .await
+    .map_err(internal_error)?;
     sqlx::query("DELETE FROM workspaces WHERE owner_user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
 
     sqlx::query("DELETE FROM security_space_device_keys WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query(
         "UPDATE security_space_members SET status = 'revoked', revoked_at = now() WHERE user_id = $1 AND status = 'active'",
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .execute(&mut **tx)
+    .await.map_err(internal_error)?;
     sqlx::query("UPDATE workspace_members SET status = 'revoked' WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query(
         r#"
         UPDATE space_blobs blob
@@ -274,38 +295,50 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .execute(&mut **tx)
+    .await
+    .map_err(internal_error)?;
     // Retain pseudonymous reservation rows through the active quota windows.
     // Deleting them would orphan pending ledger bytes and undercount global use.
     sqlx::query("DELETE FROM security_space_invites WHERE created_by = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("UPDATE security_space_invites SET redeemed_by = NULL WHERE redeemed_by = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
+    // Space deletion acquires space locks before its account quota lock.
+    // Validate the proof here, before deleting its session, to retain that order.
+    // Any stale proof rolls back all preceding changes in this transaction.
+    binding.lock(tx).await?;
     sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM user_passkeys WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM account_recovery_codes WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM account_recovery_attempts WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM signup_completions WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query(
         r#"
         UPDATE ownership_transfer_offers
@@ -315,26 +348,30 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .execute(&mut **tx)
+    .await
+    .map_err(internal_error)?;
     sqlx::query("DELETE FROM user_consents WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM user_consent_audit WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query("DELETE FROM security_events WHERE user_id = $1")
         .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+        .execute(&mut **tx)
+        .await
+        .map_err(internal_error)?;
     sqlx::query(
         "UPDATE devices SET status = 'revoked', encrypted_name = ''::bytea, revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1",
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?;
+    .execute(&mut **tx)
+    .await.map_err(internal_error)?;
     let deleted = sqlx::query(
         r#"
         UPDATE users
@@ -351,10 +388,10 @@ pub(crate) async fn delete_user(pool: &PgPool, user_id: Uuid) -> anyhow::Result<
         "#,
     )
     .bind(user_id)
-    .execute(&mut *tx)
-    .await?
+    .execute(&mut **tx)
+    .await
+    .map_err(internal_error)?
     .rows_affected()
         == 1;
-    tx.commit().await?;
     Ok(deleted)
 }

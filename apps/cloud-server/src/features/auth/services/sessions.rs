@@ -173,7 +173,7 @@ pub(crate) async fn revoke(
     payload: RevokeSessionRequest,
 ) -> Result<RevokeSessionResponse, ApiError> {
     let principal = crate::features::common::authorize_principal(state, headers).await?;
-    super::reauth::consume_reauth_token(
+    let binding = super::reauth::consume_reauth_token(
         state,
         &payload.reauth_token,
         principal.user_id,
@@ -181,13 +181,13 @@ pub(crate) async fn revoke(
         crate::features::auth::dto::ReauthAction::SecuritySettings,
     )
     .await?;
-    let revoked = revoke_refresh_token_by_id_for_user(
-        &state.pool,
-        principal.user_id,
-        payload.refresh_token_id,
-    )
-    .await?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    let revoked =
+        revoke_refresh_token_by_id_for_user(&mut tx, principal.user_id, payload.refresh_token_id)
+            .await?;
 
+    tx.commit().await.map_err(internal_error)?;
     Ok(RevokeSessionResponse { revoked })
 }
 

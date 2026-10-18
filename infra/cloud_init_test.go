@@ -1051,7 +1051,7 @@ func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
 	postgres := renderPostgresEnvironment("app", "jobs", "postgres-key", "postgres-secret", "cipher")
 	for _, expected := range []string{
 		"PGBACKREST_S3_BUCKET=kamori-production-postgres",
-		`PGBACKREST_S3_KEY_ID="postgres-key"`,
+		`PGBACKREST_S3_KEY_ID='postgres-key'`,
 		"POSTGRES_DATA_DIR=/srv/kamori-postgres/postgresql/16/main",
 	} {
 		if !strings.Contains(postgres, expected) {
@@ -1062,7 +1062,7 @@ func TestRenderedHostEnvironmentsKeepExternalCredentialsScoped(t *testing.T) {
 	backup := renderBackupEnvironment("read-key", "read-secret", "dr-key", "dr-secret", "jobs", "kamori-app-production-dr")
 	for _, expected := range []string{
 		"PRIMARY_S3_BUCKET=kamori-production-primary",
-		`PRIMARY_S3_KEY_ID="read-key"`,
+		`PRIMARY_S3_KEY_ID='read-key'`,
 		"DR_S3_BUCKET=kamori-app-production-dr",
 		"postgres://kamori_jobs:jobs@10.42.0.21:5432/kamori",
 	} {

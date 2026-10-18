@@ -56,6 +56,10 @@ Fast Rust feedback loop:
 bun run fast
 ```
 
+Strict repository verification requires a dedicated PostgreSQL test database
+via `KAMORI_DATABASE_URL` (or `DATABASE_URL` fallback); see the
+[cloud-server test prerequisites](apps/cloud-server/README.md#quality-and-test-commands).
+
 Strict repository verification:
 
 ```bash

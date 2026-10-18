@@ -90,6 +90,10 @@ class AppLocalizations {
       'newItem': 'New item',
       'newOrganizerItem': 'New organizer item',
       'editItem': 'Edit item',
+      'editSeries': 'Edit series',
+      'unsupportedRecurrence':
+          'This imported recurrence cannot be displayed here. Its original calendar data is preserved for DAV clients.',
+      'deleteSeries': 'Delete series',
       'encryptedSpace': 'Encrypted space',
       'itemType': 'Item type',
       'calendarEvent': 'Calendar event',
@@ -255,6 +259,10 @@ class AppLocalizations {
       'newItem': 'Новый элемент',
       'newOrganizerItem': 'Новый элемент органайзера',
       'editItem': 'Изменить элемент',
+      'editSeries': 'Изменить серию',
+      'unsupportedRecurrence':
+          'Это импортированное повторение пока не отображается здесь. Исходные данные сохранены для DAV-клиентов.',
+      'deleteSeries': 'Удалить серию',
       'encryptedSpace': 'Зашифрованное пространство',
       'itemType': 'Тип элемента',
       'calendarEvent': 'Событие календаря',

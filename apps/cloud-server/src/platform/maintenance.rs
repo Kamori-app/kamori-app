@@ -124,7 +124,7 @@ async fn record_heartbeat(
     Ok(())
 }
 
-async fn prepare_deletions(state: &AppState) -> anyhow::Result<()> {
+pub(crate) async fn prepare_deletions(state: &AppState) -> anyhow::Result<()> {
     let mut tx = state.pool.begin().await?;
     let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(44200619)")
         .fetch_one(&mut *tx)
@@ -133,6 +133,27 @@ async fn prepare_deletions(state: &AppState) -> anyhow::Result<()> {
         tx.rollback().await?;
         return Ok(());
     }
+    // Lock the complete space set for both cleanup statements before any
+    // accounting trigger runs. The transaction-stable cutoffs match the
+    // deletes below; space locks exclude upload admission and owner transfers.
+    let spaces: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT s.id FROM security_spaces s WHERE (s.status = 'deleted' AND s.deleted_at <= now() - interval '30 days') OR EXISTS (SELECT 1 FROM space_blobs b WHERE b.space_id = s.id AND b.status = 'pending' AND b.created_at <= now() - interval '24 hours' AND COALESCE(b.upload_lease_until, b.created_at) <= now()) ORDER BY s.id FOR UPDATE OF s",
+    ).fetch_all(&mut *tx).await?;
+    let owners: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT owner_user_id FROM security_spaces WHERE id = ANY($1) UNION SELECT owner_user_id FROM space_blobs WHERE space_id = ANY($1) ORDER BY owner_user_id",
+    ).bind(&spaces).fetch_all(&mut *tx).await?;
+    // Match upload/transfer admission: space, quota advisory, account counter.
+    // Include denormalized blob owners and sort both lock sets for mixed owners.
+    for owner in &owners {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 731))")
+            .bind(owner.to_string())
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR NO KEY UPDATE")
+        .bind(&owners)
+        .fetch_all(&mut *tx)
+        .await?;
     sqlx::query(
         r#"
         INSERT INTO object_deletion_queue (id, object_key)
@@ -146,11 +167,9 @@ async fn prepare_deletions(state: &AppState) -> anyhow::Result<()> {
     )
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
-        "DELETE FROM security_spaces WHERE status = 'deleted' AND deleted_at <= now() - interval '30 days'",
-    )
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("DELETE FROM security_spaces WHERE status = 'deleted' AND deleted_at <= now() - interval '30 days'")
+        .execute(&mut *tx)
+        .await?;
 
     // Delete metadata and enqueue its exact, never-reused object key as one
     // statement. A concurrent retry refreshes the row lease under a row lock,

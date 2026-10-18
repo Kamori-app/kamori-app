@@ -14,6 +14,8 @@ const COOKIE_REFRESH_TRANSPORT_OPTIONS = {
   credentials: "include" as const,
 };
 
+const refreshInFlight = new Map<string, Promise<RefreshResponse>>();
+
 let browserCsrfToken: string | null = null;
 let browserCsrfScope: string | null = null;
 
@@ -22,8 +24,8 @@ const rememberBrowserCsrf = (baseUrl: string, token?: string | null) => {
   browserCsrfToken = token || null;
 };
 
-const browserCsrf = async (baseUrl: string): Promise<string> => {
-  if (browserCsrfScope === baseUrl && browserCsrfToken) {
+const browserCsrf = async (baseUrl: string, force = false): Promise<string> => {
+  if (!force && browserCsrfScope === baseUrl && browserCsrfToken) {
     return browserCsrfToken;
   }
   const response = await postMsgpack<
@@ -543,31 +545,53 @@ export const cloudApi = {
     return response;
   },
 
-  refresh: async (baseUrl: string) => {
-    const csrfToken = await browserCsrf(baseUrl);
-    const attempt = await loadOrCreateRefreshAttempt(baseUrl, csrfToken);
-    try {
-      const response = await postMsgpack<RefreshRequest, RefreshResponse>(
-        baseUrl,
-        "/auth/refresh",
-        { rotation_request_id: attempt.requestId },
-        undefined,
-        await cookieRefreshWithCsrfOptions(baseUrl),
-      );
-      rememberBrowserCsrf(baseUrl, response.csrf_token);
-      try {
-        await clearRefreshAttempt(attempt.scope);
-      } catch {
-        // The old scope is inert after CSRF rotation. Cleanup failure must not
-        // turn an already-successful session rotation into an application error.
-      }
-      return response;
-    } catch (error) {
-      // The response headers may already have advanced the HttpOnly refresh
-      // and CSRF cookies. Force a fresh bootstrap before any retry.
-      rememberBrowserCsrf(baseUrl, null);
-      throw error;
+  refresh: (baseUrl: string): Promise<RefreshResponse> => {
+    if (typeof navigator === "undefined" || !navigator.locks) {
+      return Promise.reject(new Error(
+        "Safe session refresh requires browser cross-tab coordination (Web Locks).",
+      ));
     }
+    const scope = new URL(baseUrl).origin;
+    const existing = refreshInFlight.get(scope);
+    if (existing) return existing;
+
+    const rotate = async () => {
+      // Cookies are shared across tabs. Bootstrap only after the previous tab
+      // has released the refresh lock, even when this tab has a cached CSRF.
+      const csrfToken = await browserCsrf(baseUrl, true);
+      const attempt = await loadOrCreateRefreshAttempt(baseUrl, csrfToken);
+      try {
+        const response = await postMsgpack<RefreshRequest, RefreshResponse>(
+          baseUrl,
+          "/auth/refresh",
+          { rotation_request_id: attempt.requestId },
+          undefined,
+          {
+            headers: {
+              [REFRESH_TRANSPORT_HEADER]: "cookie",
+              [CSRF_HEADER]: csrfToken,
+            },
+            credentials: "include",
+          },
+        );
+        rememberBrowserCsrf(baseUrl, response.csrf_token);
+        try {
+          await clearRefreshAttempt(attempt.scope);
+        } catch {
+          // Cleanup of the old generation must not fail a successful rotation.
+        }
+        return response;
+      } catch (error) {
+        // Keep the durable attempt: if cookies did not advance, retry the exact
+        // request id. If headers advanced cookies, bootstrap finds a new scope.
+        rememberBrowserCsrf(baseUrl, null);
+        throw error;
+      }
+    };
+    const pending = navigator.locks.request(`kamori-refresh:${scope}`, rotate)
+      .finally(() => refreshInFlight.delete(scope));
+    refreshInFlight.set(scope, pending);
+    return pending;
   },
 
   logout: async (baseUrl: string, accessToken: string) => {

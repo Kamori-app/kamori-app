@@ -23,7 +23,7 @@ wasm = [
   "dep:getrandom02"
 ]
 frb = ["flutter_rust_bridge", "native", "sync-runtime", "dep:opaque-ke"]
-http-reqwest = ["reqwest", "native"]
+http-reqwest = ["reqwest", "native", "dep:rustls", "dep:webpki-roots"]
 flutter_rust_bridge = ["dep:flutter_rust_bridge"]
 
 [dependencies]
@@ -62,7 +62,9 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 flutter_rust_bridge = { version = "=2.13.0", optional = true }
 
 # HTTP client for the signed operation transport and local bridge
-reqwest = { version = "0.13", default-features = false, features = ["json"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs", "tls12"], optional = true }
+webpki-roots = { version = "1.0", optional = true }
 opaque-ke = { version = "4.0.1", features = ["argon2", "std"], optional = true }
 uuid = { version = "1.24", features = ["v4", "v5", "serde", "rng-getrandom"] }
 axum = { version = "0.8", optional = true }
@@ -81,7 +83,8 @@ hex = "0.4"
 base64 = "0.23"
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "io-util"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

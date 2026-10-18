@@ -1,8 +1,8 @@
 <script lang="ts">
     import Button from "$lib/components/ui/Button.svelte";
     import Modal from "$lib/components/ui/Modal.svelte";
-    import type { MaterializedPimItem, PimValue } from "$lib/pim";
-    import { localDateTimeToTemporal, recurringIntervalOccursOnDay, temporalToDate, temporalToInputValue } from "$lib/pim";
+    import type { MaterializedPimItem, PimValue, PimCalendarOccurrence } from "$lib/pim";
+    import { localDateTimeToTemporal, calendarOccurrencesOnDay, temporalToDate, temporalToInputValue } from "$lib/pim";
     import { locale } from "$lib/i18n";
 
     export let spaces: { id: string; name: string }[] = [];
@@ -53,31 +53,14 @@
     };
     const eventStart = (item: MaterializedPimItem) => temporalToDate(item.fields.starts_at);
     const explicitEventEnd = (item: MaterializedPimItem) => temporalToDate(item.fields.ends_at);
-    const eventEnd = (item: MaterializedPimItem) => {
-        const explicit = explicitEventEnd(item);
-        if (explicit) return explicit;
-        const startsAt = eventStart(item);
-        if (!startsAt) return undefined;
-        return isAllDay(item) ? addDays(startsAt, 1) : new Date(startsAt.getTime() + 1);
-    };
-    const eventTime = (item: MaterializedPimItem) => {
-        if (isAllDay(item)) return tr("All day", "Весь день");
-        const startsAt = eventStart(item);
-        const endsAt = explicitEventEnd(item);
-        if (!startsAt) return "";
-        const date = new Intl.DateTimeFormat($locale, { dateStyle: "medium" }).format(startsAt);
-        const startTime = new Intl.DateTimeFormat($locale, { timeStyle: "short" }).format(startsAt);
-        const endTime = endsAt ? new Intl.DateTimeFormat($locale, { timeStyle: "short" }).format(endsAt) : "";
-        return `${date} · ${startTime}${endTime ? `–${endTime}` : ""}`;
-    };
-    const occursOn = (item: MaterializedPimItem, day: Date) => {
-        return recurringIntervalOccursOnDay(
-            item.fields.starts_at,
-            item.fields.ends_at,
-            textField(item, "recurrence_rule"),
-            day,
-        );
-    };
+    const occurrencesOn = (day: Date) => visible.flatMap(item =>
+        calendarOccurrencesOnDay(item.fields, day).map(occurrence => ({ item, occurrence })))
+        .sort((a, b) => a.occurrence.startsAt.getTime() - b.occurrence.startsAt.getTime());
+    const occurrenceTime = (occurrence: PimCalendarOccurrence) => occurrence.allDay
+        ? tr("All day", "Весь день")
+        : `${new Intl.DateTimeFormat($locale, { dateStyle: "medium", timeStyle: "short" }).format(occurrence.startsAt)}–${new Intl.DateTimeFormat($locale, { timeStyle: "short" }).format(occurrence.endsAt)}`;
+    const isSeries = (item: MaterializedPimItem) => Boolean(textField(item, "recurrence_rule") || item.fields.recurrence_rdates || item.fields.recurrence_overrides);
+    const editLabel = (item: MaterializedPimItem) => isSeries(item) ? tr("Edit series", "Изменить серию") : tr("Edit event", "Изменить событие");
     const calendarDays = (month: Date) => {
         const first = new Date(month.getFullYear(), month.getMonth(), 1);
         const mondayOffset = (first.getDay() + 6) % 7;
@@ -200,7 +183,11 @@
         .sort((left, right) => (eventStart(left)?.getTime() ?? 0) - (eventStart(right)?.getTime() ?? 0));
     $: monthDays = calendarDays(anchor);
     $: visibleWeekDays = weekDays(anchor);
-    $: calendarHeading = mode === "week"
+    $: agendaOccurrences = [...new Map(visibleWeekDays.flatMap(day => visible.flatMap(item =>
+        calendarOccurrencesOnDay(item.fields, day).map(occurrence => ({ item, occurrence }))))
+        .map(row => [`${row.item.headOperationId}:${row.occurrence.recurrenceId}`, row] as const)).values()]
+        .sort((a, b) => a.occurrence.startsAt.getTime() - b.occurrence.startsAt.getTime());
+    $: calendarHeading = mode !== "month"
         ? `${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric" }).format(visibleWeekDays[0])} – ${new Intl.DateTimeFormat($locale, { month: "short", day: "numeric", year: "numeric" }).format(visibleWeekDays[6])}`
         : new Intl.DateTimeFormat($locale, { month: "long", year: "numeric" }).format(anchor);
     $: recurrenceOptions = ["", "FREQ=DAILY", "FREQ=WEEKLY", "FREQ=MONTHLY", "FREQ=YEARLY"].includes(recurrence)
@@ -223,10 +210,13 @@
                 <button class:active-mode={mode === option[0]} class="px-3 py-2 text-sm" on:click={() => (mode = option[0] as CalendarMode)}>{option[1]}</button>
             {/each}
         </div>
-        {#if mode !== "list"}<div class="ml-auto flex items-center gap-2"><button class="border border-slate/20 bg-white px-3 py-2" aria-label={tr("Previous", "Назад")} on:click={() => go(-1)}>←</button><button class="border border-slate/20 bg-white px-3 py-2 text-sm font-semibold" on:click={() => (anchor = new Date())}>{tr("Today", "Сегодня")}</button><button class="border border-slate/20 bg-white px-3 py-2" aria-label={tr("Next", "Вперёд")} on:click={() => go(1)}>→</button></div>{/if}
+        <div class="ml-auto flex items-center gap-2"><button class="border border-slate/20 bg-white px-3 py-2" aria-label={tr("Previous", "Назад")} on:click={() => go(-1)}>←</button><button class="border border-slate/20 bg-white px-3 py-2 text-sm font-semibold" on:click={() => (anchor = new Date())}>{tr("Today", "Сегодня")}</button><button class="border border-slate/20 bg-white px-3 py-2" aria-label={tr("Next", "Вперёд")} on:click={() => go(1)}>→</button></div>
     </div>
     {#if !canWrite}<p class="border-l-4 border-gold bg-sand/45 p-3 text-sm text-slate">{tr("This space is read-only or its key is unavailable on this device.", "Пространство доступно только для чтения или его ключ недоступен на устройстве.")}</p>{/if}
 
+    {#each visible.filter(item => listField(item, "recurrence_unsupported").length) as item}
+        <p role="status" class="border border-slate/20 p-3 text-sm">{item.title}: {tr("This imported recurrence cannot be displayed here. Its original calendar data is preserved for DAV clients.", "Это импортированное повторение пока не отображается здесь. Исходные данные сохранены для DAV-клиентов.")}</p>
+    {/each}
     {#if mode === "month"}
         <div class="border border-slate/15 bg-white/60">
             <h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold capitalize text-slate">{calendarHeading}</h2>
@@ -236,23 +226,23 @@
                     <div class:outside={day.getMonth() !== anchor.getMonth()} class:today={sameDay(day, new Date())} class="calendar-day min-h-24 border-b border-r border-slate/10 p-2 text-left">
                         <button class="day-number text-xs font-semibold" aria-label={`${tr("Create event on", "Создать событие на")} ${isoDate(day)}`} disabled={!canWrite} on:click={() => openCreate(day)}>{day.getDate()}</button>
                         <span class="mt-1 block space-y-1">
-                            {#each visible.filter((item) => occursOn(item, day)).slice(0, 3) as item}
-                                <button class="block w-full truncate bg-mint/15 px-1.5 py-1 text-left text-xs text-moss" on:click={() => openEdit(item)}>{isAllDay(item) ? "" : new Intl.DateTimeFormat($locale, { timeStyle: "short" }).format(eventStart(item))} {item.title}</button>
+                            {#each occurrencesOn(day).slice(0, 3) as { item, occurrence }}
+                                <button class="block w-full truncate bg-mint/15 px-1.5 py-1 text-left text-xs text-moss" title={editLabel(item)} on:click={() => openEdit(item)}>{occurrence.allDay ? "" : new Intl.DateTimeFormat($locale, { timeStyle: "short" }).format(occurrence.startsAt)} {occurrence.title ?? item.title}</button>
                             {/each}
-                            {#if visible.filter((item) => occursOn(item, day)).length > 3}<span class="block text-xs text-slate/55">+{visible.filter((item) => occursOn(item, day)).length - 3}</span>{/if}
+                            {#if occurrencesOn(day).length > 3}<span class="block text-xs text-slate/55">+{occurrencesOn(day).length - 3}</span>{/if}
                         </span>
                     </div>
                 {/each}
             </div>
         </div>
     {:else if mode === "week"}
-        <div class="border border-slate/15 bg-white/60"><h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold text-slate">{calendarHeading}</h2><div class="calendar-grid">{#each visibleWeekDays as day}<div class:today={sameDay(day, new Date())} class="min-h-64 border-r border-slate/10 p-2"><button class="mb-2 text-sm font-semibold text-slate" on:click={() => canWrite && openCreate(day)}>{new Intl.DateTimeFormat($locale, { weekday: "short", day: "numeric" }).format(day)}</button>{#each visible.filter((item) => occursOn(item, day)) as item}<button class="mb-1 block w-full bg-mint/15 p-2 text-left text-xs text-moss" on:click={() => openEdit(item)}><strong class="block">{item.title}</strong>{eventTime(item)}</button>{/each}</div>{/each}</div></div>
+        <div class="border border-slate/15 bg-white/60"><h2 class="border-b border-slate/15 px-4 py-3 font-heading text-lg font-semibold text-slate">{calendarHeading}</h2><div class="calendar-grid">{#each visibleWeekDays as day}<div class:today={sameDay(day, new Date())} class="min-h-64 border-r border-slate/10 p-2"><button class="mb-2 text-sm font-semibold text-slate" on:click={() => canWrite && openCreate(day)}>{new Intl.DateTimeFormat($locale, { weekday: "short", day: "numeric" }).format(day)}</button>{#each occurrencesOn(day) as { item, occurrence }}<button class="mb-1 block w-full bg-mint/15 p-2 text-left text-xs text-moss" title={editLabel(item)} on:click={() => openEdit(item)}><strong class="block">{occurrence.title ?? item.title}</strong>{occurrenceTime(occurrence)}{#if occurrence.location ?? textField(item, "location")}<span class="block">{occurrence.location ?? textField(item, "location")}</span>{/if}{#if occurrence.notes ?? textField(item, "notes")}<span class="block">{occurrence.notes ?? textField(item, "notes")}</span>{/if}</button>{/each}</div>{/each}</div></div>
     {:else}
-        <div class="space-y-2">{#each visible as item}<article class="flex flex-wrap items-center gap-3 border border-slate/15 bg-white/70 p-4"><div class="min-w-0 flex-1"><h2 class="font-semibold text-slate">{item.title}</h2><p class="text-sm text-slate/65">{eventTime(item)}{textField(item, "location") ? ` · ${textField(item, "location")}` : ""}</p>{#if textField(item, "notes")}<p class="mt-1 line-clamp-2 text-sm text-slate/60">{textField(item, "notes")}</p>{/if}</div><Button variant="ghost" on:click={() => openEdit(item)} disabled={!canWrite}>{tr("Edit", "Изменить")}</Button><Button variant="danger" on:click={() => onDelete(item)} disabled={!canWrite}>{tr("Delete", "Удалить")}</Button></article>{:else}<div class="border border-dashed border-slate/25 p-8 text-center text-sm text-slate/65">{tr("No events yet.", "Событий пока нет.")}</div>{/each}</div>
+        <div class="space-y-2"><h2 class="font-heading text-lg font-semibold">{calendarHeading}</h2>{#each agendaOccurrences as { item, occurrence }}<article class="flex flex-wrap items-center gap-3 border border-slate/15 bg-white/70 p-4"><div class="min-w-0 flex-1"><h2 class="font-semibold text-slate">{occurrence.title ?? item.title}</h2><p class="text-sm text-slate/65">{occurrenceTime(occurrence)}{(occurrence.location ?? textField(item, "location")) ? ` · ${occurrence.location ?? textField(item, "location")}` : ""}</p>{#if occurrence.notes ?? textField(item, "notes")}<p class="mt-1 line-clamp-2 text-sm text-slate/60">{occurrence.notes ?? textField(item, "notes")}</p>{/if}</div><Button variant="ghost" on:click={() => openEdit(item)} disabled={!canWrite}>{editLabel(item)}</Button><Button variant="danger" on:click={() => onDelete(item)} disabled={!canWrite}>{isSeries(item) ? tr("Delete series", "Удалить серию") : tr("Delete", "Удалить")}</Button></article>{:else}<div class="border border-dashed border-slate/25 p-8 text-center text-sm text-slate/65">{tr("No events this week.", "На этой неделе нет событий.")}</div>{/each}</div>
     {/if}
 </section>
 
-<Modal open={editorOpen} width="2xl" title={editing ? tr("Edit event", "Изменить событие") : tr("New event", "Новое событие")} onClose={() => (editorOpen = false)}>
+<Modal open={editorOpen} width="2xl" title={editing ? editLabel(editing) : tr("New event", "Новое событие")} onClose={() => (editorOpen = false)}>
         <form class="space-y-4" on:submit|preventDefault={save}>
             <label class="block text-sm font-semibold text-slate">{tr("Title", "Название")}<input class="mt-1 w-full border border-slate/20 bg-white px-3 py-2 font-normal" bind:value={title} maxlength="500" /></label>
             <label class="flex items-center gap-2 text-sm font-semibold text-slate"><input type="checkbox" bind:checked={allDay} on:change={() => (endTouched = true)} />{tr("All-day event", "Событие на весь день")}</label>
@@ -272,7 +262,7 @@
             <label class="block text-sm font-semibold text-slate">{tr("Notes", "Заметки")}<textarea class="mt-1 min-h-24 w-full border border-slate/20 bg-white px-3 py-2 font-normal" bind:value={notes}></textarea></label>
             <label class="block text-sm font-semibold text-slate">{tr("Categories (comma-separated)", "Категории через запятую")}<input class="mt-1 w-full border border-slate/20 bg-white px-3 py-2 font-normal" bind:value={categories} /></label>
             {#if formError}<p class="text-sm text-coral" role="alert">{formError}</p>{/if}
-            <div class="flex justify-between gap-2">{#if editing}<Button variant="danger" disabled={!canWrite} on:click={() => { void onDelete(editing!); editorOpen = false; }}>{tr("Delete", "Удалить")}</Button>{:else}<span></span>{/if}<div class="flex gap-2"><Button variant="ghost" on:click={() => (editorOpen = false)}>{tr("Cancel", "Отмена")}</Button><Button type="submit" disabled={!canWrite || busy === "pim-save"}>{busy === "pim-save" ? tr("Saving…", "Сохранение…") : tr("Save event", "Сохранить событие")}</Button></div></div>
+            <div class="flex justify-between gap-2">{#if editing}<Button variant="danger" disabled={!canWrite} on:click={() => { void onDelete(editing!); editorOpen = false; }}>{isSeries(editing) ? tr("Delete series", "Удалить серию") : tr("Delete", "Удалить")}</Button>{:else}<span></span>{/if}<div class="flex gap-2"><Button variant="ghost" on:click={() => (editorOpen = false)}>{tr("Cancel", "Отмена")}</Button><Button type="submit" disabled={!canWrite || busy === "pim-save"}>{busy === "pim-save" ? tr("Saving…", "Сохранение…") : tr("Save event", "Сохранить событие")}</Button></div></div>
         </form>
 </Modal>
 

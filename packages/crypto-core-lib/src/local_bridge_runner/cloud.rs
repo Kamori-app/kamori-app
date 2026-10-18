@@ -55,9 +55,7 @@ impl CloudSyncClient {
         rotation_attempt_source: Arc<CredentialRotationAttemptSource>,
         rotation_sink: Arc<CredentialRotationSink>,
     ) -> Result<Self> {
-        let http = Client::builder()
-            .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+        let http = cloud_http_client_builder()
             .build()
             .context("build cloud sync HTTP client")?;
         Ok(Self {
@@ -320,4 +318,18 @@ async fn decode_msgpack<T: DeserializeOwned>(response: reqwest::Response) -> Res
     let bytes = response.bytes().await.context("read msgpack body bytes")?;
     let mut deserializer = rmp_serde::Deserializer::new(bytes.as_ref()).with_human_readable();
     T::deserialize(&mut deserializer).context("decode msgpack payload")
+}
+
+fn cloud_http_client_builder() -> reqwest::ClientBuilder {
+    crate::native_http::client_builder()
+        .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+}
+
+#[cfg(test)]
+mod tls_tests {
+    #[tokio::test]
+    async fn cloud_factory_verifies_synthetic_ca_and_hostname() {
+        crate::native_http::tests::assert_https_policy(super::cloud_http_client_builder).await;
+    }
 }

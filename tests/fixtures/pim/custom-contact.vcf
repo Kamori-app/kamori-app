@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:synthetic-contact@example.invalid
+FN:Imported contact master
+NOTE:Imported contact notes
+item1.EMAIL;X-KAMORI-LABEL="personal;secure";PREF=2:synthetic@example.invalid
+X-CUSTOM;FLAG="a;b":opaque folded
+ contact value
+END:VCARD

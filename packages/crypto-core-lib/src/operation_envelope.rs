@@ -268,12 +268,33 @@ mod tests {
             .verify(signing_key.verifying_key().as_bytes())
             .expect("valid signature");
 
-        envelope.ciphertext.push(10);
-        assert!(
-            envelope
-                .verify(signing_key.verifying_key().as_bytes())
-                .is_err()
-        );
+        type FieldMutation = (&'static str, fn(&mut OperationEnvelopeV1));
+        let mutations: [FieldMutation; 10] = [
+            ("space_id", |e| e.space_id = Uuid::new_v4()),
+            ("stream_id", |e| e.stream_id = Uuid::new_v4()),
+            ("client_op_id", |e| e.client_op_id = Uuid::new_v4()),
+            ("author_device_id", |e| e.author_device_id = Uuid::new_v4()),
+            ("key_epoch", |e| e.key_epoch += 1),
+            ("envelope_kind", |e| {
+                e.envelope_kind = EnvelopeKind::Snapshot
+            }),
+            ("cipher_suite", |e| {
+                e.cipher_suite = EnvelopeCipherSuite::Aes256Gcm
+            }),
+            ("nonce", |e| e.nonce[0] ^= 1),
+            ("ciphertext", |e| e.ciphertext[0] ^= 1),
+            ("signature", |e| e.signature[0] ^= 1),
+        ];
+        for (field, mutate) in mutations {
+            let mut changed = envelope.clone();
+            mutate(&mut changed);
+            assert!(
+                changed
+                    .verify(signing_key.verifying_key().as_bytes())
+                    .is_err(),
+                "mutation of {field} must invalidate the signature"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,46 @@
+{
+  "application_source": "e3c86d5f7f5a690c14d686bac0d045907d009917",
+  "command": "bun run acceptance:full",
+  "skip_build": false,
+  "compose_project": "kamori-readiness-20261015",
+  "endpoint": "unix:///private/tmp/podman/podman-machine-default-api.sock",
+  "retries": 0,
+  "exit": 0,
+  "passed": 45,
+  "test_minutes": 1.4,
+  "deployed_cases": 9,
+  "mounted_component_cases": 36,
+  "images": [
+    {
+      "role": "cloud",
+      "tag": "kamori/cloud-server:acceptance",
+      "image_id": "2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981",
+      "repo_digests": [
+        "docker.io/kamori/cloud-server@sha256:4d512271e6472cc6fd80ff5fa13589d236c66e4a61c04a3c743b77cfde62bfe6"
+      ],
+      "container_id": "05c4056d660ebe9ff87bfed581296393dbd44d306a54d481913095517b1bf614",
+      "running_image": "2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981"
+    },
+    {
+      "role": "web",
+      "tag": "kamori/web:acceptance",
+      "image_id": "98b74e6cb6e33f4f3c367564caf31b1374cc09a0167ee048afa89a02893ab9df",
+      "repo_digests": [
+        "docker.io/kamori/web@sha256:d8b2359f4d5df9d8dd94b7a8ffa5783171a78b955a3ebdc87ffa5e3aa2432881"
+      ],
+      "container_id": "bfde4587493c722ac477c3cf13733ce6d69c1bf72751d79945e2a0e44bc93940",
+      "running_image": "98b74e6cb6e33f4f3c367564caf31b1374cc09a0167ee048afa89a02893ab9df"
+    },
+    {
+      "role": "admin",
+      "tag": "kamori/admin:acceptance",
+      "image_id": "d1ab3cf0118c847ba50085a58d8601c7f8a38456b10341c3362153c2cd0051fa",
+      "repo_digests": [
+        "docker.io/kamori/admin@sha256:7a39b83ca1f660d86d147af091890b3fa59c32f8d8118aaaae2a6413dd075b0d"
+      ],
+      "container_id": "c09a9fbf369bd59a188f0a3e812957da8ee1c308d098c4fd1ae94811da70f61b",
+      "running_image": "d1ab3cf0118c847ba50085a58d8601c7f8a38456b10341c3362153c2cd0051fa"
+    }
+  ],
+  "log": "/private/tmp/kamori-readiness-20261015/final-acceptance-final.log"
+}

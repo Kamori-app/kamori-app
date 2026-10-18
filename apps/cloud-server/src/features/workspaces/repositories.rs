@@ -1,18 +1,42 @@
 //! Repository functions for workspace and workspace_members tables.
 
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::features::{
-    common::{ApiError, internal_error},
+    auth::repositories::lock_account_security_mutation,
+    common::{ApiError, internal_error, unauthenticated},
     workspaces::dto::{WorkspaceKind, WorkspaceMember, WorkspaceRole, WorkspaceSummary},
 };
+
+// Take admission before any workspace/user locks. Account deletion holds the
+// same gate while discovering its full cascade set. A strong user lock here
+// would invert deletion's workspace -> space -> account ordering.
+async fn admit_workspace_owner(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<(), ApiError> {
+    lock_account_security_mutation(tx, user_id).await?;
+    let eligible: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL AND suspended_at IS NULL)",
+    )
+    .bind(user_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(internal_error)?;
+    if !eligible {
+        return Err(unauthenticated("account is unavailable"));
+    }
+    Ok(())
+}
 
 /// Ensures a user has an active personal workspace and owner membership.
 pub(crate) async fn ensure_personal_workspace_for_user(
     pool: &PgPool,
     user_id: Uuid,
 ) -> Result<Uuid, ApiError> {
+    let mut tx = pool.begin().await.map_err(internal_error)?;
+    admit_workspace_owner(&mut tx, user_id).await?;
     let existing: Option<Uuid> = sqlx::query_scalar(
         r#"
         SELECT id
@@ -24,11 +48,12 @@ pub(crate) async fn ensure_personal_workspace_for_user(
         "#,
     )
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(internal_error)?;
     if let Some(workspace_id) = existing {
-        ensure_workspace_owner_membership(pool, workspace_id, user_id).await?;
+        ensure_workspace_owner_membership(&mut tx, workspace_id, user_id).await?;
+        tx.commit().await.map_err(internal_error)?;
         return Ok(workspace_id);
     }
 
@@ -44,7 +69,7 @@ pub(crate) async fn ensure_personal_workspace_for_user(
     .bind(workspace_id)
     .bind(user_id)
     .bind(Vec::<u8>::new())
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(internal_error)?;
 
@@ -62,18 +87,19 @@ pub(crate) async fn ensure_personal_workspace_for_user(
             "#,
         )
         .bind(user_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(internal_error)?
         .ok_or_else(|| internal_error("failed to create personal workspace"))?
     };
 
-    ensure_workspace_owner_membership(pool, personal_workspace_id, user_id).await?;
+    ensure_workspace_owner_membership(&mut tx, personal_workspace_id, user_id).await?;
+    tx.commit().await.map_err(internal_error)?;
     Ok(personal_workspace_id)
 }
 
 async fn ensure_workspace_owner_membership(
-    pool: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), ApiError> {
@@ -88,7 +114,7 @@ async fn ensure_workspace_owner_membership(
     .bind(Uuid::new_v4())
     .bind(workspace_id)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await
     .map_err(internal_error)?;
     Ok(())
@@ -101,6 +127,7 @@ pub(crate) async fn create_team_workspace_for_owner(
     encrypted_metadata: &[u8],
 ) -> Result<Uuid, ApiError> {
     let mut tx = pool.begin().await.map_err(internal_error)?;
+    admit_workspace_owner(&mut tx, owner_user_id).await?;
     let workspace_id = Uuid::new_v4();
 
     sqlx::query(

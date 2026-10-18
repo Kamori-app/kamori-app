@@ -159,6 +159,9 @@
   const updateSetting = async (setting: RuntimeSetting) => {
     busy = `setting-${setting.key}`;
     try {
+      if (settingConfirmation !== `SET ${setting.key}`) {
+        throw new Error("Typed setting confirmation does not match.");
+      }
       const reauthToken = await reauthenticate();
       await adminApi.updateSetting(baseUrl, sessionToken, {
         key: setting.key,

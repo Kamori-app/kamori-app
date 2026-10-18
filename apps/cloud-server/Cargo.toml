@@ -54,4 +54,5 @@ default = ["webauthn"]
 webauthn = ["webauthn-rs"]
 
 [dev-dependencies]
+openssl = "0.10"
 tower = "0.5"

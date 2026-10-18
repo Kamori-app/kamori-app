@@ -8,7 +8,15 @@ import 'package:dav_bridge_mobile/src/rust/rust_bridge_mock.dart';
 ///
 /// Implementations can be backed by either generated FRB bindings or a local
 /// mock used during early product development.
+abstract class SessionLease {
+  /// Drops this caller's ownership. Native in-flight calls retain their own
+  /// ownership until completion, including when a Flutter engine shuts down.
+  void release();
+}
+
 abstract class RustBridgeApi {
+  Future<SessionLease> acquireSessionLease();
+
   /// Performs password-based sign-in.
   ///
   /// Returns either an access token or a one-time continuation when TOTP is required.
@@ -59,6 +67,8 @@ abstract class RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   });
 
   /// Triggers one explicit sync cycle and returns number of synced items.

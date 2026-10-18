@@ -6,6 +6,26 @@ S3-compatible services, then drives the deployed web application with
 Playwright. It is intended to catch integration and packaging failures that
 unit tests cannot see.
 
+## Disposable S3 fixture provenance
+
+The server and init client use the public
+[`coollabsio/minio` community rebuild](https://github.com/coollabsio/minio)
+with the immutable multiarch index
+`sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9`
+(linux/amd64 and linux/arm64). This replaces upstream registry references that
+reject anonymous pulls; no registry login or CI secret is needed.
+
+The server advances from the September release to upstream
+[`RELEASE.2025-10-15T17-29-55Z`](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z),
+a security release addressing privilege escalation. The image embeds the same
+`mc RELEASE.2025-08-13T08-35-41Z` client previously selected for initialization.
+The publisher's [build recipe](https://github.com/coollabsio/minio/blob/main/Dockerfile)
+builds upstream source and downloads the upstream client; its floating build
+inputs do not establish byte-for-byte rebuild reproducibility. The digest pins
+the runtime artifact. This is a community-published image, not an official MinIO
+image, and is used only for disposable acceptance/recovery fixtures. This change
+does not certify production use or claim security scanning of the rebuild.
+
 ## Prerequisites
 
 - Bun at the version pinned in the root `package.json`.

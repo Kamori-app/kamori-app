@@ -1,5 +1,8 @@
 #![cfg(all(feature = "local-bridge", feature = "http-reqwest"))]
 
+use crypto_core_lib::operation_envelope::OperationEnvelopeV1;
+use crypto_core_lib::pim::{PimOperationV1, PimResourceKind, PimValue};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crypto_core_lib::local_bridge_runner::{
@@ -565,4 +568,623 @@ fn cleanup_database(database_path: &Path) {
             );
         }
     }
+}
+
+fn queued_operations(bridge: &TestBridge) -> Vec<OperationEnvelopeV1> {
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT envelope FROM operation_outbox ORDER BY rowid")
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .map(|row| rmp_serde::from_slice(&row.unwrap()).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn preserves_first_party_streams_and_kinds_through_conditional_dav_writes() {
+    let bridge = TestBridge::start().await;
+    for (kind, route, suffix) in [
+        (PimResourceKind::Task, "caldav", "ics"),
+        (PimResourceKind::CalendarEvent, "caldav", "ics"),
+        (PimResourceKind::Contact, "carddav", "vcf"),
+    ] {
+        let stream = Uuid::new_v4();
+        let mut fields = BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]);
+        if kind == PimResourceKind::CalendarEvent {
+            fields.insert(
+                "starts_at".into(),
+                PimValue::Record(BTreeMap::from([
+                    ("kind".into(), "utc".into()),
+                    ("utc".into(), "20261015T120000Z".into()),
+                ])),
+            );
+        }
+        let original = bridge
+            .runner
+            .upsert_pim_item(bridge.space_id, stream, kind, fields)
+            .await
+            .unwrap();
+        let path = format!("/{route}/{}/{stream}.{suffix}", bridge.space_id);
+        let get = bridge.send("GET", &path).await;
+        assert_eq!(get.status(), StatusCode::OK);
+        let etag = header_string(&get, ETAG);
+        let updated_payload = get.text().await.unwrap().replace("Original", "Edited");
+        let before = queued_operations(&bridge).len();
+        let update = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(updated_payload.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            update.status(),
+            StatusCode::NO_CONTENT,
+            "first-party {kind:?} update"
+        );
+        let next_etag = header_string(&update, ETAG);
+        assert_eq!(
+            bridge.send("GET", &path).await.text().await.unwrap(),
+            updated_payload
+        );
+        let queued = queued_operations(&bridge);
+        assert_eq!(queued.len(), before + 1);
+        let child = queued.last().unwrap();
+        assert_eq!(child.stream_id, stream);
+        let PimOperationV1::Upsert(value) =
+            PimOperationV1::decode(&child.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("upsert")
+        };
+        assert_eq!(value.dependencies, vec![original]);
+        assert_eq!(value.resource_kind, kind);
+        let retry = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(updated_payload)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(retry.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(queued_operations(&bridge), queued);
+        let deleted = bridge
+            .request("DELETE", &path)
+            .header(IF_MATCH, next_etag)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            bridge.send("GET", &path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let deleted = queued_operations(&bridge).pop().unwrap();
+        assert_eq!(deleted.stream_id, stream);
+        let PimOperationV1::Delete(value) =
+            PimOperationV1::decode(&deleted.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("delete")
+        };
+        assert_eq!(value.dependencies, vec![child.client_op_id]);
+        assert_eq!(value.resource_kind, kind);
+    }
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn rejects_broken_heads_without_persisting_invalid_outbox_operations() {
+    for (method, damage) in ["PUT", "DELETE"]
+        .into_iter()
+        .flat_map(|method| ["missing", "cross-stream", "cycle"].map(|damage| (method, damage)))
+    {
+        let bridge = TestBridge::start().await;
+        let stream = Uuid::new_v4();
+        bridge
+            .runner
+            .upsert_pim_item(
+                bridge.space_id,
+                stream,
+                PimResourceKind::Task,
+                BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+            )
+            .await
+            .unwrap();
+        bridge
+            .runner
+            .upsert_pim_item(
+                bridge.space_id,
+                stream,
+                PimResourceKind::Task,
+                BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+            )
+            .await
+            .unwrap();
+        let path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+        let get = bridge.send("GET", &path).await;
+        let etag = header_string(&get, ETAG);
+        let payload = get.text().await.unwrap();
+        let before = queued_operations(&bridge);
+        let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+        match damage {
+            "missing" => {
+                connection
+                    .execute("DELETE FROM operation_states", [])
+                    .unwrap();
+            }
+            "cross-stream" => {
+                connection.execute("UPDATE operation_states SET stream_id = ?1 WHERE parent_operation_id IS NULL", [Uuid::new_v4().to_string()]).unwrap();
+            }
+            "cycle" => {
+                connection
+                    .execute(
+                        "UPDATE operation_states SET parent_operation_id = client_op_id",
+                        [],
+                    )
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        drop(connection);
+        let response = bridge
+            .request(method, &path)
+            .header(IF_MATCH, etag)
+            .body(payload.clone())
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_server_error());
+        assert_eq!(
+            queued_operations(&bridge),
+            before,
+            "rejected {method} must leave outbox unchanged"
+        );
+        assert_eq!(
+            bridge.send("GET", &path).await.text().await.unwrap(),
+            payload
+        );
+        bridge.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn recreates_a_deleted_first_party_href_in_its_existing_stream() {
+    let bridge = TestBridge::start().await;
+    let stream = Uuid::new_v4();
+    bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+        )
+        .await
+        .unwrap();
+    let path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+    let get = bridge.send("GET", &path).await;
+    let etag = header_string(&get, ETAG);
+    let payload = get.text().await.unwrap();
+    assert_eq!(
+        bridge
+            .request("DELETE", &path)
+            .header(IF_MATCH, etag)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let tombstone = queued_operations(&bridge).pop().unwrap();
+    let recreated = bridge
+        .request("PUT", &path)
+        .header(IF_NONE_MATCH, "*")
+        .body(payload.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(recreated.status(), StatusCode::CREATED);
+    assert_eq!(
+        bridge.send("GET", &path).await.text().await.unwrap(),
+        payload
+    );
+    let child = queued_operations(&bridge).pop().unwrap();
+    assert_eq!(child.stream_id, stream);
+    let PimOperationV1::Upsert(value) =
+        PimOperationV1::decode(&child.open(&[11; 32]).unwrap()).unwrap()
+    else {
+        panic!("upsert")
+    };
+    assert_eq!(value.resource_kind, PimResourceKind::Task);
+    assert_eq!(value.dependencies, vec![tombstone.client_op_id]);
+    bridge.stop().await;
+}
+
+fn persisted_dav_rows(
+    bridge: &TestBridge,
+) -> BTreeMap<&'static str, Vec<Vec<rusqlite::types::Value>>> {
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    [
+        "operation_outbox",
+        "operation_states",
+        "resource_heads",
+        "calendars",
+        "dav_changes",
+    ]
+    .into_iter()
+    .map(|table| {
+        let mut statement = connection
+            .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+            .unwrap();
+        let columns = statement.column_count();
+        let rows = statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|index| row.get(index))
+                    .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        (table, rows)
+    })
+    .collect()
+}
+
+async fn assert_rejects_unselected_sibling(method: &str, damage: &str) {
+    let bridge = TestBridge::start().await;
+    let stream = Uuid::new_v4();
+    let root = bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Original".into()))]),
+        )
+        .await
+        .unwrap();
+    let selected = bridge
+        .runner
+        .upsert_pim_item(
+            bridge.space_id,
+            stream,
+            PimResourceKind::Task,
+            BTreeMap::from([("title".into(), PimValue::Text("Selected".into()))]),
+        )
+        .await
+        .unwrap();
+    // A larger sibling id leaves the existing selected branch at the canonical href.
+    let sibling = Uuid::from_u128(u128::MAX);
+    let sibling_href = format!("{stream}.conflict-{sibling}.ics");
+    let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+    connection.execute(
+            "INSERT INTO operation_states (collection_id, client_op_id, stream_id, logical_resource_id, materialized_resource_id, resource_kind, payload, deleted, space_seq, parent_operation_id, seed_projection_resource_id)
+             SELECT collection_id, ?1, stream_id, logical_resource_id, ?2, resource_kind, payload, deleted, space_seq, ?3, NULL FROM operation_states WHERE client_op_id = ?4",
+            rusqlite::params![sibling.to_string(), sibling_href, root.to_string(), selected.to_string()],
+        ).unwrap();
+    connection.execute(
+            "INSERT INTO calendars SELECT collection_id, ?1, ical, etag, updated_at_ms FROM calendars WHERE resource_id = ?2",
+            rusqlite::params![sibling_href, format!("{stream}.ics")],
+        ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO resource_heads VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                bridge.space_id.to_string(),
+                sibling_href,
+                sibling.to_string()
+            ],
+        )
+        .unwrap();
+    match damage {
+        "missing-parent" => {
+            connection
+                .execute(
+                    "UPDATE operation_states SET parent_operation_id = ?1 WHERE client_op_id = ?2",
+                    rusqlite::params![Uuid::new_v4().to_string(), sibling.to_string()],
+                )
+                .unwrap();
+        }
+        "cycle" => {
+            connection.execute("UPDATE operation_states SET parent_operation_id = client_op_id WHERE client_op_id = ?1", [sibling.to_string()]).unwrap();
+        }
+        "seed-on-child" => {
+            connection.execute("UPDATE operation_states SET seed_projection_resource_id = materialized_resource_id WHERE client_op_id = ?1", [sibling.to_string()]).unwrap();
+        }
+        _ => unreachable!(),
+    }
+    drop(connection);
+    let selected_path = format!("/caldav/{}/{stream}.ics", bridge.space_id);
+    let sibling_path = format!("/caldav/{}/{sibling_href}", bridge.space_id);
+    assert_eq!(
+        bridge.send("GET", &sibling_path).await.status(),
+        StatusCode::OK
+    );
+    let get = bridge.send("GET", &selected_path).await;
+    assert_eq!(get.status(), StatusCode::OK);
+    let etag = header_string(&get, ETAG);
+    let payload = get.text().await.unwrap();
+    let before = persisted_dav_rows(&bridge);
+    let response = bridge
+        .request(method, &selected_path)
+        .header(IF_MATCH, etag)
+        .body(payload.replace("Selected", "Edited"))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_server_error());
+    let after = persisted_dav_rows(&bridge);
+    assert_eq!(
+        after["operation_outbox"].len(),
+        before["operation_outbox"].len(),
+        "{method} with unselected {damage} sibling must leave outbox unchanged"
+    );
+    assert_eq!(
+        after, before,
+        "rejected {method} must preserve every persisted graph/projection row"
+    );
+    assert_eq!(
+        bridge
+            .send("GET", &selected_path)
+            .await
+            .text()
+            .await
+            .unwrap(),
+        payload
+    );
+    assert_eq!(
+        bridge.send("GET", &sibling_path).await.status(),
+        StatusCode::OK
+    );
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_missing_parent_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "missing-parent").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_cycle_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "cycle").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_seed_misuse_on_put_without_persistence() {
+    assert_rejects_unselected_sibling("PUT", "seed-on-child").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_missing_parent_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "missing-parent").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_cycle_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "cycle").await;
+}
+
+#[tokio::test]
+async fn rejects_unselected_sibling_seed_misuse_on_delete_without_persistence() {
+    assert_rejects_unselected_sibling("DELETE", "seed-on-child").await;
+}
+
+#[path = "support/pim_corpus.rs"]
+mod pim_corpus;
+
+#[tokio::test]
+async fn imported_corpus_survives_first_party_edits_and_dav_with_one_linear_outbox() {
+    let bridge = TestBridge::start().await;
+    for (fixture, source) in pim_corpus::corpus() {
+        let route = if fixture.kind == PimResourceKind::Contact {
+            "carddav"
+        } else {
+            "caldav"
+        };
+        let path = format!("/{route}/{}/{}", bridge.space_id, fixture.file);
+        let before = queued_operations(&bridge).len();
+        let response = bridge
+            .request("PUT", &path)
+            .header(IF_NONE_MATCH, "*")
+            .body(source.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED, "{}", fixture.file);
+        let root = queued_operations(&bridge).last().unwrap().clone();
+        assert_eq!(queued_operations(&bridge).len(), before + 1);
+        let stream = root.stream_id;
+        let imported = bridge.send("GET", &path).await;
+        assert_eq!(imported.status(), StatusCode::OK);
+        assert_eq!(imported.text().await.unwrap(), source);
+        let branches = bridge
+            .runner
+            .list_materialized_pim_branches(bridge.space_id)
+            .await
+            .unwrap();
+        let branch = branches
+            .iter()
+            .find(|branch| branch.logical_resource_id == stream)
+            .unwrap();
+        assert_eq!(branch.projection_resource_id, fixture.file);
+        assert_eq!(branch.head_operation_id, root.client_op_id);
+        pim_corpus::assert_fields(&fixture, branch.payload.as_deref().unwrap());
+
+        let edit_id = bridge
+            .runner
+            .upsert_pim_branch(
+                bridge.space_id,
+                stream,
+                fixture.file.clone(),
+                root.client_op_id,
+                fixture.kind,
+                pim_corpus::edit_fields("First-party title", "First-party note"),
+            )
+            .await
+            .unwrap();
+        let edited = bridge.send("GET", &path).await;
+        assert_eq!(edited.status(), StatusCode::OK);
+        let etag = header_string(&edited, ETAG);
+        let edited = edited.text().await.unwrap();
+        let timestamp =
+            crypto_core_lib::pim::projection_property(&edited, fixture.kind, "DTSTAMP").unwrap();
+        if fixture.kind != PimResourceKind::Contact {
+            assert!(
+                timestamp
+                    .as_ref()
+                    .is_some_and(|value| value.ends_with('Z') && value.len() == 16)
+            );
+        }
+        let without_timestamp = |payload: &str| match &timestamp {
+            Some(value) => payload.replace(&format!("DTSTAMP:{value}\r\n"), ""),
+            None => payload.to_string(),
+        };
+        pim_corpus::assert_partial_edit(
+            &fixture,
+            &source,
+            &without_timestamp(&edited),
+            "First-party title",
+            "First-party note",
+        );
+        let dav_edit = edited.replace("First-party title", "DAV title");
+        let response = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(dav_edit.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let received = bridge.send("GET", &path).await;
+        assert_eq!(received.status(), StatusCode::OK);
+        let received = received.text().await.unwrap();
+        assert_eq!(received, dav_edit);
+        pim_corpus::assert_partial_edit(
+            &fixture,
+            &source,
+            &without_timestamp(&received),
+            "DAV title",
+            "First-party note",
+        );
+        let queued = queued_operations(&bridge);
+        assert_eq!(queued.len(), before + 3);
+        let chain = &queued[before..];
+        assert_eq!(chain[1].client_op_id, edit_id);
+        for (index, envelope) in chain.iter().enumerate() {
+            assert_eq!(envelope.space_id, bridge.space_id);
+            assert_eq!(envelope.stream_id, stream);
+            let PimOperationV1::Upsert(upsert) =
+                PimOperationV1::decode(&envelope.open(&[11; 32]).unwrap()).unwrap()
+            else {
+                panic!("upsert");
+            };
+            assert_eq!(upsert.resource_id, stream);
+            assert_eq!(upsert.resource_kind, fixture.kind);
+            let parents = if index == 0 {
+                vec![]
+            } else {
+                vec![chain[index - 1].client_op_id]
+            };
+            assert_eq!(upsert.dependencies, parents);
+            if index == 1 {
+                assert!(
+                    upsert.raw_projection.is_empty(),
+                    "first-party edit must remain field-level"
+                );
+                let mut expected = pim_corpus::edit_fields("First-party title", "First-party note");
+                if let Some(timestamp) = &timestamp {
+                    expected.insert("dtstamp".into(), PimValue::Text(timestamp.clone()));
+                }
+                assert_eq!(upsert.fields, expected);
+            }
+        }
+        let branches = bridge
+            .runner
+            .list_materialized_pim_branches(bridge.space_id)
+            .await
+            .unwrap();
+        let matching: Vec<_> = branches
+            .iter()
+            .filter(|branch| branch.logical_resource_id == stream)
+            .collect();
+        assert_eq!(matching.len(), 1, "no duplicated/orphan branch");
+        assert_eq!(matching[0].projection_resource_id, fixture.file);
+        assert_eq!(matching[0].head_operation_id, chain[2].client_op_id);
+        assert!(!matching[0].deleted && !matching[0].conflict);
+        assert_eq!(matching[0].payload.as_deref(), Some(received.as_str()));
+        let stale = bridge
+            .request("PUT", &path)
+            .header(IF_MATCH, &etag)
+            .body(dav_edit)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            queued_operations(&bridge),
+            queued,
+            "rejected retry must not queue an orphan operation"
+        );
+        let connection = rusqlite::Connection::open(&bridge.database_path).unwrap();
+        let states: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM operation_states WHERE collection_id = ?1 AND stream_id = ?2",
+                rusqlite::params![bridge.space_id.to_string(), stream.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            states, 3,
+            "every accepted edit has exactly one materialized state"
+        );
+        drop(connection);
+        let deleted_id = bridge
+            .runner
+            .delete_pim_branch(
+                bridge.space_id,
+                stream,
+                fixture.file.clone(),
+                chain[2].client_op_id,
+                fixture.kind,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge.send("GET", &path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let branches = bridge
+            .runner
+            .list_materialized_pim_branches(bridge.space_id)
+            .await
+            .unwrap();
+        let tombstone = branches
+            .iter()
+            .find(|branch| branch.logical_resource_id == stream)
+            .unwrap();
+        assert!(tombstone.deleted);
+        assert_eq!(
+            tombstone.projection_resource_id, fixture.file,
+            "native delete must retain the imported href"
+        );
+        assert_eq!(tombstone.head_operation_id, deleted_id);
+        let queued = queued_operations(&bridge);
+        assert_eq!(queued.len(), before + 4);
+        let deleted = queued.last().unwrap();
+        assert_eq!(deleted.stream_id, stream);
+        assert_eq!(deleted.client_op_id, deleted_id);
+        let PimOperationV1::Delete(operation) =
+            PimOperationV1::decode(&deleted.open(&[11; 32]).unwrap()).unwrap()
+        else {
+            panic!("delete");
+        };
+        assert_eq!(operation.dependencies, vec![chain[2].client_op_id]);
+        assert_eq!(
+            operation.projection_resource_id.as_deref(),
+            Some(fixture.file.as_str())
+        );
+    }
+    bridge.stop().await;
 }

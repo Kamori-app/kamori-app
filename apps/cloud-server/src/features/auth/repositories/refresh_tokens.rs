@@ -37,6 +37,7 @@ pub(crate) struct RefreshRotation<'a> {
 
 pub(crate) struct DeviceAuthorizationRefresh<'a> {
     pub(crate) user_id: Uuid,
+    pub(crate) binding: super::AuthenticationBinding,
     pub(crate) device_secret: &'a str,
     pub(crate) flow_id: Uuid,
     pub(crate) rotation_key: &'a [u8; 32],
@@ -97,11 +98,28 @@ fn derive_device_authorization_refresh_token(
 
 pub(crate) async fn create_refresh_token(
     pool: &PgPool,
-    user_id: Uuid,
+    binding: super::AuthenticationBinding,
+    credential_id: Option<&[u8]>,
     user_agent: Option<&str>,
     ip_address: Option<&str>,
     expires_at: OffsetDateTime,
 ) -> Result<IssuedRefreshToken, ApiError> {
+    let mut tx = pool.begin().await.map_err(internal_error)?;
+    binding.lock(&mut tx).await?;
+    let user_id = binding.user_id;
+    if let Some(credential_id) = credential_id {
+        let present: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM user_passkeys WHERE user_id = $1 AND credential_id = $2 FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(credential_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal_error)?;
+        if present.is_none() {
+            return Err(unauthenticated("passkey was revoked"));
+        }
+    }
     let (token, token_hash) = generate_refresh_token_and_hash();
     let token_id = Uuid::new_v4();
 
@@ -119,9 +137,10 @@ pub(crate) async fn create_refresh_token(
     .bind(expires_at)
     .bind(user_agent)
     .bind(ip_address)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
 
     Ok(IssuedRefreshToken { token_id, token })
 }
@@ -135,6 +154,7 @@ pub(crate) async fn create_device_authorization_refresh_token(
 ) -> Result<IssuedRefreshToken, ApiError> {
     let DeviceAuthorizationRefresh {
         user_id,
+        binding,
         device_secret,
         flow_id,
         rotation_key,
@@ -144,50 +164,33 @@ pub(crate) async fn create_device_authorization_refresh_token(
     } = request;
     let (token, token_hash) =
         derive_device_authorization_refresh_token(device_secret, flow_id, rotation_key);
-    let proposed_token_id = Uuid::new_v4();
-    sqlx::query(
-        r#"
-        INSERT INTO refresh_tokens (
-            id, user_id, token_hash, expires_at, user_agent, ip_address
-        )
-        SELECT $1, active_user.id, $3, $4, $5, $6
-        FROM users active_user
-        WHERE active_user.id = $2
-          AND active_user.deleted_at IS NULL
-          AND active_user.suspended_at IS NULL
-        ON CONFLICT (token_hash) DO NOTHING
-        "#,
-    )
-    .bind(proposed_token_id)
-    .bind(user_id)
-    .bind(&token_hash)
-    .bind(expires_at)
-    .bind(user_agent)
-    .bind(ip_address)
-    .execute(pool)
-    .await
-    .map_err(internal_error)?;
-
-    let token_id: Uuid = sqlx::query_scalar(
-        r#"
-        SELECT token.id
-        FROM refresh_tokens token
-        JOIN users active_user ON active_user.id = token.user_id
-        WHERE token.token_hash = $1
-          AND token.user_id = $2
-          AND token.revoked_at IS NULL
-          AND token.expires_at > now()
-          AND active_user.deleted_at IS NULL
-          AND active_user.suspended_at IS NULL
-        "#,
-    )
-    .bind(&token_hash)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(internal_error)?
-    .ok_or_else(|| unauthenticated("device authorization was already consumed"))?;
-
+    let mut tx = pool.begin().await.map_err(internal_error)?;
+    // The account lock serializes first exchange and exact retries with reset.
+    // An existing active session is authoritative for retries; only a first
+    // issuance must still match the approving credential generation.
+    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL FOR NO KEY UPDATE")
+        .bind(user_id).fetch_optional(&mut *tx).await.map_err(internal_error)?;
+    if active.is_none() {
+        return Err(unauthenticated("account is unavailable"));
+    }
+    let existing = sqlx::query("SELECT id, revoked_at IS NULL AND expires_at > now() AS active FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2 FOR UPDATE")
+        .bind(&token_hash).bind(user_id).fetch_optional(&mut *tx).await.map_err(internal_error)?;
+    let token_id = if let Some(row) = existing {
+        if !row.try_get::<bool, _>("active").map_err(internal_error)? {
+            return Err(unauthenticated("device authorization was already consumed"));
+        }
+        row.try_get("id").map_err(internal_error)?
+    } else {
+        // An already created active replacement is retryable even when the
+        // browser session later rotates. Only first issuance needs approval.
+        binding.lock(&mut tx).await?;
+        let token_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, user_agent, ip_address) VALUES ($1, $2, $3, $4, $5, $6)")
+            .bind(token_id).bind(user_id).bind(&token_hash).bind(expires_at).bind(user_agent).bind(ip_address)
+            .execute(&mut *tx).await.map_err(internal_error)?;
+        token_id
+    };
+    tx.commit().await.map_err(internal_error)?;
     Ok(IssuedRefreshToken { token_id, token })
 }
 
@@ -241,6 +244,21 @@ pub(crate) async fn rotate_refresh_token(
     } = request;
     let now = OffsetDateTime::now_utc();
     let mut tx = pool.begin().await.map_err(internal_error)?;
+
+    // Account first, then session: reset and every refresh insertion use the
+    // same order, so a concurrent rotation cannot escape account-wide revocation.
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM refresh_tokens WHERE token_hash = $1")
+            .bind(current_token_hash)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| unauthenticated("invalid refresh token"))?;
+    let active: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL FOR NO KEY UPDATE")
+        .bind(user_id).fetch_optional(&mut *tx).await.map_err(internal_error)?;
+    if active.is_none() {
+        return Err(unauthenticated("invalid refresh token"));
+    }
 
     let current = find_refresh_token_for_update(&mut tx, current_token_hash)
         .await?
@@ -396,7 +414,7 @@ pub(crate) async fn revoke_refresh_token_by_hash(
 }
 
 pub(crate) async fn revoke_refresh_token_by_id_for_user(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     refresh_token_id: Uuid,
 ) -> Result<bool, ApiError> {
@@ -411,7 +429,7 @@ pub(crate) async fn revoke_refresh_token_by_id_for_user(
     .bind(refresh_token_id)
     .bind(user_id)
     .bind(now)
-    .execute(pool)
+    .execute(&mut **tx)
     .await
     .map_err(internal_error)?;
     Ok(result.rows_affected() > 0)
@@ -458,24 +476,22 @@ pub(crate) async fn list_refresh_sessions(
 }
 
 pub(crate) async fn update_user_password_file_and_revoke_refresh_sessions(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     opaque_record: &[u8],
     encrypted_master_key: &[u8],
 ) -> Result<(), ApiError> {
     let now = OffsetDateTime::now_utc();
-    let mut tx = pool.begin().await.map_err(internal_error)?;
 
     let updated =
-        sqlx::query("UPDATE users SET opaque_record = $2, encrypted_master_key = $3 WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL")
+        sqlx::query("UPDATE users SET auth_generation = auth_generation + 1, opaque_record = $2, encrypted_master_key = $3 WHERE id = $1 AND deleted_at IS NULL AND suspended_at IS NULL")
             .bind(user_id)
             .bind(opaque_record)
             .bind(encrypted_master_key)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(internal_error)?;
     if updated.rows_affected() == 0 {
-        tx.rollback().await.map_err(internal_error)?;
         return Err(unauthenticated("user not found"));
     }
 
@@ -484,10 +500,9 @@ pub(crate) async fn update_user_password_file_and_revoke_refresh_sessions(
     )
     .bind(user_id)
     .bind(now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(internal_error)?;
 
-    tx.commit().await.map_err(internal_error)?;
     Ok(())
 }

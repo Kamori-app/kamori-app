@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:uuid/uuid.dart';
@@ -19,6 +20,19 @@ class _MockInviteCodeEntry {
 
 /// In-memory bridge implementation for local UI development and tests.
 class MockRustBridgeApi implements RustBridgeApi {
+  // Only the debug mock uses a Dart queue. Release builds acquire the native
+  // process-wide lease shared by every foreground/background Flutter engine.
+  static Future<void> _sessionTail = Future.value();
+
+  @override
+  Future<SessionLease> acquireSessionLease() async {
+    final previous = _sessionTail;
+    final released = Completer<void>();
+    _sessionTail = released.future;
+    await previous;
+    return _MockSessionLease(() => released.complete());
+  }
+
   String? _accessToken;
   String? _refreshToken;
   String? _refreshRotationRequestId;
@@ -181,6 +195,8 @@ class MockRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   }) async {
     if (sqliteKey.length != 32) {
       throw ArgumentError('SQLite key must contain exactly 32 bytes');
@@ -389,5 +405,17 @@ class MockRustBridgeApi implements RustBridgeApi {
       return '';
     }
     return '${normalized.substring(0, 4)}-${normalized.substring(4, 8)}-${normalized.substring(8, 12)}-${normalized.substring(12, 16)}';
+  }
+}
+
+class _MockSessionLease implements SessionLease {
+  _MockSessionLease(this._release);
+  void Function()? _release;
+
+  @override
+  void release() {
+    final callback = _release;
+    _release = null;
+    callback?.call();
   }
 }

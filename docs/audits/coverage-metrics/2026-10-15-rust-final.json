@@ -1,0 +1,5098 @@
+{
+  "revision": "69820cd4ff61361d56a42f1b048a890043b1ddd5",
+  "toolchain": "Rust 1.97.1; cargo-llvm-cov 0.9.1",
+  "scope": "workspace with crypto-core-lib/frb; PostgreSQL integration tests enabled",
+  "excluded": "frb_generated|integration_tests|/tests/|build.rs",
+  "note": "Line/region/function coverage; branch coverage not measured. Inline/other test modules outside filename exclusions may be included; new lock_regressions.rs contributes 1504/1552 lines.",
+  "totals": {
+    "branches": {
+      "count": 0,
+      "covered": 0,
+      "notcovered": 0,
+      "percent": 0
+    },
+    "functions": {
+      "count": 2698,
+      "covered": 1423,
+      "percent": 52.742772424017794
+    },
+    "instantiations": {
+      "count": 4573,
+      "covered": 1871,
+      "percent": 40.914060791602886
+    },
+    "lines": {
+      "count": 28473,
+      "covered": 17564,
+      "percent": 61.68651002704316
+    },
+    "mcdc": {
+      "count": 0,
+      "covered": 0,
+      "notcovered": 0,
+      "percent": 0
+    },
+    "regions": {
+      "count": 39396,
+      "covered": 23895,
+      "notcovered": 15501,
+      "percent": 60.65336582394152
+    }
+  },
+  "files": [
+    {
+      "path": "apps/cloud-server/src/app/bootstrap.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 15,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 15,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 105,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 197,
+          "covered": 0,
+          "notcovered": 197,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/app/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 36,
+          "covered": 28,
+          "percent": 77.77777777777779
+        },
+        "instantiations": {
+          "count": 36,
+          "covered": 28,
+          "percent": 77.77777777777779
+        },
+        "lines": {
+          "count": 310,
+          "covered": 291,
+          "percent": 93.87096774193549
+        },
+        "regions": {
+          "count": 461,
+          "covered": 426,
+          "notcovered": 35,
+          "percent": 92.40780911062907
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/admin/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 28,
+          "covered": 28,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 49,
+          "covered": 49,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/admin/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 32,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 32,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 119,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 119,
+          "covered": 0,
+          "notcovered": 119,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/admin/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 49,
+          "covered": 6,
+          "percent": 12.244897959183673
+        },
+        "instantiations": {
+          "count": 49,
+          "covered": 6,
+          "percent": 12.244897959183673
+        },
+        "lines": {
+          "count": 737,
+          "covered": 133,
+          "percent": 18.046132971506108
+        },
+        "regions": {
+          "count": 879,
+          "covered": 142,
+          "notcovered": 737,
+          "percent": 16.1547212741752
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/admin/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 34,
+          "covered": 34,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 49,
+          "covered": 49,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/admin/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 89,
+          "covered": 10,
+          "percent": 11.235955056179774
+        },
+        "instantiations": {
+          "count": 89,
+          "covered": 10,
+          "percent": 11.235955056179774
+        },
+        "lines": {
+          "count": 777,
+          "covered": 77,
+          "percent": 9.90990990990991
+        },
+        "regions": {
+          "count": 1011,
+          "covered": 118,
+          "notcovered": 893,
+          "percent": 11.671612265084075
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/dto/passkeys.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 23,
+          "covered": 23,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 41,
+          "covered": 41,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/dto/password.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 44,
+          "covered": 44,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 79,
+          "covered": 79,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/dto/sessions.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 18,
+          "covered": 18,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 32,
+          "covered": 32,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/dto/signin.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 28,
+          "covered": 26,
+          "percent": 92.85714285714286
+        },
+        "regions": {
+          "count": 42,
+          "covered": 40,
+          "notcovered": 2,
+          "percent": 95.23809523809523
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/dto/signup.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 10,
+          "covered": 10,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 19,
+          "covered": 19,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/device_authorization.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 31,
+          "covered": 31,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 31,
+          "covered": 28,
+          "notcovered": 3,
+          "percent": 90.32258064516128
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/passkeys.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 14,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 14,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 54,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 52,
+          "covered": 0,
+          "notcovered": 52,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/password.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 6,
+          "percent": 75.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 6,
+          "percent": 75.0
+        },
+        "lines": {
+          "count": 30,
+          "covered": 22,
+          "percent": 73.33333333333333
+        },
+        "regions": {
+          "count": 30,
+          "covered": 21,
+          "notcovered": 9,
+          "percent": 70.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/reauth.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 16,
+          "covered": 16,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 16,
+          "covered": 15,
+          "notcovered": 1,
+          "percent": 93.75
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/sessions.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 6,
+          "percent": 60.0
+        },
+        "instantiations": {
+          "count": 10,
+          "covered": 6,
+          "percent": 60.0
+        },
+        "lines": {
+          "count": 38,
+          "covered": 23,
+          "percent": 60.526315789473685
+        },
+        "regions": {
+          "count": 35,
+          "covered": 20,
+          "notcovered": 15,
+          "percent": 57.14285714285714
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/signin.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 6,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 6,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 23,
+          "covered": 23,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 21,
+          "covered": 20,
+          "notcovered": 1,
+          "percent": 95.23809523809523
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/signup.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 14,
+          "covered": 14,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 14,
+          "covered": 12,
+          "notcovered": 2,
+          "percent": 85.71428571428571
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/handlers/totp.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 4,
+          "percent": 40.0
+        },
+        "instantiations": {
+          "count": 10,
+          "covered": 4,
+          "percent": 40.0
+        },
+        "lines": {
+          "count": 40,
+          "covered": 16,
+          "percent": 40.0
+        },
+        "regions": {
+          "count": 39,
+          "covered": 16,
+          "notcovered": 23,
+          "percent": 41.02564102564102
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/account_recovery_attempts.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 7,
+          "percent": 87.5
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 7,
+          "percent": 87.5
+        },
+        "lines": {
+          "count": 170,
+          "covered": 162,
+          "percent": 95.29411764705881
+        },
+        "regions": {
+          "count": 220,
+          "covered": 191,
+          "notcovered": 29,
+          "percent": 86.81818181818181
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/account_recovery_codes.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 2,
+          "percent": 18.181818181818183
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 2,
+          "percent": 18.181818181818183
+        },
+        "lines": {
+          "count": 104,
+          "covered": 20,
+          "percent": 19.230769230769234
+        },
+        "regions": {
+          "count": 107,
+          "covered": 13,
+          "notcovered": 94,
+          "percent": 12.149532710280374
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/authentication.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 6,
+          "percent": 85.71428571428571
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 6,
+          "percent": 85.71428571428571
+        },
+        "lines": {
+          "count": 50,
+          "covered": 49,
+          "percent": 98.0
+        },
+        "regions": {
+          "count": 78,
+          "covered": 68,
+          "notcovered": 10,
+          "percent": 87.17948717948718
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/refresh_tokens.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 23,
+          "covered": 15,
+          "percent": 65.21739130434783
+        },
+        "instantiations": {
+          "count": 23,
+          "covered": 15,
+          "percent": 65.21739130434783
+        },
+        "lines": {
+          "count": 415,
+          "covered": 302,
+          "percent": 72.77108433734941
+        },
+        "regions": {
+          "count": 549,
+          "covered": 385,
+          "notcovered": 164,
+          "percent": 70.12750455373407
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/user_passkeys.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 18,
+          "covered": 2,
+          "percent": 11.111111111111112
+        },
+        "instantiations": {
+          "count": 18,
+          "covered": 2,
+          "percent": 11.111111111111112
+        },
+        "lines": {
+          "count": 173,
+          "covered": 13,
+          "percent": 7.514450867052022
+        },
+        "regions": {
+          "count": 210,
+          "covered": 12,
+          "notcovered": 198,
+          "percent": 5.714285714285714
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/repositories/users.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 19,
+          "covered": 15,
+          "percent": 78.94736842105263
+        },
+        "instantiations": {
+          "count": 19,
+          "covered": 15,
+          "percent": 78.94736842105263
+        },
+        "lines": {
+          "count": 232,
+          "covered": 203,
+          "percent": 87.5
+        },
+        "regions": {
+          "count": 288,
+          "covered": 214,
+          "notcovered": 74,
+          "percent": 74.30555555555556
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 59,
+          "covered": 59,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 99,
+          "covered": 99,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/device_authorization.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 28,
+          "covered": 16,
+          "percent": 57.14285714285714
+        },
+        "instantiations": {
+          "count": 28,
+          "covered": 16,
+          "percent": 57.14285714285714
+        },
+        "lines": {
+          "count": 270,
+          "covered": 236,
+          "percent": 87.4074074074074
+        },
+        "regions": {
+          "count": 380,
+          "covered": 306,
+          "notcovered": 74,
+          "percent": 80.52631578947368
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/device_enrollment.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 13,
+          "covered": 11,
+          "percent": 84.61538461538461
+        },
+        "instantiations": {
+          "count": 13,
+          "covered": 11,
+          "percent": 84.61538461538461
+        },
+        "lines": {
+          "count": 190,
+          "covered": 180,
+          "percent": 94.73684210526316
+        },
+        "regions": {
+          "count": 211,
+          "covered": 189,
+          "notcovered": 22,
+          "percent": 89.57345971563981
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/passkeys.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 25,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 25,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 262,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 375,
+          "covered": 0,
+          "notcovered": 375,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/password.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 15,
+          "covered": 7,
+          "percent": 46.666666666666664
+        },
+        "instantiations": {
+          "count": 15,
+          "covered": 7,
+          "percent": 46.666666666666664
+        },
+        "lines": {
+          "count": 162,
+          "covered": 129,
+          "percent": 79.62962962962963
+        },
+        "regions": {
+          "count": 226,
+          "covered": 170,
+          "notcovered": 56,
+          "percent": 75.22123893805309
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/reauth.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 18,
+          "covered": 9,
+          "percent": 50.0
+        },
+        "instantiations": {
+          "count": 18,
+          "covered": 9,
+          "percent": 50.0
+        },
+        "lines": {
+          "count": 202,
+          "covered": 152,
+          "percent": 75.24752475247524
+        },
+        "regions": {
+          "count": 269,
+          "covered": 181,
+          "notcovered": 88,
+          "percent": 67.28624535315984
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/sessions.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 17,
+          "covered": 9,
+          "percent": 52.94117647058824
+        },
+        "instantiations": {
+          "count": 17,
+          "covered": 9,
+          "percent": 52.94117647058824
+        },
+        "lines": {
+          "count": 159,
+          "covered": 117,
+          "percent": 73.58490566037736
+        },
+        "regions": {
+          "count": 257,
+          "covered": 173,
+          "notcovered": 84,
+          "percent": 67.31517509727627
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/signin.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 30,
+          "covered": 20,
+          "percent": 66.66666666666666
+        },
+        "instantiations": {
+          "count": 30,
+          "covered": 20,
+          "percent": 66.66666666666666
+        },
+        "lines": {
+          "count": 320,
+          "covered": 273,
+          "percent": 85.3125
+        },
+        "regions": {
+          "count": 424,
+          "covered": 318,
+          "notcovered": 106,
+          "percent": 75.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/signup.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 6,
+          "percent": 54.54545454545454
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 6,
+          "percent": 54.54545454545454
+        },
+        "lines": {
+          "count": 151,
+          "covered": 132,
+          "percent": 87.41721854304636
+        },
+        "regions": {
+          "count": 189,
+          "covered": 151,
+          "notcovered": 38,
+          "percent": 79.8941798941799
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/support.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 35,
+          "covered": 32,
+          "percent": 91.42857142857143
+        },
+        "instantiations": {
+          "count": 35,
+          "covered": 32,
+          "percent": 91.42857142857143
+        },
+        "lines": {
+          "count": 231,
+          "covered": 213,
+          "percent": 92.2077922077922
+        },
+        "regions": {
+          "count": 374,
+          "covered": 344,
+          "notcovered": 30,
+          "percent": 91.97860962566845
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/services/totp.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 16,
+          "covered": 5,
+          "percent": 31.25
+        },
+        "instantiations": {
+          "count": 16,
+          "covered": 5,
+          "percent": 31.25
+        },
+        "lines": {
+          "count": 218,
+          "covered": 71,
+          "percent": 32.56880733944954
+        },
+        "regions": {
+          "count": 310,
+          "covered": 82,
+          "notcovered": 228,
+          "percent": 26.451612903225808
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/transport/cookies.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 99,
+          "covered": 87,
+          "percent": 87.87878787878788
+        },
+        "regions": {
+          "count": 165,
+          "covered": 126,
+          "notcovered": 39,
+          "percent": 76.36363636363637
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/transport/csrf.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "lines": {
+          "count": 24,
+          "covered": 22,
+          "percent": 91.66666666666666
+        },
+        "regions": {
+          "count": 41,
+          "covered": 35,
+          "notcovered": 6,
+          "percent": 85.36585365853658
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/transport/mod.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 15,
+          "covered": 15,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 15,
+          "covered": 15,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 104,
+          "covered": 104,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 195,
+          "covered": 195,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/transport/origin.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 7,
+          "percent": 63.63636363636363
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 7,
+          "percent": 63.63636363636363
+        },
+        "lines": {
+          "count": 69,
+          "covered": 64,
+          "percent": 92.7536231884058
+        },
+        "regions": {
+          "count": 116,
+          "covered": 105,
+          "notcovered": 11,
+          "percent": 90.51724137931035
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/auth/transport/refresh_transport.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 4,
+          "percent": 40.0
+        },
+        "instantiations": {
+          "count": 10,
+          "covered": 4,
+          "percent": 40.0
+        },
+        "lines": {
+          "count": 52,
+          "covered": 45,
+          "percent": 86.53846153846155
+        },
+        "regions": {
+          "count": 68,
+          "covered": 49,
+          "notcovered": 19,
+          "percent": 72.05882352941178
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/cas/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 13,
+          "covered": 13,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 20,
+          "covered": 20,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/cas/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 17,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 17,
+          "covered": 0,
+          "notcovered": 17,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/cas/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 20,
+          "covered": 6,
+          "percent": 30.0
+        },
+        "instantiations": {
+          "count": 20,
+          "covered": 6,
+          "percent": 30.0
+        },
+        "lines": {
+          "count": 497,
+          "covered": 112,
+          "percent": 22.535211267605636
+        },
+        "regions": {
+          "count": 533,
+          "covered": 117,
+          "notcovered": 416,
+          "percent": 21.951219512195124
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/cas/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 12,
+          "covered": 12,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/cas/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 17,
+          "covered": 3,
+          "percent": 17.647058823529413
+        },
+        "instantiations": {
+          "count": 17,
+          "covered": 3,
+          "percent": 17.647058823529413
+        },
+        "lines": {
+          "count": 325,
+          "covered": 8,
+          "percent": 2.4615384615384617
+        },
+        "regions": {
+          "count": 388,
+          "covered": 14,
+          "notcovered": 374,
+          "percent": 3.608247422680412
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/common/authz.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 30,
+          "covered": 29,
+          "percent": 96.66666666666667
+        },
+        "instantiations": {
+          "count": 30,
+          "covered": 29,
+          "percent": 96.66666666666667
+        },
+        "lines": {
+          "count": 215,
+          "covered": 213,
+          "percent": 99.06976744186046
+        },
+        "regions": {
+          "count": 305,
+          "covered": 299,
+          "notcovered": 6,
+          "percent": 98.0327868852459
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/common/errors.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 9,
+          "percent": 81.81818181818183
+        },
+        "instantiations": {
+          "count": 21,
+          "covered": 9,
+          "percent": 42.857142857142854
+        },
+        "lines": {
+          "count": 66,
+          "covered": 54,
+          "percent": 81.81818181818183
+        },
+        "regions": {
+          "count": 73,
+          "covered": 65,
+          "notcovered": 8,
+          "percent": 89.04109589041096
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/common/msgpack.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 8,
+          "percent": 80.0
+        },
+        "instantiations": {
+          "count": 413,
+          "covered": 106,
+          "percent": 25.66585956416465
+        },
+        "lines": {
+          "count": 128,
+          "covered": 92,
+          "percent": 71.875
+        },
+        "regions": {
+          "count": 149,
+          "covered": 125,
+          "notcovered": 24,
+          "percent": 83.89261744966443
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/devices/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 7,
+          "covered": 4,
+          "percent": 57.14285714285714
+        },
+        "regions": {
+          "count": 7,
+          "covered": 4,
+          "notcovered": 3,
+          "percent": 57.14285714285714
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/devices/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "lines": {
+          "count": 24,
+          "covered": 17,
+          "percent": 70.83333333333334
+        },
+        "regions": {
+          "count": 24,
+          "covered": 17,
+          "notcovered": 7,
+          "percent": 70.83333333333334
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/devices/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 3,
+          "percent": 42.857142857142854
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 3,
+          "percent": 42.857142857142854
+        },
+        "lines": {
+          "count": 141,
+          "covered": 64,
+          "percent": 45.39007092198582
+        },
+        "regions": {
+          "count": 137,
+          "covered": 60,
+          "notcovered": 77,
+          "percent": 43.79562043795621
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/devices/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 5,
+          "covered": 5,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 10,
+          "covered": 10,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/devices/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 4,
+          "percent": 36.36363636363637
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 4,
+          "percent": 36.36363636363637
+        },
+        "lines": {
+          "count": 107,
+          "covered": 79,
+          "percent": 73.83177570093457
+        },
+        "regions": {
+          "count": 174,
+          "covered": 117,
+          "notcovered": 57,
+          "percent": 67.24137931034483
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/health/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 134,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 114,
+          "covered": 0,
+          "notcovered": 114,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/health/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 7,
+          "covered": 7,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 15,
+          "covered": 15,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/invites/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 38,
+          "covered": 38,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 59,
+          "covered": 59,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/invites/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 18,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 26,
+          "covered": 0,
+          "notcovered": 26,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/invites/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 254,
+          "covered": 249,
+          "percent": 98.03149606299213
+        },
+        "regions": {
+          "count": 319,
+          "covered": 274,
+          "notcovered": 45,
+          "percent": 85.8934169278997
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/invites/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 5,
+          "covered": 5,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 9,
+          "covered": 9,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/invites/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 4,
+          "percent": 36.36363636363637
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 4,
+          "percent": 36.36363636363637
+        },
+        "lines": {
+          "count": 118,
+          "covered": 19,
+          "percent": 16.101694915254235
+        },
+        "regions": {
+          "count": 166,
+          "covered": 31,
+          "notcovered": 135,
+          "percent": 18.67469879518072
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 16,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 18,
+          "covered": 0,
+          "notcovered": 18,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/lock_regressions.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 69,
+          "covered": 64,
+          "percent": 92.7536231884058
+        },
+        "instantiations": {
+          "count": 69,
+          "covered": 64,
+          "percent": 92.7536231884058
+        },
+        "lines": {
+          "count": 1552,
+          "covered": 1504,
+          "percent": 96.90721649484536
+        },
+        "regions": {
+          "count": 1793,
+          "covered": 1715,
+          "notcovered": 78,
+          "percent": 95.64974902398215
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 13,
+          "covered": 12,
+          "percent": 92.3076923076923
+        },
+        "instantiations": {
+          "count": 13,
+          "covered": 12,
+          "percent": 92.3076923076923
+        },
+        "lines": {
+          "count": 229,
+          "covered": 217,
+          "percent": 94.75982532751092
+        },
+        "regions": {
+          "count": 361,
+          "covered": 291,
+          "notcovered": 70,
+          "percent": 80.60941828254848
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 5,
+          "covered": 5,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 10,
+          "covered": 10,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/operations/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 16,
+          "covered": 7,
+          "percent": 43.75
+        },
+        "instantiations": {
+          "count": 16,
+          "covered": 7,
+          "percent": 43.75
+        },
+        "lines": {
+          "count": 183,
+          "covered": 63,
+          "percent": 34.42622950819672
+        },
+        "regions": {
+          "count": 201,
+          "covered": 79,
+          "notcovered": 122,
+          "percent": 39.30348258706468
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/ownership/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 3,
+          "covered": 3,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 3,
+          "covered": 3,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 24,
+          "covered": 23,
+          "percent": 95.83333333333334
+        },
+        "regions": {
+          "count": 32,
+          "covered": 31,
+          "notcovered": 1,
+          "percent": 96.875
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/ownership/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 10,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 43,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 63,
+          "covered": 0,
+          "notcovered": 63,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/ownership/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 17,
+          "covered": 8,
+          "percent": 47.05882352941176
+        },
+        "instantiations": {
+          "count": 17,
+          "covered": 8,
+          "percent": 47.05882352941176
+        },
+        "lines": {
+          "count": 445,
+          "covered": 320,
+          "percent": 71.91011235955057
+        },
+        "regions": {
+          "count": 524,
+          "covered": 328,
+          "notcovered": 196,
+          "percent": 62.59541984732826
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/ownership/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 16,
+          "covered": 16,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 18,
+          "covered": 18,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/ownership/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 14,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 14,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 106,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 94,
+          "covered": 0,
+          "notcovered": 94,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/spaces/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 7,
+          "covered": 6,
+          "percent": 85.71428571428571
+        },
+        "regions": {
+          "count": 10,
+          "covered": 8,
+          "notcovered": 2,
+          "percent": 80.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/spaces/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 24,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 24,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 97,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 98,
+          "covered": 0,
+          "notcovered": 98,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/spaces/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 34,
+          "covered": 12,
+          "percent": 35.294117647058826
+        },
+        "instantiations": {
+          "count": 34,
+          "covered": 12,
+          "percent": 35.294117647058826
+        },
+        "lines": {
+          "count": 869,
+          "covered": 379,
+          "percent": 43.613348676639816
+        },
+        "regions": {
+          "count": 1026,
+          "covered": 403,
+          "notcovered": 623,
+          "percent": 39.278752436647174
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/spaces/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 26,
+          "covered": 26,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 43,
+          "covered": 43,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/spaces/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 45,
+          "covered": 10,
+          "percent": 22.22222222222222
+        },
+        "instantiations": {
+          "count": 45,
+          "covered": 10,
+          "percent": 22.22222222222222
+        },
+        "lines": {
+          "count": 574,
+          "covered": 190,
+          "percent": 33.10104529616725
+        },
+        "regions": {
+          "count": 748,
+          "covered": 292,
+          "notcovered": 456,
+          "percent": 39.037433155080215
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/users/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 11,
+          "covered": 11,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 16,
+          "covered": 16,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/users/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 34,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 51,
+          "covered": 0,
+          "notcovered": 51,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/users/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 2,
+          "percent": 25.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 2,
+          "percent": 25.0
+        },
+        "lines": {
+          "count": 366,
+          "covered": 223,
+          "percent": 60.92896174863388
+        },
+        "regions": {
+          "count": 314,
+          "covered": 168,
+          "notcovered": 146,
+          "percent": 53.503184713375795
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/users/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 8,
+          "covered": 8,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 13,
+          "covered": 13,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/users/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 56,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 54,
+          "covered": 0,
+          "notcovered": 54,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/access.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 5,
+          "percent": 83.33333333333334
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 5,
+          "percent": 83.33333333333334
+        },
+        "lines": {
+          "count": 67,
+          "covered": 54,
+          "percent": 80.59701492537313
+        },
+        "regions": {
+          "count": 65,
+          "covered": 53,
+          "notcovered": 12,
+          "percent": 81.53846153846153
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/dto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 4,
+          "percent": 66.66666666666666
+        },
+        "lines": {
+          "count": 55,
+          "covered": 40,
+          "percent": 72.72727272727273
+        },
+        "regions": {
+          "count": 91,
+          "covered": 71,
+          "notcovered": 20,
+          "percent": 78.02197802197803
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/handlers.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 10,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 45,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 64,
+          "covered": 0,
+          "notcovered": 64,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/repositories.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 19,
+          "covered": 8,
+          "percent": 42.10526315789473
+        },
+        "instantiations": {
+          "count": 19,
+          "covered": 8,
+          "percent": 42.10526315789473
+        },
+        "lines": {
+          "count": 320,
+          "covered": 126,
+          "percent": 39.375
+        },
+        "regions": {
+          "count": 318,
+          "covered": 128,
+          "notcovered": 190,
+          "percent": 40.25157232704403
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/router.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 1,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 14,
+          "covered": 14,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 18,
+          "covered": 18,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/features/workspaces/services.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 16,
+          "covered": 2,
+          "percent": 12.5
+        },
+        "instantiations": {
+          "count": 16,
+          "covered": 2,
+          "percent": 12.5
+        },
+        "lines": {
+          "count": 113,
+          "covered": 18,
+          "percent": 15.929203539823009
+        },
+        "regions": {
+          "count": 165,
+          "covered": 31,
+          "notcovered": 134,
+          "percent": 18.787878787878785
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/main.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 3,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 3,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 54,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 43,
+          "covered": 0,
+          "notcovered": 43,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/config.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 51,
+          "covered": 32,
+          "percent": 62.74509803921568
+        },
+        "instantiations": {
+          "count": 51,
+          "covered": 32,
+          "percent": 62.74509803921568
+        },
+        "lines": {
+          "count": 509,
+          "covered": 408,
+          "percent": 80.15717092337917
+        },
+        "regions": {
+          "count": 744,
+          "covered": 551,
+          "notcovered": 193,
+          "percent": 74.05913978494624
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/db.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 6,
+          "covered": 3,
+          "percent": 50.0
+        },
+        "instantiations": {
+          "count": 6,
+          "covered": 3,
+          "percent": 50.0
+        },
+        "lines": {
+          "count": 23,
+          "covered": 13,
+          "percent": 56.52173913043478
+        },
+        "regions": {
+          "count": 37,
+          "covered": 24,
+          "notcovered": 13,
+          "percent": 64.86486486486487
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/jwt.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 7,
+          "percent": 87.5
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 7,
+          "percent": 87.5
+        },
+        "lines": {
+          "count": 99,
+          "covered": 98,
+          "percent": 98.989898989899
+        },
+        "regions": {
+          "count": 192,
+          "covered": 190,
+          "notcovered": 2,
+          "percent": 98.95833333333334
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/maintenance.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 2,
+          "percent": 18.181818181818183
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 2,
+          "percent": 18.181818181818183
+        },
+        "lines": {
+          "count": 211,
+          "covered": 58,
+          "percent": 27.488151658767773
+        },
+        "regions": {
+          "count": 253,
+          "covered": 50,
+          "notcovered": 203,
+          "percent": 19.76284584980237
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/metrics.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 4,
+          "covered": 4,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 34,
+          "covered": 33,
+          "percent": 97.05882352941178
+        },
+        "regions": {
+          "count": 61,
+          "covered": 59,
+          "notcovered": 2,
+          "percent": 96.72131147540983
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/object_storage.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 3,
+          "covered": 3,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 3,
+          "covered": 3,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 28,
+          "covered": 16,
+          "percent": 57.14285714285714
+        },
+        "regions": {
+          "count": 55,
+          "covered": 34,
+          "notcovered": 21,
+          "percent": 61.81818181818181
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/rate_limit.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 30,
+          "covered": 25,
+          "percent": 83.33333333333334
+        },
+        "instantiations": {
+          "count": 30,
+          "covered": 25,
+          "percent": 83.33333333333334
+        },
+        "lines": {
+          "count": 253,
+          "covered": 194,
+          "percent": 76.6798418972332
+        },
+        "regions": {
+          "count": 399,
+          "covered": 329,
+          "notcovered": 70,
+          "percent": 82.45614035087718
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/request_guard.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 4,
+          "percent": 57.14285714285714
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 4,
+          "percent": 57.14285714285714
+        },
+        "lines": {
+          "count": 64,
+          "covered": 35,
+          "percent": 54.6875
+        },
+        "regions": {
+          "count": 102,
+          "covered": 52,
+          "notcovered": 50,
+          "percent": 50.98039215686274
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/secret_box.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 12,
+          "covered": 9,
+          "percent": 75.0
+        },
+        "instantiations": {
+          "count": 12,
+          "covered": 9,
+          "percent": 75.0
+        },
+        "lines": {
+          "count": 79,
+          "covered": 75,
+          "percent": 94.93670886075948
+        },
+        "regions": {
+          "count": 167,
+          "covered": 159,
+          "notcovered": 8,
+          "percent": 95.20958083832335
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/security/auth.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 14,
+          "covered": 14,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 14,
+          "covered": 14,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 118,
+          "covered": 113,
+          "percent": 95.76271186440678
+        },
+        "regions": {
+          "count": 223,
+          "covered": 213,
+          "notcovered": 10,
+          "percent": 95.51569506726457
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/security/opaque.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 36,
+          "covered": 17,
+          "percent": 47.22222222222222
+        },
+        "instantiations": {
+          "count": 36,
+          "covered": 17,
+          "percent": 47.22222222222222
+        },
+        "lines": {
+          "count": 258,
+          "covered": 219,
+          "percent": 84.88372093023256
+        },
+        "regions": {
+          "count": 389,
+          "covered": 325,
+          "notcovered": 64,
+          "percent": 83.54755784061697
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/security/passkey.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 68,
+          "covered": 9,
+          "percent": 13.23529411764706
+        },
+        "instantiations": {
+          "count": 68,
+          "covered": 9,
+          "percent": 13.23529411764706
+        },
+        "lines": {
+          "count": 383,
+          "covered": 115,
+          "percent": 30.026109660574413
+        },
+        "regions": {
+          "count": 538,
+          "covered": 185,
+          "notcovered": 353,
+          "percent": 34.386617100371744
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/state.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 6,
+          "percent": 54.54545454545454
+        },
+        "instantiations": {
+          "count": 11,
+          "covered": 6,
+          "percent": 54.54545454545454
+        },
+        "lines": {
+          "count": 119,
+          "covered": 78,
+          "percent": 65.54621848739495
+        },
+        "regions": {
+          "count": 163,
+          "covered": 99,
+          "notcovered": 64,
+          "percent": 60.73619631901841
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/state_store.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 52,
+          "covered": 26,
+          "percent": 50.0
+        },
+        "instantiations": {
+          "count": 52,
+          "covered": 26,
+          "percent": 50.0
+        },
+        "lines": {
+          "count": 173,
+          "covered": 119,
+          "percent": 68.78612716763006
+        },
+        "regions": {
+          "count": 261,
+          "covered": 196,
+          "notcovered": 65,
+          "percent": 75.09578544061303
+        }
+      }
+    },
+    {
+      "path": "apps/cloud-server/src/platform/test_support.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 2,
+          "covered": 2,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 87,
+          "covered": 87,
+          "percent": 100.0
+        },
+        "regions": {
+          "count": 102,
+          "covered": 102,
+          "notcovered": 0,
+          "percent": 100.0
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/auth.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 107,
+          "covered": 64,
+          "percent": 59.813084112149525
+        },
+        "instantiations": {
+          "count": 154,
+          "covered": 89,
+          "percent": 57.7922077922078
+        },
+        "lines": {
+          "count": 1340,
+          "covered": 793,
+          "percent": 59.17910447761194
+        },
+        "regions": {
+          "count": 1867,
+          "covered": 984,
+          "notcovered": 883,
+          "percent": 52.704874129619704
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/bridge.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 35,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 35,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 223,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 343,
+          "covered": 0,
+          "notcovered": 343,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/collections.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 8,
+          "covered": 1,
+          "percent": 12.5
+        },
+        "instantiations": {
+          "count": 8,
+          "covered": 1,
+          "percent": 12.5
+        },
+        "lines": {
+          "count": 100,
+          "covered": 15,
+          "percent": 15.0
+        },
+        "regions": {
+          "count": 160,
+          "covered": 38,
+          "notcovered": 122,
+          "percent": 23.75
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/common.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 59,
+          "covered": 16,
+          "percent": 27.11864406779661
+        },
+        "instantiations": {
+          "count": 104,
+          "covered": 22,
+          "percent": 21.153846153846153
+        },
+        "lines": {
+          "count": 416,
+          "covered": 107,
+          "percent": 25.721153846153843
+        },
+        "regions": {
+          "count": 612,
+          "covered": 163,
+          "notcovered": 449,
+          "percent": 26.633986928104576
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/session.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 91,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 144,
+          "covered": 0,
+          "notcovered": 144,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/commands/window.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 23,
+          "covered": 6,
+          "percent": 26.08695652173913
+        },
+        "instantiations": {
+          "count": 23,
+          "covered": 6,
+          "percent": 26.08695652173913
+        },
+        "lines": {
+          "count": 151,
+          "covered": 50,
+          "percent": 33.11258278145696
+        },
+        "regions": {
+          "count": 238,
+          "covered": 79,
+          "notcovered": 159,
+          "percent": 33.193277310924366
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/lib.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 3,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 3,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 29,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 36,
+          "covered": 0,
+          "notcovered": 36,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/main.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 1,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 1,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 3,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 3,
+          "covered": 0,
+          "notcovered": 3,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "apps/dav-bridge-desktop/src-tauri/src/state.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 36,
+          "covered": 12,
+          "percent": 33.33333333333333
+        },
+        "instantiations": {
+          "count": 36,
+          "covered": 12,
+          "percent": 33.33333333333333
+        },
+        "lines": {
+          "count": 177,
+          "covered": 91,
+          "percent": 51.41242937853108
+        },
+        "regions": {
+          "count": 235,
+          "covered": 121,
+          "notcovered": 114,
+          "percent": 51.48936170212765
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/account_keys.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 4,
+          "covered": 3,
+          "percent": 75.0
+        },
+        "instantiations": {
+          "count": 7,
+          "covered": 3,
+          "percent": 42.857142857142854
+        },
+        "lines": {
+          "count": 31,
+          "covered": 27,
+          "percent": 87.09677419354838
+        },
+        "regions": {
+          "count": 64,
+          "covered": 58,
+          "notcovered": 6,
+          "percent": 90.625
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/crypto.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 14,
+          "covered": 12,
+          "percent": 85.71428571428571
+        },
+        "instantiations": {
+          "count": 28,
+          "covered": 21,
+          "percent": 75.0
+        },
+        "lines": {
+          "count": 224,
+          "covered": 212,
+          "percent": 94.64285714285714
+        },
+        "regions": {
+          "count": 315,
+          "covered": 274,
+          "notcovered": 41,
+          "percent": 86.98412698412699
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 19,
+          "covered": 18,
+          "percent": 94.73684210526316
+        },
+        "instantiations": {
+          "count": 98,
+          "covered": 34,
+          "percent": 34.69387755102041
+        },
+        "lines": {
+          "count": 88,
+          "covered": 85,
+          "percent": 96.5909090909091
+        },
+        "regions": {
+          "count": 160,
+          "covered": 151,
+          "notcovered": 9,
+          "percent": 94.375
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/auth.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 34,
+          "covered": 7,
+          "percent": 20.588235294117645
+        },
+        "instantiations": {
+          "count": 68,
+          "covered": 7,
+          "percent": 10.294117647058822
+        },
+        "lines": {
+          "count": 236,
+          "covered": 33,
+          "percent": 13.983050847457626
+        },
+        "regions": {
+          "count": 371,
+          "covered": 41,
+          "notcovered": 330,
+          "percent": 11.05121293800539
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/bridge.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 79,
+          "covered": 12,
+          "percent": 15.18987341772152
+        },
+        "instantiations": {
+          "count": 158,
+          "covered": 12,
+          "percent": 7.59493670886076
+        },
+        "lines": {
+          "count": 621,
+          "covered": 157,
+          "percent": 25.28180354267311
+        },
+        "regions": {
+          "count": 1064,
+          "covered": 238,
+          "notcovered": 826,
+          "percent": 22.36842105263158
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/crypto_exports.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 10,
+          "covered": 5,
+          "percent": 50.0
+        },
+        "instantiations": {
+          "count": 19,
+          "covered": 5,
+          "percent": 26.31578947368421
+        },
+        "lines": {
+          "count": 62,
+          "covered": 41,
+          "percent": 66.12903225806451
+        },
+        "regions": {
+          "count": 71,
+          "covered": 50,
+          "notcovered": 21,
+          "percent": 70.4225352112676
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/devices.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 38,
+          "covered": 3,
+          "percent": 7.894736842105263
+        },
+        "instantiations": {
+          "count": 76,
+          "covered": 3,
+          "percent": 3.9473684210526314
+        },
+        "lines": {
+          "count": 377,
+          "covered": 91,
+          "percent": 24.13793103448276
+        },
+        "regions": {
+          "count": 557,
+          "covered": 117,
+          "notcovered": 440,
+          "percent": 21.005385996409338
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/invites.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 49,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "instantiations": {
+          "count": 128,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "lines": {
+          "count": 424,
+          "covered": 0,
+          "percent": 0.0
+        },
+        "regions": {
+          "count": 602,
+          "covered": 0,
+          "notcovered": 602,
+          "percent": 0.0
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/state.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 23,
+          "covered": 16,
+          "percent": 69.56521739130434
+        },
+        "instantiations": {
+          "count": 46,
+          "covered": 16,
+          "percent": 34.78260869565217
+        },
+        "lines": {
+          "count": 93,
+          "covered": 45,
+          "percent": 48.38709677419355
+        },
+        "regions": {
+          "count": 134,
+          "covered": 63,
+          "notcovered": 71,
+          "percent": 47.01492537313434
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/frb_api/transport.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 34,
+          "covered": 13,
+          "percent": 38.23529411764706
+        },
+        "instantiations": {
+          "count": 318,
+          "covered": 17,
+          "percent": 5.345911949685535
+        },
+        "lines": {
+          "count": 215,
+          "covered": 89,
+          "percent": 41.3953488372093
+        },
+        "regions": {
+          "count": 322,
+          "covered": 107,
+          "notcovered": 215,
+          "percent": 33.22981366459628
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/local_bridge_runner/cache.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 121,
+          "covered": 113,
+          "percent": 93.38842975206612
+        },
+        "instantiations": {
+          "count": 215,
+          "covered": 175,
+          "percent": 81.3953488372093
+        },
+        "lines": {
+          "count": 1901,
+          "covered": 1784,
+          "percent": 93.8453445554971
+        },
+        "regions": {
+          "count": 2702,
+          "covered": 2405,
+          "notcovered": 297,
+          "percent": 89.00814211695041
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/local_bridge_runner/cloud.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 35,
+          "covered": 32,
+          "percent": 91.42857142857143
+        },
+        "instantiations": {
+          "count": 122,
+          "covered": 58,
+          "percent": 47.540983606557376
+        },
+        "lines": {
+          "count": 228,
+          "covered": 215,
+          "percent": 94.29824561403511
+        },
+        "regions": {
+          "count": 337,
+          "covered": 299,
+          "notcovered": 38,
+          "percent": 88.72403560830861
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/local_bridge_runner/dav.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 79,
+          "covered": 73,
+          "percent": 92.40506329113924
+        },
+        "instantiations": {
+          "count": 171,
+          "covered": 109,
+          "percent": 63.74269005847954
+        },
+        "lines": {
+          "count": 919,
+          "covered": 820,
+          "percent": 89.22742110990207
+        },
+        "regions": {
+          "count": 1359,
+          "covered": 1222,
+          "notcovered": 137,
+          "percent": 89.91905813097866
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/local_bridge_runner/mod.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 212,
+          "covered": 142,
+          "percent": 66.98113207547169
+        },
+        "instantiations": {
+          "count": 486,
+          "covered": 226,
+          "percent": 46.50205761316872
+        },
+        "lines": {
+          "count": 1893,
+          "covered": 1345,
+          "percent": 71.05124141574221
+        },
+        "regions": {
+          "count": 2685,
+          "covered": 1913,
+          "notcovered": 772,
+          "percent": 71.24767225325884
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/local_bridge_runner/types.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 11,
+          "covered": 11,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 32,
+          "covered": 27,
+          "percent": 84.375
+        },
+        "lines": {
+          "count": 73,
+          "covered": 67,
+          "percent": 91.78082191780823
+        },
+        "regions": {
+          "count": 78,
+          "covered": 68,
+          "notcovered": 10,
+          "percent": 87.17948717948718
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/native_http.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 16,
+          "covered": 16,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 17,
+          "covered": 17,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 130,
+          "covered": 129,
+          "percent": 99.23076923076923
+        },
+        "regions": {
+          "count": 192,
+          "covered": 191,
+          "notcovered": 1,
+          "percent": 99.47916666666666
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/operation_envelope.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 30,
+          "covered": 28,
+          "percent": 93.33333333333333
+        },
+        "instantiations": {
+          "count": 47,
+          "covered": 38,
+          "percent": 80.85106382978722
+        },
+        "lines": {
+          "count": 228,
+          "covered": 212,
+          "percent": 92.98245614035088
+        },
+        "regions": {
+          "count": 314,
+          "covered": 292,
+          "notcovered": 22,
+          "percent": 92.9936305732484
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/pim.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 155,
+          "covered": 130,
+          "percent": 83.87096774193549
+        },
+        "instantiations": {
+          "count": 290,
+          "covered": 183,
+          "percent": 63.10344827586207
+        },
+        "lines": {
+          "count": 2049,
+          "covered": 1751,
+          "percent": 85.45632015617375
+        },
+        "regions": {
+          "count": 3461,
+          "covered": 2855,
+          "notcovered": 606,
+          "percent": 82.49060965039004
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/recovery.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 7,
+          "covered": 5,
+          "percent": 71.42857142857143
+        },
+        "instantiations": {
+          "count": 12,
+          "covered": 5,
+          "percent": 41.66666666666667
+        },
+        "lines": {
+          "count": 37,
+          "covered": 34,
+          "percent": 91.8918918918919
+        },
+        "regions": {
+          "count": 67,
+          "covered": 62,
+          "notcovered": 5,
+          "percent": 92.5373134328358
+        }
+      }
+    },
+    {
+      "path": "packages/crypto-core-lib/src/secret_vault.rs",
+      "summary": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0.0
+        },
+        "functions": {
+          "count": 3,
+          "covered": 3,
+          "percent": 100.0
+        },
+        "instantiations": {
+          "count": 5,
+          "covered": 5,
+          "percent": 100.0
+        },
+        "lines": {
+          "count": 19,
+          "covered": 18,
+          "percent": 94.73684210526316
+        },
+        "regions": {
+          "count": 42,
+          "covered": 39,
+          "notcovered": 3,
+          "percent": 92.85714285714286
+        }
+      }
+    }
+  ]
+}

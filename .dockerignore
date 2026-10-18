@@ -24,3 +24,10 @@ apps/dav-bridge-mobile/ios
 !.env.example
 docs
 AUDIT.md
+
+# Keep local credentials and audit scratch out of build contexts.
+SECRETS.md
+**/SECRETS.md
+.superpowers
+.aws
+**/.aws

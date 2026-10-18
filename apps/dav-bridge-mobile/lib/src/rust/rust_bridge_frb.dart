@@ -12,6 +12,25 @@ import 'package:dav_bridge_mobile/src/rust/rust_bridge_api.dart';
 /// This class calls `crypto-core-lib` through `flutter_rust_bridge` and exposes
 /// the same interface as [RustBridgeApi].
 class FrbRustBridgeApi implements RustBridgeApi {
+  frb_api.MobileSessionLease? _activeSession;
+
+  frb_api.MobileSessionLease get _session =>
+      _activeSession ?? (throw StateError('Mobile session lease is required.'));
+
+  @override
+  Future<SessionLease> acquireSessionLease() async {
+    await _ensureInitialized();
+    final native = frb_api.mobileNewSessionLease();
+    try {
+      await frb_api.mobileAcquireSessionLease(session: native);
+    } catch (_) {
+      native.dispose();
+      rethrow;
+    }
+    _activeSession = native;
+    return _FrbSessionLease(native, () => _activeSession = null);
+  }
+
   static Future<void>? _initFuture;
 
   static Future<void> _ensureInitialized() {
@@ -61,6 +80,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     final result = await frb_api.mobilePasswordLogin(
+      session: _session,
       cloudBaseUrl: cloudBaseUrl,
       username: username,
       password: password,
@@ -93,6 +113,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     final result = await frb_api.mobileProvisionDeviceAndSpaces(
+      session: _session,
       cloudBaseUrl: cloudBaseUrl,
       accessToken: accessToken,
       accountMasterKey: _asFixed32Bytes(
@@ -131,6 +152,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     await frb_api.mobileImportRefreshToken(
+      session: _session,
       refreshToken: refreshToken,
       rotationRequestId: rotationRequestId,
     );
@@ -140,20 +162,26 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<String?> exportRefreshToken() async {
     await _ensureInitialized();
-    return frb_api.mobileExportRefreshToken();
+    return frb_api.mobileExportRefreshToken(
+      session: _session,
+    );
   }
 
   @override
   Future<String?> exportRefreshRotationRequestId() async {
     await _ensureInitialized();
-    return frb_api.mobileExportRefreshRotationRequestId();
+    return frb_api.mobileExportRefreshRotationRequestId(
+      session: _session,
+    );
   }
 
   /// Clears refresh token from Rust runtime memory.
   @override
   Future<void> clearRefreshToken() async {
     await _ensureInitialized();
-    await frb_api.mobileClearRefreshToken();
+    await frb_api.mobileClearRefreshToken(
+      session: _session,
+    );
   }
 
   @override
@@ -163,6 +191,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     return frb_api.mobileRevokeRefreshSession(
+      session: _session,
       cloudBaseUrl: cloudBaseUrl,
       refreshToken: refreshToken,
     );
@@ -176,14 +205,19 @@ class FrbRustBridgeApi implements RustBridgeApi {
     required String accessToken,
     required List<int> sqliteKey,
     DeviceSecrets? device,
+    required String username,
+    bool freshSession = false,
   }) async {
     await _ensureInitialized();
     await frb_api.mobileConfigureSync(
+      session: _session,
       cloudBaseUrl: cloudBaseUrl,
       sqlitePath: sqlitePath,
       accessToken: accessToken,
       sqliteKey: _asFixed32Bytes('sqliteKey', sqliteKey),
       device: device == null ? null : _toFrbDevice(device),
+      username: username,
+      freshSession: freshSession,
     );
   }
 
@@ -191,7 +225,9 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<int> syncNow() async {
     await _ensureInitialized();
-    final synced = await frb_api.mobileSyncNow();
+    final synced = await frb_api.mobileSyncNow(
+      session: _session,
+    );
     return synced.toInt();
   }
 
@@ -233,6 +269,24 @@ class FrbRustBridgeApi implements RustBridgeApi {
         priority: item.priority.toInt(),
         location: item.location,
         recurrenceRule: item.recurrenceRule,
+        recurrenceUnsupported: item.recurrenceUnsupported,
+        recurrenceExdates: item.recurrenceExdates
+            .map((value) => _fromFrbTemporal(value)!)
+            .toList(growable: false),
+        recurrenceRdates: item.recurrenceRdates
+            .map((value) => _fromFrbTemporal(value)!)
+            .toList(growable: false),
+        recurrenceOverrides: item.recurrenceOverrides
+            .map((value) => PimRecurrenceOverride(
+                  recurrenceId: _fromFrbTemporal(value.recurrenceId)!,
+                  startsAt: _fromFrbTemporal(value.startsAt),
+                  endsAt: _fromFrbTemporal(value.endsAt),
+                  title: value.title,
+                  notes: value.notes,
+                  location: value.location,
+                  cancelled: value.cancelled,
+                ))
+            .toList(growable: false),
         reminderMinutes: item.reminderMinutes?.toInt(),
         categories: item.categories,
         namePrefix: item.namePrefix,
@@ -278,7 +332,9 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<List<PimItem>> listPimItems() async {
     await _ensureInitialized();
-    final items = await frb_api.mobileListPimItems();
+    final items = await frb_api.mobileListPimItems(
+      session: _session,
+    );
     return items.map(_fromFrbPimItem).toList(growable: false);
   }
 
@@ -286,6 +342,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   Future<PimItem> upsertPimItem({required PimDraft draft}) async {
     await _ensureInitialized();
     final item = await frb_api.mobileUpsertPimItem(
+      session: _session,
       draft: frb_types.MobilePimDraft(
         spaceId: draft.spaceId,
         resourceId: draft.resourceId,
@@ -350,6 +407,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   Future<void> deletePimItem({required PimItem item}) async {
     await _ensureInitialized();
     await frb_api.mobileDeletePimItem(
+      session: _session,
       spaceId: item.spaceId,
       resourceId: item.resourceId,
       projectionId: item.projectionId,
@@ -361,7 +419,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<CollectionEntry> createCollection({required String name}) async {
     await _ensureInitialized();
-    final collection = await frb_api.mobileCreateCollection(name: name);
+    final collection =
+        await frb_api.mobileCreateCollection(session: _session, name: name);
     return CollectionEntry(
       id: collection.collectionId,
       name: collection.name,
@@ -376,7 +435,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<void> moveCollectionToTrash({required String collectionId}) async {
     await _ensureInitialized();
-    await frb_api.mobileMoveCollectionToTrash(collectionId: collectionId);
+    await frb_api.mobileMoveCollectionToTrash(
+        session: _session, collectionId: collectionId);
   }
 
   /// Registers in-memory CMK for the local collection id.
@@ -389,6 +449,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     await frb_api.mobileRegisterCollectionKey(
+      session: _session,
       collectionId: collectionId,
       keyEpoch: keyEpoch,
       syncStartSeq: BigInt.from(syncStartSeq),
@@ -400,7 +461,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<void> unregisterCollectionKey({required String collectionId}) async {
     await _ensureInitialized();
-    await frb_api.mobileUnregisterCollectionKey(collectionId: collectionId);
+    await frb_api.mobileUnregisterCollectionKey(
+        session: _session, collectionId: collectionId);
   }
 
   /// Issues a short-lived invite code for a collection.
@@ -412,6 +474,7 @@ class FrbRustBridgeApi implements RustBridgeApi {
   }) async {
     await _ensureInitialized();
     final issued = await frb_api.mobileCreateInviteCode(
+      session: _session,
       collectionId: collectionId,
       collectionKey: _asFixed32Bytes('collectionKey', collectionKey),
       ttlMinutes: ttlMinutes,
@@ -429,8 +492,8 @@ class FrbRustBridgeApi implements RustBridgeApi {
   @override
   Future<RedeemedInvite> redeemInviteCode({required String inviteCode}) async {
     await _ensureInitialized();
-    final redeemed =
-        await frb_api.mobileRedeemInviteCode(inviteCode: inviteCode);
+    final redeemed = await frb_api.mobileRedeemInviteCode(
+        session: _session, inviteCode: inviteCode);
     return RedeemedInvite(
       collectionId: redeemed.collectionId,
       role: redeemed.role,
@@ -439,5 +502,22 @@ class FrbRustBridgeApi implements RustBridgeApi {
       currentStateStartSeq: redeemed.currentStateStartSeq.toInt(),
       collectionKey: redeemed.collectionKey.toList(growable: false),
     );
+  }
+}
+
+class _FrbSessionLease implements SessionLease {
+  _FrbSessionLease(this._native, this._clearActive);
+  final frb_api.MobileSessionLease _native;
+  void Function()? _clearActive;
+
+  @override
+  void release() {
+    final clear = _clearActive;
+    if (clear == null) return;
+    _clearActive = null;
+    clear();
+    // dispose decrements only Dart's opaque Arc. Every pending native call
+    // owns another Arc, so engine teardown cannot unlock ongoing Rust work.
+    _native.dispose();
   }
 }

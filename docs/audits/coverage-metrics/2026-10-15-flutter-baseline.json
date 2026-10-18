@@ -1,0 +1,133 @@
+{
+  "revision": "81248927f1ad734c246f582486d9840da6b47637",
+  "scope": "flutter test --coverage; only reported/imported Dart files",
+  "note": "Line coverage only; branch coverage not measured. Denominator is reported files, not whole repository.",
+  "totals": {
+    "LF": 4369,
+    "LH": 820,
+    "FNF": 0,
+    "FNH": 0
+  },
+  "files": [
+    {
+      "path": "lib/src/models/bridge_models.dart",
+      "LF": 179,
+      "LH": 142
+    },
+    {
+      "path": "lib/src/services/sync_runtime_storage.dart",
+      "LF": 129,
+      "LH": 48
+    },
+    {
+      "path": "lib/src/rust/rust_bridge_api.dart",
+      "LF": 3,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/services/system_projection_service.dart",
+      "LF": 282,
+      "LH": 1
+    },
+    {
+      "path": "lib/src/services/token_storage_service.dart",
+      "LF": 54,
+      "LH": 4
+    },
+    {
+      "path": "lib/src/state/bridge_controller.dart",
+      "LF": 492,
+      "LH": 394
+    },
+    {
+      "path": "lib/src/rust/gen/crypto.dart",
+      "LF": 26,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/gen/frb_generated.dart",
+      "LF": 1037,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/gen/lib.dart",
+      "LF": 6,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/gen/frb_api.dart",
+      "LF": 55,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/gen/frb_api/types.dart",
+      "LF": 291,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/gen/frb_generated.io.dart",
+      "LF": 5,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/rust_bridge_frb.dart",
+      "LF": 254,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/rust/rust_bridge_mock.dart",
+      "LF": 155,
+      "LH": 53
+    },
+    {
+      "path": "lib/src/services/background_sync_service.dart",
+      "LF": 53,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/state/bridge_state.dart",
+      "LF": 20,
+      "LH": 20
+    },
+    {
+      "path": "lib/src/state/locale_controller.dart",
+      "LF": 25,
+      "LH": 17
+    },
+    {
+      "path": "lib/src/i18n/app_localizations.dart",
+      "LF": 15,
+      "LH": 13
+    },
+    {
+      "path": "lib/src/ui/app_root.dart",
+      "LF": 23,
+      "LH": 20
+    },
+    {
+      "path": "lib/src/ui/auth_screen.dart",
+      "LF": 96,
+      "LH": 70
+    },
+    {
+      "path": "lib/src/ui/dashboard_screen.dart",
+      "LF": 269,
+      "LH": 1
+    },
+    {
+      "path": "lib/src/ui/brand_mark.dart",
+      "LF": 37,
+      "LH": 36
+    },
+    {
+      "path": "lib/src/ui/share_screen.dart",
+      "LF": 145,
+      "LH": 0
+    },
+    {
+      "path": "lib/src/ui/pim_screen.dart",
+      "LF": 718,
+      "LH": 1
+    }
+  ]
+}

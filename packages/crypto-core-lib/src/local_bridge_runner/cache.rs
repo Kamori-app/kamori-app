@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::operation_envelope::OperationEnvelopeV1;
-use crate::pim::{PimBranchNodeV1, assign_pim_branches};
+use crate::pim::{PimBranchAssignmentV1, PimBranchNodeV1, assign_pim_branches};
 use sha2::{Digest, Sha256};
 
 const DEFAULT_SYNC_SCOPE: &str = "workspace:personal";
@@ -277,6 +277,102 @@ impl LocalCache {
         Ok(())
     }
 
+    /// A newly authenticated session deliberately replaces only credential
+    /// state. One transaction keeps an old OS anchor from seeing an empty gap.
+    pub(crate) fn start_refresh_session(
+        &self,
+        endpoint: &str,
+        account: &str,
+        access: &str,
+        refresh: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.db_key.is_some(),
+            "encrypted cache is required for token rotation"
+        );
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        tx.execute("CREATE TABLE IF NOT EXISTS refresh_credential_scope (id INTEGER PRIMARY KEY CHECK (id = 1), endpoint TEXT NOT NULL, account TEXT)", [])?;
+        tx.execute("DELETE FROM refresh_rotation_attempt", [])?;
+        tx.execute("INSERT INTO runtime_credentials (id, access_token, refresh_token, previous_refresh_hash) VALUES (1, ?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET access_token = excluded.access_token, refresh_token = excluded.refresh_token, previous_refresh_hash = excluded.previous_refresh_hash", params![access, refresh, Sha256::digest(refresh.as_bytes()).as_slice()])?;
+        tx.execute("INSERT INTO refresh_credential_scope (id, endpoint, account) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET endpoint = excluded.endpoint, account = excluded.account", params![endpoint, account])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Bind credential state to an endpoint before selecting or sending tokens.
+    /// Legacy rows may only be claimed using an exact trusted generation anchor.
+    pub(crate) fn bind_refresh_scope(
+        &self,
+        endpoint: &str,
+        trusted_token: &str,
+        account: Option<&str>,
+    ) -> Result<()> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        tx.execute("CREATE TABLE IF NOT EXISTS refresh_credential_scope (id INTEGER PRIMARY KEY CHECK (id = 1), endpoint TEXT NOT NULL, account TEXT)", [])?;
+        ensure_column(
+            &tx,
+            "refresh_credential_scope",
+            "account",
+            "ALTER TABLE refresh_credential_scope ADD COLUMN account TEXT",
+        )?;
+        let scope: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT endpoint, account FROM refresh_credential_scope WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        // Account attribution is established by desktop fresh signin/startup.
+        // Unattributed FRB caches retain their existing lifecycle; the desktop
+        // guard must not reinterpret mobile login or backend switches.
+        if account.is_none() && scope.as_ref().is_none_or(|(_, stored)| stored.is_none()) {
+            return Ok(());
+        }
+        if let Some((stored_endpoint, stored_account)) = &scope {
+            anyhow::ensure!(
+                stored_endpoint == endpoint,
+                "refresh cache endpoint does not match configured endpoint"
+            );
+            if let (Some(stored), Some(supplied)) = (stored_account, account) {
+                anyhow::ensure!(
+                    stored == supplied,
+                    "refresh cache account does not match stored account"
+                );
+            }
+        }
+        // Every desktop selection needs an exact generation anchor. Unknown
+        // older tokens must never be retried with a new id (account-wide reuse).
+        {
+            let current: Option<(String, Vec<u8>)> = tx.query_row("SELECT refresh_token, previous_refresh_hash FROM runtime_credentials WHERE id = 1", [], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+            let pending: Option<Vec<u8>> = tx
+                .query_row(
+                    "SELECT refresh_token_hash FROM refresh_rotation_attempt WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let hash = Sha256::digest(trusted_token.as_bytes());
+            let current_anchored = current.as_ref().is_none_or(|(token, previous)| {
+                token == trusted_token || previous.as_slice() == hash.as_slice()
+            });
+            let pending_anchored = pending.as_ref().is_none_or(|value| {
+                value.as_slice() == hash.as_slice()
+                    || current.as_ref().is_some_and(|(token, _)| {
+                        value.as_slice() == Sha256::digest(token.as_bytes()).as_slice()
+                    })
+            });
+            anyhow::ensure!(
+                current_anchored && pending_anchored,
+                "legacy refresh cache has no trusted credential anchor"
+            );
+            tx.execute("INSERT INTO refresh_credential_scope (id, endpoint, account) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET account = COALESCE(excluded.account, refresh_credential_scope.account)", params![endpoint, account])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Recovers a refresh rotation only when the caller supplied either the
     /// stored token or its immediate predecessor. This prevents credentials
     /// from a previous account on the same backend/cache path being reused.
@@ -355,6 +451,14 @@ impl LocalCache {
     /// The row is committed before any network request is sent and is retained
     /// until the matching replacement credentials are durably committed.
     pub(crate) fn begin_refresh_rotation(&self, refresh_token: &str) -> Result<Uuid> {
+        self.begin_refresh_rotation_with_fallback(refresh_token, Uuid::new_v4())
+    }
+
+    pub(crate) fn begin_refresh_rotation_with_fallback(
+        &self,
+        refresh_token: &str,
+        fallback: Uuid,
+    ) -> Result<Uuid> {
         anyhow::ensure!(
             self.db_key.is_some(),
             "encrypted cache is required for token rotation"
@@ -378,7 +482,7 @@ impl LocalCache {
             return Ok(request_id);
         }
 
-        let request_id = Uuid::new_v4();
+        let request_id = fallback;
         transaction.execute(
             r#"
             INSERT INTO refresh_rotation_attempt (id, refresh_token_hash, rotation_request_id)
@@ -397,6 +501,9 @@ impl LocalCache {
         let mut conn = self.connect()?;
         let transaction = conn.transaction()?;
         transaction.execute("DELETE FROM runtime_credentials WHERE id = 1", [])?;
+        // Scope may predate this method on legacy caches.
+        transaction.execute("CREATE TABLE IF NOT EXISTS refresh_credential_scope (id INTEGER PRIMARY KEY CHECK (id = 1), endpoint TEXT NOT NULL, account TEXT)", [])?;
+        transaction.execute("DELETE FROM refresh_credential_scope WHERE id = 1", [])?;
         transaction.execute("DELETE FROM refresh_rotation_attempt WHERE id = 1", [])?;
         transaction.commit()?;
         Ok(())
@@ -746,6 +853,23 @@ impl LocalCache {
             .map_err(Into::into)
     }
 
+    /// Preflight the complete stream before a DAV write persists its envelope/state.
+    #[cfg(feature = "local-bridge")]
+    pub(crate) fn validate_pim_stream(
+        &self,
+        collection_id: &str,
+        stream_id: Uuid,
+        default_projection_resource_id: &str,
+    ) -> Result<()> {
+        load_validated_pim_stream(
+            &self.connect()?,
+            collection_id,
+            stream_id,
+            default_projection_resource_id,
+        )?;
+        Ok(())
+    }
+
     /// Rebuilds one stream's projection rows from its complete known version
     /// graph in a single transaction. Arrival order cannot influence branch
     /// identity or which branch inherits the canonical DAV resource name.
@@ -758,32 +882,12 @@ impl LocalCache {
     ) -> Result<()> {
         let mut conn = self.connect()?;
         let transaction = conn.transaction()?;
-        let states = {
-            let mut statement = transaction.prepare(
-                r#"
-                SELECT client_op_id, collection_id, stream_id, logical_resource_id,
-                       materialized_resource_id, resource_kind, payload, deleted, space_seq,
-                       parent_operation_id, seed_projection_resource_id
-                FROM operation_states
-                WHERE collection_id = ?1 AND stream_id = ?2
-                "#,
-            )?;
-            statement
-                .query_map(
-                    params![collection_id, stream_id.to_string()],
-                    map_operation_state,
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        let nodes = states
-            .iter()
-            .map(|state| PimBranchNodeV1 {
-                operation_id: state.client_op_id,
-                parent_operation_id: state.parent_operation_id,
-                seed_projection_resource_id: state.seed_projection_resource_id.clone(),
-            })
-            .collect::<Vec<_>>();
-        let assignments = assign_pim_branches(default_projection_resource_id, &nodes)?;
+        let (states, assignments) = load_validated_pim_stream(
+            &transaction,
+            collection_id,
+            stream_id,
+            default_projection_resource_id,
+        )?;
         let assignment_by_id = assignments
             .iter()
             .map(|assignment| (assignment.operation_id, assignment))
@@ -1137,6 +1241,42 @@ impl LocalCache {
     }
 }
 
+/// Read and validate exactly the complete graph used to rebuild a stream.
+fn load_validated_pim_stream(
+    conn: &Connection,
+    collection_id: &str,
+    stream_id: Uuid,
+    default_projection_resource_id: &str,
+) -> Result<(Vec<CachedOperationState>, Vec<PimBranchAssignmentV1>)> {
+    let states = {
+        let mut statement = conn.prepare(
+            r#"
+                SELECT client_op_id, collection_id, stream_id, logical_resource_id,
+                       materialized_resource_id, resource_kind, payload, deleted, space_seq,
+                       parent_operation_id, seed_projection_resource_id
+                FROM operation_states
+                WHERE collection_id = ?1 AND stream_id = ?2
+                "#,
+        )?;
+        statement
+            .query_map(
+                params![collection_id, stream_id.to_string()],
+                map_operation_state,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let nodes = states
+        .iter()
+        .map(|state| PimBranchNodeV1 {
+            operation_id: state.client_op_id,
+            parent_operation_id: state.parent_operation_id,
+            seed_projection_resource_id: state.seed_projection_resource_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    let assignments = assign_pim_branches(default_projection_resource_id, &nodes)?;
+    Ok((states, assignments))
+}
+
 fn upsert_operation_state(conn: &Connection, state: &CachedOperationState) -> Result<()> {
     conn.execute(
         r#"
@@ -1396,6 +1536,149 @@ mod tests {
             now
         ));
         path
+    }
+
+    #[test]
+    fn legacy_refresh_scope_requires_exact_anchor_and_never_overwrites_endpoint() {
+        for committed in [false, true] {
+            let path = temp_db_path(if committed {
+                "legacy-committed-scope"
+            } else {
+                "legacy-pending-scope"
+            });
+            let cache = LocalCache::new(path.clone(), Some("synthetic-key".into())).unwrap();
+            let attempt = cache.begin_refresh_rotation("T0").unwrap();
+            if committed {
+                cache.store_rotated_credentials("T0", "A1", "T1").unwrap();
+            }
+            assert!(
+                cache
+                    .bind_refresh_scope("https://other.example", "unrelated-account", Some("alice"))
+                    .is_err()
+            );
+            cache
+                .bind_refresh_scope("https://trusted.example", "T0", Some("alice"))
+                .unwrap();
+            cache
+                .bind_refresh_scope("https://trusted.example", "T0", None)
+                .unwrap();
+            assert!(
+                cache
+                    .bind_refresh_scope("https://trusted.example", "T0", Some("bob"))
+                    .is_err()
+            );
+            assert!(
+                cache
+                    .bind_refresh_scope("https://other.example", "T0", Some("alice"))
+                    .is_err()
+            );
+            cache
+                .bind_refresh_scope("https://trusted.example", "T0", Some("alice"))
+                .unwrap();
+
+            if committed {
+                assert_eq!(
+                    cache.recover_rotated_credentials(Some("T0")).unwrap(),
+                    Some(("A1".into(), "T1".into()))
+                );
+            } else {
+                assert_eq!(cache.begin_refresh_rotation("T0").unwrap(), attempt);
+            }
+            drop(cache);
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn fresh_session_replaces_credentials_atomically_and_preserves_pim_and_cursors() {
+        let path = temp_db_path("fresh-session");
+        let cache = LocalCache::new(path.clone(), Some("synthetic-key".into())).unwrap();
+        let resource = LocalResource {
+            collection_id: "personal".into(),
+            resource_id: "alice.vcf".into(),
+            kind: DavResourceKind::Contact,
+            payload: "BEGIN:VCARD".into(),
+            etag: "etag1".into(),
+            updated_at_ms: 1000,
+        };
+        cache.upsert_lww(&resource).unwrap();
+        cache.advance_last_seq("space:personal", 23).unwrap();
+        cache
+            .start_refresh_session("https://old.example", "alice", "A0", "T0")
+            .unwrap();
+        let old_attempt = cache.begin_refresh_rotation("T0").unwrap();
+        cache
+            .start_refresh_session("https://new.example", "bob", "B0", "U0")
+            .unwrap();
+        assert!(
+            cache
+                .recover_rotated_credentials(Some("T0"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            cache.recover_rotated_credentials(Some("U0")).unwrap(),
+            Some(("B0".into(), "U0".into()))
+        );
+        assert_ne!(cache.begin_refresh_rotation("U0").unwrap(), old_attempt);
+        assert_eq!(
+            cache
+                .get_resource(DavResourceKind::Contact, "personal", "alice.vcf")
+                .unwrap()
+                .unwrap()
+                .payload,
+            resource.payload
+        );
+        assert_eq!(cache.load_last_seq("space:personal").unwrap(), 23);
+        assert!(
+            cache
+                .bind_refresh_scope("https://old.example", "T0", Some("alice"))
+                .is_err()
+        );
+        cache
+            .bind_refresh_scope("https://new.example", "U0", Some("bob"))
+            .unwrap();
+        drop(cache);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unattributed_frb_runtime_keeps_existing_fresh_login_and_endpoint_switch_behavior() {
+        let path = temp_db_path("frb-unattributed-scope");
+        let cache = LocalCache::new(path.clone(), Some("synthetic-key".into())).unwrap();
+        cache.store_rotated_credentials("T0", "A1", "T1").unwrap();
+        cache
+            .bind_refresh_scope("https://first.example", "T0", None)
+            .unwrap();
+        assert_eq!(
+            cache
+                .recover_rotated_credentials(Some("T0"))
+                .unwrap()
+                .unwrap()
+                .1,
+            "T1"
+        );
+        cache
+            .bind_refresh_scope("https://second.example", "new-independent-signin", None)
+            .unwrap();
+        assert!(
+            cache
+                .recover_rotated_credentials(Some("new-independent-signin"))
+                .unwrap()
+                .is_none()
+        );
+        // A desktop establishes attribution explicitly; subsequent runner opens
+        // enforce the same endpoint, account and generation without weakening it.
+        cache
+            .bind_refresh_scope("https://first.example", "T0", Some("alice"))
+            .unwrap();
+        assert!(
+            cache
+                .bind_refresh_scope("https://second.example", "T0", None)
+                .is_err()
+        );
+        drop(cache);
+        let _ = std::fs::remove_file(path);
     }
 
     fn test_envelope(space_id: Uuid, client_op_id: Uuid) -> OperationEnvelopeV1 {

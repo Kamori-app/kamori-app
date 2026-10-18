@@ -37,11 +37,70 @@
       "dependsOn": ["^test"],
       "outputs": []
     },
+    "cloud-server#test": {
+      "dependsOn": ["^test"],
+      "cache": false,
+      "passThroughEnv": ["KAMORI_DATABASE_URL", "DATABASE_URL"]
+    },
     "fast": {
       "outputs": []
     },
     "format": {
       "outputs": []
+    },
+    "dav-bridge-desktop#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/specs/uiHost.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/uiGates.bundle.mjs",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/desktop-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/desktopUi.js",
+        "$TURBO_ROOT$/tests/acceptance/specs/invite-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/inviteUi.js",
+        "$TURBO_ROOT$/apps/web-frontend/src/**",
+        "$TURBO_ROOT$/apps/web-frontend/package.json"
+      ]
+    },
+    "admin-frontend#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/specs/uiHost.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/uiGates.bundle.mjs",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/admin-ui.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/adminUi.js"
+      ]
+    },
+    "crypto-core-lib#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**"
+      ]
+    },
+    "dav-bridge-mobile#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**"
+      ]
+    },
+    "web-frontend#test": {
+      "dependsOn": ["^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/fixtures/pim/**",
+        "$TURBO_ROOT$/tests/acceptance/ui-gates.config.ts",
+        "$TURBO_ROOT$/tests/acceptance/package.json",
+        "$TURBO_ROOT$/tests/acceptance/specs/pim-recurrence.spec.ts",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/calendarCorpus.js",
+        "$TURBO_ROOT$/tests/acceptance/fixtures/taskEditor.bundle.mjs"
+      ]
     }
   }
 }

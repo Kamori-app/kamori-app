@@ -40,6 +40,7 @@ struct DeviceFlow {
     hpke_public_key: Vec<u8>,
     approved_user_id: Option<Uuid>,
     approved_username: Option<String>,
+    approved_binding: Option<super::super::repositories::AuthenticationBinding>,
     encrypted_master_key_package: Option<Vec<u8>>,
 }
 
@@ -118,6 +119,7 @@ pub(crate) async fn start(
         hpke_public_key: hpke_public_key.to_vec(),
         approved_user_id: None,
         approved_username: None,
+        approved_binding: None,
         encrypted_master_key_package: None,
     };
     state
@@ -175,7 +177,14 @@ pub(crate) async fn approve(
     headers: &HeaderMap,
     request: DeviceAuthorizationApproveRequest,
 ) -> Result<DeviceAuthorizationApproveResponse, ApiError> {
-    let user_id = authorize_session(state, headers).await?;
+    let principal = crate::features::common::authorize_principal(state, headers).await?;
+    let user_id = principal.user_id;
+    let binding = super::super::repositories::session_authentication_binding(
+        &state.pool,
+        user_id,
+        principal.session_id,
+    )
+    .await?;
     let username = find_active_username_by_id(&state.pool, user_id)
         .await?
         .ok_or_else(|| unauthenticated("account is unavailable"))?;
@@ -222,6 +231,7 @@ pub(crate) async fn approve(
         }
         flow.approved_user_id = Some(user_id);
         flow.approved_username = Some(username.clone());
+        flow.approved_binding = Some(binding);
         flow.encrypted_master_key_package = Some(request.encrypted_master_key_package.clone());
         let updated = rmp_serde::to_vec_named(&flow).map_err(internal_error)?;
         if state
@@ -278,6 +288,9 @@ pub(crate) async fn token(
         &state.pool,
         DeviceAuthorizationRefresh {
             user_id,
+            binding: flow
+                .approved_binding
+                .ok_or_else(|| unauthenticated("device approval has no credential binding"))?,
             device_secret: &request.device_secret,
             flow_id: request.flow_id,
             rotation_key: &state.config.refresh_rotation_key,
@@ -290,8 +303,19 @@ pub(crate) async fn token(
     let access_token = state
         .issue_access_token(user_id, &username, refresh.token_id)
         .map_err(internal_error)?;
-    let device_enrollment_token =
-        super::device_enrollment::issue_for_refresh(state, user_id, &refresh.token).await?;
+    let device_enrollment_token = super::device_enrollment::issue_for_refresh(
+        state,
+        super::super::repositories::AuthenticationBinding {
+            user_id,
+            generation: flow
+                .approved_binding
+                .ok_or_else(|| unauthenticated("device approval has no credential binding"))?
+                .generation,
+            session_id: Some(refresh.token_id),
+        },
+        &refresh.token,
+    )
+    .await?;
     if let Err(error) = state.state_store.delete(&code_key(&flow.user_code)).await {
         tracing::warn!(%error, flow_id = %request.flow_id, "device authorization code cleanup failed");
     }

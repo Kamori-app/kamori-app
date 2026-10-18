@@ -62,7 +62,9 @@ pub(super) async fn import_mobile_refresh_credential(
     *MOBILE_REFRESH_ROTATION_REQUEST_ID.lock().await = Some(rotation_request_id);
 }
 
-pub(super) async fn mobile_refresh_rotation_request_id(refresh_token: &str) -> Result<Uuid, String> {
+pub(super) async fn mobile_refresh_rotation_request_id(
+    refresh_token: &str,
+) -> Result<Uuid, String> {
     let stored_refresh = MOBILE_REFRESH_TOKEN.lock().await;
     if stored_refresh.as_deref() != Some(refresh_token) {
         return Err("refresh credential generation does not match the active token".to_string());
@@ -114,5 +116,8 @@ pub(super) async fn persist_mobile_rotated_credentials(
     // credential generations. The next call rebuilds one shared runner from
     // the durably committed pair.
     MOBILE_RUNNER.lock().await.take();
+    if MOBILE_BRIDGE_RUNTIME.lock().await.last_config.is_some() {
+        super::bridge::mobile_runner().await?;
+    }
     Ok(())
 }

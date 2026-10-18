@@ -9,6 +9,7 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `ensure_mobile_session`, `with_mobile_session`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `MobileOpaqueSuite`
 
 Future<Keypair> generateX25519Keypair() =>
@@ -50,11 +51,13 @@ Future<U8Array32> decryptGroupKeyFromPeer(
         encrypted: encrypted, recipientPrivateKey: recipientPrivateKey);
 
 Future<MobileLoginResult> mobilePasswordLogin(
-        {required String cloudBaseUrl,
+        {required MobileSessionLease session,
+        required String cloudBaseUrl,
         required String username,
         required String password,
         String? totpCode}) =>
     RustLib.instance.api.crateFrbApiMobilePasswordLogin(
+        session: session,
         cloudBaseUrl: cloudBaseUrl,
         username: username,
         password: password,
@@ -66,13 +69,15 @@ Future<MobileDeviceSecrets> mobileGenerateDeviceSecrets() =>
     RustLib.instance.api.crateFrbApiMobileGenerateDeviceSecrets();
 
 Future<MobileProvisionResult> mobileProvisionDeviceAndSpaces(
-        {required String cloudBaseUrl,
+        {required MobileSessionLease session,
+        required String cloudBaseUrl,
         required String accessToken,
         required U8Array32 accountMasterKey,
         required String platform,
         String? deviceEnrollmentToken,
         MobileDeviceSecrets? existingDevice}) =>
     RustLib.instance.api.crateFrbApiMobileProvisionDeviceAndSpaces(
+        session: session,
         cloudBaseUrl: cloudBaseUrl,
         accessToken: accessToken,
         accountMasterKey: accountMasterKey,
@@ -80,75 +85,102 @@ Future<MobileProvisionResult> mobileProvisionDeviceAndSpaces(
         deviceEnrollmentToken: deviceEnrollmentToken,
         existingDevice: existingDevice);
 
-Future<MobileCollection> mobileCreateCollection({required String name}) =>
-    RustLib.instance.api.crateFrbApiMobileCreateCollection(name: name);
-
-Future<void> mobileMoveCollectionToTrash({required String collectionId}) =>
+Future<MobileCollection> mobileCreateCollection(
+        {required MobileSessionLease session, required String name}) =>
     RustLib.instance.api
-        .crateFrbApiMobileMoveCollectionToTrash(collectionId: collectionId);
+        .crateFrbApiMobileCreateCollection(session: session, name: name);
+
+Future<void> mobileMoveCollectionToTrash(
+        {required MobileSessionLease session, required String collectionId}) =>
+    RustLib.instance.api.crateFrbApiMobileMoveCollectionToTrash(
+        session: session, collectionId: collectionId);
 
 Future<void> mobileImportRefreshToken(
-        {required String refreshToken, required String rotationRequestId}) =>
+        {required MobileSessionLease session,
+        required String refreshToken,
+        required String rotationRequestId}) =>
     RustLib.instance.api.crateFrbApiMobileImportRefreshToken(
-        refreshToken: refreshToken, rotationRequestId: rotationRequestId);
+        session: session,
+        refreshToken: refreshToken,
+        rotationRequestId: rotationRequestId);
 
-Future<String?> mobileExportRefreshToken() =>
-    RustLib.instance.api.crateFrbApiMobileExportRefreshToken();
+Future<String?> mobileExportRefreshToken(
+        {required MobileSessionLease session}) =>
+    RustLib.instance.api.crateFrbApiMobileExportRefreshToken(session: session);
 
-Future<String?> mobileExportRefreshRotationRequestId() =>
-    RustLib.instance.api.crateFrbApiMobileExportRefreshRotationRequestId();
+Future<String?> mobileExportRefreshRotationRequestId(
+        {required MobileSessionLease session}) =>
+    RustLib.instance.api
+        .crateFrbApiMobileExportRefreshRotationRequestId(session: session);
 
-Future<void> mobileClearRefreshToken() =>
-    RustLib.instance.api.crateFrbApiMobileClearRefreshToken();
+Future<void> mobileClearRefreshToken({required MobileSessionLease session}) =>
+    RustLib.instance.api.crateFrbApiMobileClearRefreshToken(session: session);
 
 Future<bool> mobileRevokeRefreshSession(
-        {required String cloudBaseUrl, required String refreshToken}) =>
+        {required MobileSessionLease session,
+        required String cloudBaseUrl,
+        required String refreshToken}) =>
     RustLib.instance.api.crateFrbApiMobileRevokeRefreshSession(
-        cloudBaseUrl: cloudBaseUrl, refreshToken: refreshToken);
+        session: session,
+        cloudBaseUrl: cloudBaseUrl,
+        refreshToken: refreshToken);
 
 Future<MobileIssuedInviteCode> mobileCreateInviteCode(
-        {required String collectionId,
+        {required MobileSessionLease session,
+        required String collectionId,
         required U8Array32 collectionKey,
         required int ttlMinutes}) =>
     RustLib.instance.api.crateFrbApiMobileCreateInviteCode(
+        session: session,
         collectionId: collectionId,
         collectionKey: collectionKey,
         ttlMinutes: ttlMinutes);
 
 Future<MobileRedeemedInvite> mobileRedeemInviteCode(
-        {required String inviteCode}) =>
-    RustLib.instance.api
-        .crateFrbApiMobileRedeemInviteCode(inviteCode: inviteCode);
+        {required MobileSessionLease session, required String inviteCode}) =>
+    RustLib.instance.api.crateFrbApiMobileRedeemInviteCode(
+        session: session, inviteCode: inviteCode);
 
 Future<void> mobileConfigureSync(
-        {required String cloudBaseUrl,
+        {required MobileSessionLease session,
+        required String cloudBaseUrl,
         required String sqlitePath,
         required String accessToken,
         required U8Array32 sqliteKey,
-        MobileDeviceSecrets? device}) =>
+        MobileDeviceSecrets? device,
+        required String username,
+        required bool freshSession}) =>
     RustLib.instance.api.crateFrbApiMobileConfigureSync(
+        session: session,
         cloudBaseUrl: cloudBaseUrl,
         sqlitePath: sqlitePath,
         accessToken: accessToken,
         sqliteKey: sqliteKey,
-        device: device);
+        device: device,
+        username: username,
+        freshSession: freshSession);
 
-Future<BigInt> mobileSyncNow() =>
-    RustLib.instance.api.crateFrbApiMobileSyncNow();
+Future<BigInt> mobileSyncNow({required MobileSessionLease session}) =>
+    RustLib.instance.api.crateFrbApiMobileSyncNow(session: session);
 
-Future<List<MobilePimItem>> mobileListPimItems() =>
-    RustLib.instance.api.crateFrbApiMobileListPimItems();
+Future<List<MobilePimItem>> mobileListPimItems(
+        {required MobileSessionLease session}) =>
+    RustLib.instance.api.crateFrbApiMobileListPimItems(session: session);
 
-Future<MobilePimItem> mobileUpsertPimItem({required MobilePimDraft draft}) =>
-    RustLib.instance.api.crateFrbApiMobileUpsertPimItem(draft: draft);
+Future<MobilePimItem> mobileUpsertPimItem(
+        {required MobileSessionLease session, required MobilePimDraft draft}) =>
+    RustLib.instance.api
+        .crateFrbApiMobileUpsertPimItem(session: session, draft: draft);
 
 Future<void> mobileDeletePimItem(
-        {required String spaceId,
+        {required MobileSessionLease session,
+        required String spaceId,
         required String resourceId,
         required String projectionId,
         required String headOperationId,
         required String resourceKind}) =>
     RustLib.instance.api.crateFrbApiMobileDeletePimItem(
+        session: session,
         spaceId: spaceId,
         resourceId: resourceId,
         projectionId: projectionId,
@@ -156,16 +188,31 @@ Future<void> mobileDeletePimItem(
         resourceKind: resourceKind);
 
 Future<void> mobileRegisterCollectionKey(
-        {required String collectionId,
+        {required MobileSessionLease session,
+        required String collectionId,
         required int keyEpoch,
         required BigInt syncStartSeq,
         required U8Array32 cmk}) =>
     RustLib.instance.api.crateFrbApiMobileRegisterCollectionKey(
+        session: session,
         collectionId: collectionId,
         keyEpoch: keyEpoch,
         syncStartSeq: syncStartSeq,
         cmk: cmk);
 
-Future<void> mobileUnregisterCollectionKey({required String collectionId}) =>
-    RustLib.instance.api
-        .crateFrbApiMobileUnregisterCollectionKey(collectionId: collectionId);
+Future<void> mobileUnregisterCollectionKey(
+        {required MobileSessionLease session, required String collectionId}) =>
+    RustLib.instance.api.crateFrbApiMobileUnregisterCollectionKey(
+        session: session, collectionId: collectionId);
+
+/// Attach Dart's NativeFinalizer before beginning an async acquisition. Returning
+/// a newly acquired opaque handle asynchronously could orphan it if its target
+/// engine exits before receiving the result.
+MobileSessionLease mobileNewSessionLease() =>
+    RustLib.instance.api.crateFrbApiMobileNewSessionLease();
+
+Future<void> mobileAcquireSessionLease({required MobileSessionLease session}) =>
+    RustLib.instance.api.crateFrbApiMobileAcquireSessionLease(session: session);
+
+// Rust type: RustOpaqueMoi<MobileSessionLease>
+abstract class MobileSessionLease implements RustOpaqueInterface {}

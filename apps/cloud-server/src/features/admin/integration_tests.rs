@@ -8,27 +8,24 @@ use super::repositories::{
     RemoveSecurityKeyResult, RenamePasskeyResult, remove_security_key, rename_passkey,
 };
 
+use crate::platform::test_support::required_test_database_url;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-async fn test_pool() -> Option<PgPool> {
-    let database_url = std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())?;
+async fn test_pool() -> PgPool {
+    let database_url = required_test_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
         .await
         .expect("connect postgres");
     MIGRATOR.run(&pool).await.expect("run migrations");
-    Some(pool)
+    pool
 }
 
 #[tokio::test]
 async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
-    let Some(pool) = test_pool().await else {
-        eprintln!("skipping admin integration test: DATABASE_URL is not set");
-        return;
-    };
+    let pool = test_pool().await;
     let admin_id = Uuid::new_v4();
     let primary_id = Uuid::new_v4();
     let backup_id = Uuid::new_v4();
@@ -45,8 +42,16 @@ async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
     .await
     .expect("insert admin");
     for (key_id, name, credential_id) in [
-        (primary_id, "Primary passkey", vec![2_u8; 32]),
-        (backup_id, "Backup passkey", vec![3_u8; 32]),
+        (
+            primary_id,
+            "Primary passkey",
+            Uuid::new_v4().as_bytes().to_vec(),
+        ),
+        (
+            backup_id,
+            "Backup passkey",
+            Uuid::new_v4().as_bytes().to_vec(),
+        ),
     ] {
         sqlx::query(
             r#"
@@ -106,7 +111,7 @@ async fn passkey_names_are_unique_rename_is_audited_and_last_key_is_retained() {
     )
     .bind(Uuid::new_v4())
     .bind(admin_id)
-    .bind(vec![5_u8; 32])
+    .bind(Uuid::new_v4().as_bytes().to_vec())
     .bind(vec![6_u8])
     .execute(&pool)
     .await;

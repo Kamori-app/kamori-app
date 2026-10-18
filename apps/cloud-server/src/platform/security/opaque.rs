@@ -32,6 +32,8 @@ impl CipherSuite for DefaultOpaqueSuite {
 pub struct OpaqueLoginResult {
     /// Derived session key bytes.
     pub session_key: Vec<u8>,
+    /// Credential generation captured with the password file at login start.
+    pub auth_generation: Option<i64>,
 }
 
 /// Server response and opaque handle for one isolated login exchange.
@@ -137,6 +139,7 @@ impl OpaqueServer {
         username: &str,
         request_bytes: &[u8],
         password_file_bytes: Option<&[u8]>,
+        auth_generation: Option<i64>,
     ) -> Result<OpaqueLoginStart> {
         let request = CredentialRequest::<DefaultOpaqueSuite>::deserialize(request_bytes)
             .map_err(|e| anyhow!("deserialize credential request: {e:?}"))?;
@@ -157,7 +160,8 @@ impl OpaqueServer {
         )
         .map_err(|e| anyhow!("opaque login start failed: {e:?}"))?;
 
-        let state_bytes = start_result.state.serialize().to_vec();
+        let state_bytes =
+            rmp_serde::to_vec(&(start_result.state.serialize().to_vec(), auth_generation))?;
         let flow_id = uuid::Uuid::new_v4();
         let key = login_state_key(username, flow_id);
         self.state_store
@@ -189,6 +193,8 @@ impl OpaqueServer {
             .map_err(map_store_error)?
             .ok_or_else(|| anyhow!("missing login state for user"))?;
 
+        let (state_bytes, auth_generation): (Vec<u8>, Option<i64>) =
+            rmp_serde::from_slice(&state_bytes)?;
         let state = ServerLogin::<DefaultOpaqueSuite>::deserialize(&state_bytes)
             .map_err(|e| anyhow!("deserialize login state: {e:?}"))?;
 
@@ -198,6 +204,7 @@ impl OpaqueServer {
 
         Ok(OpaqueLoginResult {
             session_key: finish_result.session_key.to_vec(),
+            auth_generation,
         })
     }
 
@@ -337,6 +344,7 @@ mod tests {
                 "alice",
                 &credential_request_bytes,
                 Some(&password_file_bytes),
+                Some(0),
             ))
             .expect("server login start");
 

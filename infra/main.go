@@ -101,17 +101,26 @@ type cloudEnvSecrets struct {
 	metricsBearerToken   string
 }
 
-func envLine(name, value string) string {
-	return name + "=" + strconv.Quote(value) + "\n"
+func composeEnvLine(name, value string) string {
+	// Compose interpolates dollar expressions even inside double-quoted dotenv values.
+	// Escape for its dotenv grammar, which is separate from POSIX shell syntax.
+	escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "$", "$$", "\n", "\\n", "\r", "\\r", "\t", "\\t").Replace(value)
+	return name + "=\"" + escaped + "\"\n"
+}
+
+// shellEnvLine renders a literal POSIX assignment, including embedded newlines.
+// Environment values cannot contain NUL; other characters are kept verbatim.
+func shellEnvLine(name, value string) string {
+	return name + "='" + strings.ReplaceAll(value, "'", "'\\''") + "'\n"
 }
 
 func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) string {
 	return "KAMORI_BIND_ADDR=0.0.0.0:8080\n" +
-		envLine("KAMORI_DATABASE_URL", databaseConnectionURL(secrets.databasePassword)) +
+		composeEnvLine("KAMORI_DATABASE_URL", databaseConnectionURL(secrets.databasePassword)) +
 		"KAMORI_DATABASE_MAX_CONNECTIONS=20\n" +
-		envLine("KAMORI_VALKEY_URL", valkeyConnectionURL(secrets.valkeyPassword)) +
+		composeEnvLine("KAMORI_VALKEY_URL", valkeyConnectionURL(secrets.valkeyPassword)) +
 		"KAMORI_VALKEY_KEY_PREFIX=kamori:production:\n" +
-		envLine("KAMORI_JWT_SECRET", secrets.jwtSecret) +
+		composeEnvLine("KAMORI_JWT_SECRET", secrets.jwtSecret) +
 		"KAMORI_JWT_ISSUER=https://api.kamori.app\n" +
 		"KAMORI_JWT_AUDIENCE=kamori-clients\n" +
 		"KAMORI_ACCESS_TOKEN_TTL_SECONDS=300\n" +
@@ -125,8 +134,8 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		"KAMORI_WEBAUTHN_RP_NAME=Kamori\n" +
 		"KAMORI_ADMIN_WEBAUTHN_RP_ORIGIN=https://admin.kamori.app\n" +
 		"KAMORI_ADMIN_WEBAUTHN_RP_NAME=Kamori Admin\n" +
-		envLine("KAMORI_ADMIN_TOTP_KEK", secrets.adminTotpKek) +
-		envLine("KAMORI_AUTH_TOTP_KEK", secrets.authTotpKek) +
+		composeEnvLine("KAMORI_ADMIN_TOTP_KEK", secrets.adminTotpKek) +
+		composeEnvLine("KAMORI_AUTH_TOTP_KEK", secrets.authTotpKek) +
 		"KAMORI_ENABLE_TOTP=true\n" +
 		"KAMORI_CORS_ALLOW_ORIGINS=https://app.kamori.app,tauri://localhost\n" +
 		"KAMORI_WEB_COOKIE_ORIGINS=https://app.kamori.app\n" +
@@ -159,14 +168,14 @@ func renderCloudEnv(secrets cloudEnvSecrets, endpoint, region, bucket string) st
 		"KAMORI_BLOB_DOWNLOAD_BYTES_PER_SECOND=1250000\n" +
 		"KAMORI_GLOBAL_NONESSENTIAL_EGRESS_STOP_BYTES=16000000000000\n" +
 		"KAMORI_GLOBAL_EMERGENCY_EGRESS_BREAKER_BYTES=19000000000000\n" +
-		envLine("KAMORI_OBJECT_STORE_ENDPOINT", "https://"+strings.TrimPrefix(endpoint, "https://")) +
-		envLine("KAMORI_OBJECT_STORE_REGION", region) +
-		envLine("KAMORI_OBJECT_STORE_BUCKET", bucket) +
-		envLine("KAMORI_OBJECT_STORE_ACCESS_KEY_ID", secrets.objectStoreKeyID) +
-		envLine("KAMORI_OBJECT_STORE_SECRET_ACCESS_KEY", secrets.objectStoreSecretKey) +
+		composeEnvLine("KAMORI_OBJECT_STORE_ENDPOINT", "https://"+strings.TrimPrefix(endpoint, "https://")) +
+		composeEnvLine("KAMORI_OBJECT_STORE_REGION", region) +
+		composeEnvLine("KAMORI_OBJECT_STORE_BUCKET", bucket) +
+		composeEnvLine("KAMORI_OBJECT_STORE_ACCESS_KEY_ID", secrets.objectStoreKeyID) +
+		composeEnvLine("KAMORI_OBJECT_STORE_SECRET_ACCESS_KEY", secrets.objectStoreSecretKey) +
 		"KAMORI_OBJECT_STORE_ALLOW_HTTP=false\n" +
 		"KAMORI_OBJECT_STORE_VIRTUAL_HOSTED_STYLE=false\n" +
-		envLine("KAMORI_METRICS_BEARER_TOKEN", secrets.metricsBearerToken) +
+		composeEnvLine("KAMORI_METRICS_BEARER_TOKEN", secrets.metricsBearerToken) +
 		"KAMORI_AUTH_RATE_LIMIT_PER_MINUTE=30\n" +
 		"KAMORI_API_RATE_LIMIT_PER_MINUTE=1200\n" +
 		"KAMORI_TRUSTED_PROXY_CIDRS=172.30.0.2/32,10.42.0.5/32\n" +

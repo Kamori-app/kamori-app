@@ -285,6 +285,40 @@ class PimPostalAddress {
   final String country;
 }
 
+class PimRecurrenceOverride {
+  const PimRecurrenceOverride(
+      {required this.recurrenceId,
+      this.startsAt,
+      this.endsAt,
+      this.title,
+      this.notes,
+      this.location,
+      this.cancelled = false});
+  final PimTemporal recurrenceId;
+  final PimTemporal? startsAt;
+  final PimTemporal? endsAt;
+  final String? title;
+  final String? notes;
+  final String? location;
+  final bool cancelled;
+}
+
+class PimCalendarOccurrence {
+  const PimCalendarOccurrence(
+      {required this.startsAt,
+      required this.endsAt,
+      required this.allDay,
+      this.title,
+      this.notes,
+      this.location});
+  final DateTime startsAt;
+  final DateTime endsAt;
+  final bool allDay;
+  final String? title;
+  final String? notes;
+  final String? location;
+}
+
 class PimItem {
   const PimItem({
     required this.spaceId,
@@ -302,6 +336,10 @@ class PimItem {
     this.priority = 0,
     this.location,
     this.recurrenceRule,
+    this.recurrenceExdates = const [],
+    this.recurrenceRdates = const [],
+    this.recurrenceOverrides = const [],
+    this.recurrenceUnsupported = const [],
     this.reminderMinutes,
     this.categories = const [],
     this.namePrefix = '',
@@ -335,6 +373,10 @@ class PimItem {
   final int priority;
   final String? location;
   final String? recurrenceRule;
+  final List<PimTemporal> recurrenceExdates;
+  final List<PimTemporal> recurrenceRdates;
+  final List<PimRecurrenceOverride> recurrenceOverrides;
+  final List<String> recurrenceUnsupported;
   final int? reminderMinutes;
   final List<String> categories;
   final String namePrefix;
@@ -456,59 +498,128 @@ class PimDraft {
   final bool favorite;
 }
 
-/// Applies iCalendar's exclusive DTEND semantics to a local calendar day.
-bool pimIntervalOccursOnDate(PimItem item, DateTime date) {
-  final start = item.startsAt?.toDateTime();
-  final end = item.endsAt?.toDateTime() ??
-      (item.startsAt?.isAllDay == true
-          ? start?.add(const Duration(days: 1))
-          : start?.add(const Duration(milliseconds: 1)));
-  if (start == null || end == null) return false;
-  final dayStart = DateTime(date.year, date.month, date.day);
-  final dayEnd = dayStart.add(const Duration(days: 1));
-  final recurrence = item.recurrenceRule;
-  if (recurrence == null || recurrence.isEmpty) {
-    return start.isBefore(dayEnd) && end.isAfter(dayStart);
+/// Applies the imported recurrence set while retaining the series for editing.
+bool pimIntervalOccursOnDate(PimItem item, DateTime date) =>
+    pimOccurrencesOnDate(item, date).isNotEmpty;
+
+List<PimCalendarOccurrence> pimOccurrencesOnDate(PimItem item, DateTime date) {
+  if (item.recurrenceUnsupported.isNotEmpty) return [];
+  final temporal = item.startsAt;
+  if (temporal == null || temporal.toDateTime() == null) return [];
+  DateTime? axis(PimTemporal? value) {
+    final instant = value?.toDateTime();
+    if (instant == null) return null;
+    return value!.isAllDay
+        ? DateTime.utc(instant.year, instant.month, instant.day)
+        : DateTime.fromMillisecondsSinceEpoch(instant.millisecondsSinceEpoch,
+            isUtc: true);
   }
 
-  try {
-    final rule = RecurrenceRule.fromString(
-      recurrence.toUpperCase().startsWith('RRULE:')
-          ? recurrence
-          : 'RRULE:$recurrence',
-    );
-    final floatingStart = _floatingTemporal(item.startsAt!);
-    final floatingEnd = item.endsAt == null
-        ? floatingStart.add(item.startsAt!.isAllDay
-            ? const Duration(days: 1)
-            : const Duration(milliseconds: 1))
-        : _floatingTemporal(item.endsAt!);
-    final duration = floatingEnd.difference(floatingStart);
-    final searchStart = DateTime.utc(date.year, date.month, date.day)
-        .subtract(duration)
-        .subtract(const Duration(days: 1));
-    final searchEnd = DateTime.utc(date.year, date.month, date.day + 2);
-    return rule
-        .getInstances(
-      start: floatingStart,
-      after: searchStart,
-      includeAfter: true,
-      before: searchEnd,
-      includeBefore: true,
-    )
-        .any((occurrence) {
-      final occurrenceStart = _recurrenceInstant(item.startsAt!, occurrence);
-      final occurrenceEnd = occurrenceStart.add(duration);
-      return occurrenceStart.isBefore(dayEnd) &&
-          occurrenceEnd.isAfter(dayStart);
-    });
-  } on FormatException {
-    return start.isBefore(dayEnd) && end.isAfter(dayStart);
+  final start = axis(temporal)!;
+  final floatingStart = _floatingTemporal(temporal);
+  // Explicit DTEND defines an exact duration for every instance. Date-only
+  // values use the civil axis; timed values use converted absolute instants.
+  final end = axis(item.endsAt) ??
+      start.add(temporal.isAllDay
+          ? const Duration(days: 1)
+          : const Duration(milliseconds: 1));
+  final duration = end.difference(start);
+  final dayStart = DateTime(date.year, date.month, date.day);
+  final dayEnd = DateTime(date.year, date.month, date.day + 1);
+  final excluded = item.recurrenceExdates
+      .map((value) => axis(value)?.millisecondsSinceEpoch)
+      .toSet();
+  final replaced = item.recurrenceOverrides
+      .map((value) => axis(value.recurrenceId)?.millisecondsSinceEpoch)
+      .toSet();
+  final candidates = <int, DateTime>{start.millisecondsSinceEpoch: start};
+  final recurrence = item.recurrenceRule;
+  if (recurrence != null && recurrence.isNotEmpty) {
+    try {
+      final rule = RecurrenceRule.fromString(
+          recurrence.toUpperCase().startsWith('RRULE:')
+              ? recurrence
+              : 'RRULE:$recurrence');
+      final searchStart = DateTime.utc(date.year, date.month, date.day)
+          .subtract(duration)
+          .subtract(const Duration(days: 1));
+      final searchEnd = DateTime.utc(date.year, date.month, date.day + 2);
+      if (!searchEnd.isBefore(floatingStart)) {
+        for (final floating in rule.getInstances(
+            start: floatingStart,
+            after: searchStart.isBefore(floatingStart)
+                ? floatingStart
+                : searchStart,
+            includeAfter: true,
+            before: searchEnd,
+            includeBefore: true)) {
+          final occurrence = temporal.isAllDay
+              ? floating
+              : _recurrenceInstant(temporal, floating);
+          candidates[occurrence.millisecondsSinceEpoch] = occurrence;
+        }
+      }
+    } on FormatException {
+      // Preserve the original visible anchor for an unsupported rule.
+    }
   }
+  for (final value in item.recurrenceRdates) {
+    final occurrence = axis(value);
+    if (occurrence != null) {
+      candidates[occurrence.millisecondsSinceEpoch] = occurrence;
+    }
+  }
+  final output = <PimCalendarOccurrence>[];
+  void add(DateTime begin, DateTime end, bool allDay,
+      [PimRecurrenceOverride? override]) {
+    final displayedStart =
+        allDay ? DateTime(begin.year, begin.month, begin.day) : begin.toLocal();
+    final displayedEnd =
+        allDay ? DateTime(end.year, end.month, end.day) : end.toLocal();
+    if (displayedStart.isBefore(dayEnd) && displayedEnd.isAfter(dayStart)) {
+      output.add(PimCalendarOccurrence(
+          startsAt: displayedStart,
+          endsAt: displayedEnd,
+          allDay: allDay,
+          title: override?.title,
+          notes: override?.notes,
+          location: override?.location));
+    }
+  }
+
+  for (final entry in candidates.entries) {
+    if (!excluded.contains(entry.key) && !replaced.contains(entry.key)) {
+      // DTSTART is an explicit interval, including its absolute DTEND across
+      // offset changes. Subsequent occurrences use the same exact duration.
+      final end = entry.key == start.millisecondsSinceEpoch
+          ? axis(item.endsAt) ?? entry.value.add(duration)
+          : entry.value.add(duration);
+      add(entry.value, end, temporal.isAllDay);
+    }
+  }
+  final seenOverrides = <int>{};
+  for (final override in item.recurrenceOverrides) {
+    final identity = axis(override.recurrenceId)?.millisecondsSinceEpoch;
+    if (identity == null ||
+        !seenOverrides.add(identity) ||
+        override.cancelled ||
+        excluded.contains(identity)) {
+      continue;
+    }
+    final begin = axis(override.startsAt);
+    if (begin == null) continue;
+    add(begin, axis(override.endsAt) ?? begin.add(duration),
+        override.startsAt!.isAllDay, override);
+  }
+  output.sort((left, right) => left.startsAt.compareTo(right.startsAt));
+  return output;
 }
 
 DateTime _floatingTemporal(PimTemporal value) {
-  final wall = value.toEditorDateTime() ?? value.toDateTime()!;
+  // UTC rules recur in UTC fields; the editor converts them to device time.
+  final wall = value.kind == 'utc'
+      ? value.toDateTime()!
+      : value.toEditorDateTime() ?? value.toDateTime()!;
   return DateTime.utc(
     wall.year,
     wall.month,

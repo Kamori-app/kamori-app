@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { encode } from "@msgpack/msgpack";
 
 import {
@@ -323,4 +324,117 @@ describe("encrypted PIM codecs", () => {
 
     expect(projectionProperty(projection, "calendar_event", "SUMMARY")).toBe("Master");
   });
+});
+
+
+// These fixtures specify UTC calendar days. Isolate their viewer zone rather
+// than changing process.env.TZ for the host suite or concurrent tests.
+const recurringIntervalOccursOnUtcDay = (start, end, rule, day) => {
+  const args = JSON.stringify([start, end, rule, [day.getFullYear(), day.getMonth(), day.getDate()]]);
+  const probe = `
+    import { recurringIntervalOccursOnDay } from ${JSON.stringify(new URL("./pim.ts", import.meta.url).pathname)};
+    const [start, end, rule, day] = ${args};
+    console.log(recurringIntervalOccursOnDay(start, end, rule, new Date(...day)));
+  `;
+  const result = Bun.spawnSync([process.execPath, "--eval", probe], { env: { ...process.env, TZ: "UTC" } });
+  expect(result.exitCode).toBe(0);
+  return JSON.parse(result.stdout.toString());
+};
+
+describe("timed recurrence across zones", () => {
+  const zoned = (input, zone) => ({ type: "record", value: localDateTimeToTemporal(input, zone) });
+  test("weekly Tbilisi 07:00 stays on Friday in a UTC browser", () => {
+    const start = zoned("2026-08-28T07:00", "Asia/Tbilisi");
+    const end = zoned("2026-08-28T07:30", "Asia/Tbilisi");
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 8, 3))).toBe(false);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 8, 4))).toBe(true);
+  });
+  test("negative-offset midnight recurrence uses the actual next-day instant", () => {
+    const start = zoned("2026-08-28T23:45", "America/Los_Angeles");
+    const end = zoned("2026-08-29T00:15", "America/Los_Angeles");
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 8, 4))).toBe(false);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 8, 5))).toBe(true);
+  });
+  test("weekly DST recurrence keeps local wall time when its UTC day changes", () => {
+    const start = zoned("2026-10-23T19:30", "America/New_York");
+    const end = zoned("2026-10-23T19:45", "America/New_York");
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 9, 30))).toBe(true);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 10, 6))).toBe(false);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY", new Date(2026, 10, 7))).toBe(true);
+  });
+});
+
+describe("recurrence browser timezone isolation", () => {
+  for (const browserZone of ["UTC", "Asia/Tbilisi", "America/Los_Angeles"]) {
+    test(`compares zoned occurrences as actual instants under ${browserZone}`, () => {
+      const probe = `
+        import { localDateTimeToTemporal, recurringIntervalOccursOnDay } from ${JSON.stringify(new URL("./pim.ts", import.meta.url).pathname)};
+        const fixtures = [
+          ["2026-08-28T07:00", "2026-08-28T07:30", "Asia/Tbilisi", "2026-09-04T03:00:00Z"],
+          ["2026-08-28T16:00", "2026-08-28T16:30", "America/Los_Angeles", "2026-09-04T23:00:00Z"],
+          ["2026-10-23T19:30", "2026-10-23T19:45", "America/New_York", "2026-11-07T00:30:00Z"],
+          ["2026-08-28T23:30", "2026-08-28T23:45", "Asia/Tbilisi", "2026-09-04T19:30:00Z"],
+          // Browser DST changes after this instant but before the floating anchor.
+          ["2026-10-25T11:30", "2026-10-25T11:45", "Asia/Tbilisi", "2026-11-01T07:30:00Z"],
+        ];
+        console.log(JSON.stringify(fixtures.map(([s, e, zone, instant]) => {
+          const start = { type: "record", value: localDateTimeToTemporal(s, zone) };
+          const end = { type: "record", value: localDateTimeToTemporal(e, zone) };
+          const day = new Date(instant);
+          return [-1, 0, 1].map(offset => recurringIntervalOccursOnDay(start, end, "FREQ=WEEKLY", new Date(day.getFullYear(), day.getMonth(), day.getDate() + offset)));
+        })));
+      `;
+      const result = Bun.spawnSync([process.execPath, "--eval", probe], { env: { ...process.env, TZ: browserZone } });
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout.toString())).toEqual([
+        [false, true, false], [false, true, false],
+        [false, true, false], [false, true, false], [false, true, false],
+      ]);
+    });
+  }
+});
+
+describe("zoned recurrence UTC UNTIL and COUNT", () => {
+  const start = { type: "record", value: { kind: "zoned_datetime", local: "20260828T070000", timezone: "Asia/Tbilisi", utc: "20260828T030000Z" } };
+  const end = { type: "record", value: { kind: "zoned_datetime", local: "20260828T073000", timezone: "Asia/Tbilisi", utc: "20260828T033000Z" } };
+  test("UTC UNTIL includes an occurrence exactly at its instant", () => {
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY;UNTIL=20260904T030000Z", new Date(2026, 8, 4))).toBe(true);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY;UNTIL=20260904T025959Z", new Date(2026, 8, 4))).toBe(false);
+  });
+  test("COUNT and weekday constraints still count the original anchor", () => {
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY;BYDAY=FR;COUNT=2", new Date(2026, 8, 4))).toBe(true);
+    expect(recurringIntervalOccursOnUtcDay(start, end, "FREQ=WEEKLY;BYDAY=FR;COUNT=2", new Date(2026, 8, 11))).toBe(false);
+  });
+  test("positive offset after midnight occurs on the previous UTC day", () => {
+    const s = { type: "record", value: localDateTimeToTemporal("2026-08-28T00:15", "Asia/Tbilisi") };
+    const e = { type: "record", value: localDateTimeToTemporal("2026-08-28T00:45", "Asia/Tbilisi") };
+    expect(recurringIntervalOccursOnUtcDay(s, e, "FREQ=WEEKLY", new Date(2026, 8, 3))).toBe(true);
+    expect(recurringIntervalOccursOnUtcDay(s, e, "FREQ=WEEKLY", new Date(2026, 8, 4))).toBe(false);
+  });
+});
+
+describe("expired zoned recurrence bounded work", () => {
+  for (const [name, end, until, expected] of [
+    ["expired short interval", "20260828T033000Z", "20260828T030000Z", []],
+    ["last interval still overlaps despite old UNTIL", "26000828T033000Z", "20260828T030000Z", ["2026-08-28T03:00:00.000Z"]],
+    ["retains every overlapping instance through inclusive UNTIL", "26000828T033000Z", "20260828T030001Z", ["2026-08-28T03:00:00.000Z", "2026-08-28T03:00:01.000Z"]],
+  ]) {
+    test(name, () => {
+      const probe = `
+        import { calendarOccurrencesOnDay } from ${JSON.stringify(new URL("./pim.ts", import.meta.url).pathname)};
+        const start = { type: "record", value: { kind: "zoned_datetime", local: "20260828T070000", timezone: "Asia/Tbilisi", utc: "20260828T030000Z" } };
+        const end = { type: "record", value: { kind: "utc", utc: ${JSON.stringify(end)} } };
+        const fields = { starts_at: start, ends_at: end, recurrence_rule: { type: "text", value: "FREQ=SECONDLY;UNTIL=${until}" } };
+        console.log(JSON.stringify(calendarOccurrencesOnDay(fields, new Date(2500, 7, 28)).map(value => value.startsAt.toISOString())));
+      `;
+      // Hundreds of years of SECONDLY expansion cannot finish before this generous
+      // process deadline. Correctly bounded work needs only the expired rule's tail.
+      const result = spawnSync(process.execPath, ["--eval", probe], {
+        env: { ...process.env, TZ: "UTC" }, encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(expected);
+    }, 15000);
+  }
 });

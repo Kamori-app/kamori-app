@@ -9,12 +9,12 @@ use crate::{
 
 use super::{
     state::{
-        MOBILE_BRIDGE_RUNTIME, MOBILE_COLLECTION_KEYS, MOBILE_DEVICE_SECRETS,
-        MOBILE_REFRESH_TOKEN, MOBILE_RUNNER, MOBILE_RUNTIME_LEASE, MOBILE_SYNC_STARTS,
+        MOBILE_BRIDGE_RUNTIME, MOBILE_COLLECTION_KEYS, MOBILE_DEVICE_SECRETS, MOBILE_REFRESH_TOKEN,
+        MOBILE_RUNNER, MOBILE_RUNTIME_LEASE, MOBILE_SYNC_STARTS,
     },
     types::{
-        MobileDeviceSecrets, MobileLabeledValue, MobilePimDraft, MobilePimItem,
-        MobilePimTemporal, MobilePostalAddress, MobileSyncConfig,
+        MobileDeviceSecrets, MobileLabeledValue, MobilePimDraft, MobilePimItem, MobilePimTemporal,
+        MobilePostalAddress, MobileRecurrenceOverride, MobileSyncConfig,
     },
 };
 
@@ -22,13 +22,44 @@ pub(super) async fn mobile_runner() -> Result<LocalBridgeRunner, String> {
     if let Some(runner) = MOBILE_RUNNER.lock().await.clone() {
         return Ok(runner);
     }
-    let config = MOBILE_BRIDGE_RUNTIME
+    let mut config = MOBILE_BRIDGE_RUNTIME
         .lock()
         .await
         .last_config
         .clone()
         .ok_or_else(|| "mobile sync has not been configured yet".to_string())?;
-    let refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
+    let mut refresh_token = MOBILE_REFRESH_TOKEN.lock().await.clone();
+    if let Some(imported) = refresh_token.clone() {
+        let store = crate::local_bridge_runner::RefreshCredentialStore::open(
+            config.sqlite_path.clone(),
+            hex::encode(config.sqlite_key),
+            &config.cloud_base_url,
+            &imported,
+            &config.username,
+        )
+        .map_err(|error| format!("Fresh sign-in required: {error}"))?;
+        let imported_id = super::state::mobile_refresh_rotation_request_id(&imported).await?;
+        if let Some((access, refresh)) = store
+            .recover(&imported)
+            .map_err(|error| error.to_string())?
+        {
+            config.access_token = access;
+            refresh_token = Some(refresh);
+        }
+        let current = refresh_token.as_deref().expect("imported credential");
+        // A pending native attempt wins over a stale OS-store request id. A
+        // new generation receives its own id, durably before any request.
+        let fallback = if current == imported {
+            imported_id
+        } else {
+            uuid::Uuid::new_v4()
+        };
+        let request_id = store
+            .begin_with_fallback(current, fallback)
+            .map_err(|error| error.to_string())?;
+        super::state::import_mobile_refresh_credential(current.to_string(), request_id).await;
+        MOBILE_BRIDGE_RUNTIME.lock().await.last_config = Some(config.clone());
+    }
     let mut local_config = LocalBridgeConfig::new(
         config.sqlite_path,
         config.cloud_base_url,
@@ -41,12 +72,11 @@ pub(super) async fn mobile_runner() -> Result<LocalBridgeRunner, String> {
     if let Some(device) = MOBILE_DEVICE_SECRETS.lock().await.clone() {
         let device_id = uuid::Uuid::parse_str(&device.device_id)
             .map_err(|error| format!("invalid persisted mobile device id: {error}"))?;
-        local_config = local_config.with_device_identity(
-            crate::local_bridge_runner::LocalDeviceIdentity {
+        local_config =
+            local_config.with_device_identity(crate::local_bridge_runner::LocalDeviceIdentity {
                 device_id,
                 signing_private_key: device.signing_private_key,
-            },
-        );
+            });
     }
     let runner = LocalBridgeRunner::new(local_config).map_err(|error| error.to_string())?;
     for (collection_id, (key_epoch, cmk)) in MOBILE_COLLECTION_KEYS.lock().await.clone() {
@@ -57,12 +87,7 @@ pub(super) async fn mobile_runner() -> Result<LocalBridgeRunner, String> {
             .copied()
             .unwrap_or(0);
         runner
-            .register_collection_key_epoch_from(
-                collection_id,
-                key_epoch,
-                cmk,
-                sync_start_seq,
-            )
+            .register_collection_key_epoch_from(collection_id, key_epoch, cmk, sync_start_seq)
             .await
             .map_err(|error| error.to_string())?;
     }
@@ -70,11 +95,16 @@ pub(super) async fn mobile_runner() -> Result<LocalBridgeRunner, String> {
     Ok(runner)
 }
 
-async fn persist_runner_refresh_token(runner: &LocalBridgeRunner) {
+async fn persist_runner_refresh_token(runner: &LocalBridgeRunner) -> Result<(), String> {
     if let Some(config) = MOBILE_BRIDGE_RUNTIME.lock().await.last_config.as_mut() {
         config.access_token = runner.current_access_token().await;
     }
-    super::state::set_mobile_refresh_token(runner.current_refresh_token().await).await;
+    let refresh = runner.current_refresh_token().await;
+    super::state::set_mobile_refresh_token(refresh).await;
+    // Reconcile the next attempt into both durable storage and direct FRB globals.
+    MOBILE_RUNNER.lock().await.take();
+    mobile_runner().await?;
+    Ok(())
 }
 
 pub(super) async fn mobile_configure_sync_impl(
@@ -83,6 +113,8 @@ pub(super) async fn mobile_configure_sync_impl(
     access_token: String,
     sqlite_key: [u8; 32],
     device: Option<MobileDeviceSecrets>,
+    username: String,
+    fresh_session: bool,
 ) -> Result<(), String> {
     let _lease = MOBILE_RUNTIME_LEASE.lock().await;
     let cloud_base_url = crate::local_bridge_runner::normalize_cloud_base_url(&cloud_base_url)
@@ -90,11 +122,29 @@ pub(super) async fn mobile_configure_sync_impl(
     if cloud_base_url.trim().is_empty()
         || sqlite_path.trim().is_empty()
         || access_token.trim().is_empty()
+        || username.trim().is_empty()
     {
         return Err("sync configuration fields must not be empty".to_string());
     }
+    if fresh_session {
+        let refresh = MOBILE_REFRESH_TOKEN
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| "fresh sign-in refresh credential is required".to_string())?;
+        crate::local_bridge_runner::RefreshCredentialStore::start_session(
+            sqlite_path.clone(),
+            hex::encode(sqlite_key),
+            &cloud_base_url,
+            &username,
+            &access_token,
+            &refresh,
+        )
+        .map_err(|error| error.to_string())?;
+    }
     let mut runtime = MOBILE_BRIDGE_RUNTIME.lock().await;
     runtime.last_config = Some(MobileSyncConfig {
+        username,
         cloud_base_url,
         sqlite_path,
         access_token,
@@ -115,7 +165,7 @@ pub(super) async fn mobile_sync_now_impl() -> Result<u64, String> {
     }
     let runner = mobile_runner().await?;
     let result = runner.sync_once().await.map_err(|error| error.to_string());
-    persist_runner_refresh_token(&runner).await;
+    persist_runner_refresh_token(&runner).await?;
     result
 }
 
@@ -154,6 +204,10 @@ fn materialize_mobile_item(branch: MaterializedPimBranch) -> Option<MobilePimIte
         priority: pim_integer(&fields, "priority").unwrap_or(0),
         location: pim_text(&fields, "location"),
         recurrence_rule: pim_text(&fields, "recurrence_rule"),
+        recurrence_exdates: pim_temporal_records(&fields, "recurrence_exdates"),
+        recurrence_rdates: pim_temporal_records(&fields, "recurrence_rdates"),
+        recurrence_overrides: pim_recurrence_overrides(&fields),
+        recurrence_unsupported: pim_text_list(&fields, "recurrence_unsupported"),
         reminder_minutes: pim_integer(&fields, "reminder_minutes"),
         categories: pim_text_list(&fields, "categories"),
         name_prefix: pim_record_value(&fields, "name", "prefix"),
@@ -210,16 +264,40 @@ fn pim_record_value(
 }
 
 fn pim_temporal(fields: &BTreeMap<String, PimValue>, name: &str) -> Option<MobilePimTemporal> {
-    let PimValue::Record(record) = fields.get(name)? else {
-        return None;
-    };
+    let PimValue::Record(record) = fields.get(name)? else { return None; };
+    pim_temporal_record(record, "")
+}
+
+fn pim_temporal_record(record: &BTreeMap<String, String>, prefix: &str) -> Option<MobilePimTemporal> {
     Some(MobilePimTemporal {
-        kind: record.get("kind").cloned().unwrap_or_default(),
-        date: record.get("date").cloned(),
-        utc: record.get("utc").cloned(),
-        local: record.get("local").cloned(),
-        timezone: record.get("timezone").cloned(),
+        kind: record.get(&format!("{prefix}kind"))?.clone(),
+        date: record.get(&format!("{prefix}date")).cloned(),
+        utc: record.get(&format!("{prefix}utc")).cloned(),
+        local: record.get(&format!("{prefix}local")).cloned(),
+        timezone: record.get(&format!("{prefix}timezone")).cloned(),
     })
+}
+
+fn pim_temporal_records(fields: &BTreeMap<String, PimValue>, name: &str) -> Vec<MobilePimTemporal> {
+    match fields.get(name) {
+        Some(PimValue::Records(records)) => records.iter().filter_map(|record| pim_temporal_record(record, "")).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn pim_recurrence_overrides(fields: &BTreeMap<String, PimValue>) -> Vec<MobileRecurrenceOverride> {
+    match fields.get("recurrence_overrides") {
+        Some(PimValue::Records(records)) => records.iter().filter_map(|record| Some(MobileRecurrenceOverride {
+            recurrence_id: pim_temporal_record(record, "recurrence_id_")?,
+            starts_at: pim_temporal_record(record, "starts_at_"),
+            ends_at: pim_temporal_record(record, "ends_at_"),
+            title: record.get("title").cloned(),
+            notes: record.get("notes").cloned(),
+            location: record.get("location").cloned(),
+            cancelled: record.get("cancelled").is_some_and(|value| value == "true"),
+        })).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn pim_labeled_values(
@@ -514,7 +592,7 @@ pub(super) async fn mobile_upsert_pim_item_impl(
             .await,
         _ => unreachable!("paired branch fields were validated"),
     };
-    persist_runner_refresh_token(&runner).await;
+    persist_runner_refresh_token(&runner).await?;
     let head_operation_id = result.map_err(|error| error.to_string())?;
     runner
         .list_materialized_pim_branches(space_id)
@@ -551,7 +629,7 @@ pub(super) async fn mobile_delete_pim_item_impl(
             kind,
         )
         .await;
-    persist_runner_refresh_token(&runner).await;
+    persist_runner_refresh_token(&runner).await?;
     result.map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -596,3 +674,7 @@ pub(super) async fn mobile_unregister_collection_key_impl(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "bridge_corpus_tests.rs"]
+mod corpus_tests;

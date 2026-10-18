@@ -71,7 +71,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -623992990;
+  int get rustContentHash => 1231785373;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -107,52 +107,70 @@ abstract class RustLibApi extends BaseApi {
 
   Future<Keypair> crateFrbApiGenerateX25519Keypair();
 
-  Future<void> crateFrbApiMobileClearRefreshToken();
+  Future<void> crateFrbApiMobileAcquireSessionLease(
+      {required MobileSessionLease session});
+
+  Future<void> crateFrbApiMobileClearRefreshToken(
+      {required MobileSessionLease session});
 
   Future<void> crateFrbApiMobileConfigureSync(
-      {required String cloudBaseUrl,
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
       required String sqlitePath,
       required String accessToken,
       required U8Array32 sqliteKey,
-      MobileDeviceSecrets? device});
+      MobileDeviceSecrets? device,
+      required String username,
+      required bool freshSession});
 
   Future<MobileCollection> crateFrbApiMobileCreateCollection(
-      {required String name});
+      {required MobileSessionLease session, required String name});
 
   Future<MobileIssuedInviteCode> crateFrbApiMobileCreateInviteCode(
-      {required String collectionId,
+      {required MobileSessionLease session,
+      required String collectionId,
       required U8Array32 collectionKey,
       required int ttlMinutes});
 
   Future<void> crateFrbApiMobileDeletePimItem(
-      {required String spaceId,
+      {required MobileSessionLease session,
+      required String spaceId,
       required String resourceId,
       required String projectionId,
       required String headOperationId,
       required String resourceKind});
 
-  Future<String?> crateFrbApiMobileExportRefreshRotationRequestId();
+  Future<String?> crateFrbApiMobileExportRefreshRotationRequestId(
+      {required MobileSessionLease session});
 
-  Future<String?> crateFrbApiMobileExportRefreshToken();
+  Future<String?> crateFrbApiMobileExportRefreshToken(
+      {required MobileSessionLease session});
 
   Future<MobileDeviceSecrets> crateFrbApiMobileGenerateDeviceSecrets();
 
   Future<void> crateFrbApiMobileImportRefreshToken(
-      {required String refreshToken, required String rotationRequestId});
+      {required MobileSessionLease session,
+      required String refreshToken,
+      required String rotationRequestId});
 
-  Future<List<MobilePimItem>> crateFrbApiMobileListPimItems();
+  Future<List<MobilePimItem>> crateFrbApiMobileListPimItems(
+      {required MobileSessionLease session});
 
   Future<void> crateFrbApiMobileMoveCollectionToTrash(
-      {required String collectionId});
+      {required MobileSessionLease session, required String collectionId});
+
+  MobileSessionLease crateFrbApiMobileNewSessionLease();
 
   Future<MobileLoginResult> crateFrbApiMobilePasswordLogin(
-      {required String cloudBaseUrl,
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
       required String username,
       required String password,
       String? totpCode});
 
   Future<MobileProvisionResult> crateFrbApiMobileProvisionDeviceAndSpaces(
-      {required String cloudBaseUrl,
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
       required String accessToken,
       required U8Array32 accountMasterKey,
       required String platform,
@@ -160,26 +178,39 @@ abstract class RustLibApi extends BaseApi {
       MobileDeviceSecrets? existingDevice});
 
   Future<MobileRedeemedInvite> crateFrbApiMobileRedeemInviteCode(
-      {required String inviteCode});
+      {required MobileSessionLease session, required String inviteCode});
 
   Future<void> crateFrbApiMobileRegisterCollectionKey(
-      {required String collectionId,
+      {required MobileSessionLease session,
+      required String collectionId,
       required int keyEpoch,
       required BigInt syncStartSeq,
       required U8Array32 cmk});
 
   Future<bool> crateFrbApiMobileRevokeRefreshSession(
-      {required String cloudBaseUrl, required String refreshToken});
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
+      required String refreshToken});
 
-  Future<BigInt> crateFrbApiMobileSyncNow();
+  Future<BigInt> crateFrbApiMobileSyncNow(
+      {required MobileSessionLease session});
 
   Future<MobileSyncRuntime> crateFrbApiTypesMobileSyncRuntimeDefault();
 
   Future<void> crateFrbApiMobileUnregisterCollectionKey(
-      {required String collectionId});
+      {required MobileSessionLease session, required String collectionId});
 
   Future<MobilePimItem> crateFrbApiMobileUpsertPimItem(
-      {required MobilePimDraft draft});
+      {required MobileSessionLease session, required MobilePimDraft draft});
+
+  RustArcIncrementStrongCountFnType
+      get rust_arc_increment_strong_count_MobileSessionLease;
+
+  RustArcDecrementStrongCountFnType
+      get rust_arc_decrement_strong_count_MobileSessionLease;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_MobileSessionLeasePtr;
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -358,10 +389,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateFrbApiMobileClearRefreshToken() {
+  Future<void> crateFrbApiMobileAcquireSessionLease(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 7, port: port_);
       },
@@ -369,33 +402,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateFrbApiMobileClearRefreshTokenConstMeta,
-      argValues: [],
+      constMeta: kCrateFrbApiMobileAcquireSessionLeaseConstMeta,
+      argValues: [session],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateFrbApiMobileClearRefreshTokenConstMeta =>
+  TaskConstMeta get kCrateFrbApiMobileAcquireSessionLeaseConstMeta =>
       const TaskConstMeta(
-        debugName: "mobile_clear_refresh_token",
-        argNames: [],
+        debugName: "mobile_acquire_session_lease",
+        argNames: ["session"],
       );
 
   @override
-  Future<void> crateFrbApiMobileConfigureSync(
-      {required String cloudBaseUrl,
-      required String sqlitePath,
-      required String accessToken,
-      required U8Array32 sqliteKey,
-      MobileDeviceSecrets? device}) {
+  Future<void> crateFrbApiMobileClearRefreshToken(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(cloudBaseUrl, serializer);
-        sse_encode_String(sqlitePath, serializer);
-        sse_encode_String(accessToken, serializer);
-        sse_encode_u_8_array_32(sqliteKey, serializer);
-        sse_encode_opt_box_autoadd_mobile_device_secrets(device, serializer);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 8, port: port_);
       },
@@ -403,8 +428,57 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
+      constMeta: kCrateFrbApiMobileClearRefreshTokenConstMeta,
+      argValues: [session],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFrbApiMobileClearRefreshTokenConstMeta =>
+      const TaskConstMeta(
+        debugName: "mobile_clear_refresh_token",
+        argNames: ["session"],
+      );
+
+  @override
+  Future<void> crateFrbApiMobileConfigureSync(
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
+      required String sqlitePath,
+      required String accessToken,
+      required U8Array32 sqliteKey,
+      MobileDeviceSecrets? device,
+      required String username,
+      required bool freshSession}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
+        sse_encode_String(cloudBaseUrl, serializer);
+        sse_encode_String(sqlitePath, serializer);
+        sse_encode_String(accessToken, serializer);
+        sse_encode_u_8_array_32(sqliteKey, serializer);
+        sse_encode_opt_box_autoadd_mobile_device_secrets(device, serializer);
+        sse_encode_String(username, serializer);
+        sse_encode_bool(freshSession, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 9, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
       constMeta: kCrateFrbApiMobileConfigureSyncConstMeta,
-      argValues: [cloudBaseUrl, sqlitePath, accessToken, sqliteKey, device],
+      argValues: [
+        session,
+        cloudBaseUrl,
+        sqlitePath,
+        accessToken,
+        sqliteKey,
+        device,
+        username,
+        freshSession
+      ],
       apiImpl: this,
     ));
   }
@@ -413,30 +487,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "mobile_configure_sync",
         argNames: [
+          "session",
           "cloudBaseUrl",
           "sqlitePath",
           "accessToken",
           "sqliteKey",
-          "device"
+          "device",
+          "username",
+          "freshSession"
         ],
       );
 
   @override
   Future<MobileCollection> crateFrbApiMobileCreateCollection(
-      {required String name}) {
+      {required MobileSessionLease session, required String name}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 9, port: port_);
+            funcId: 10, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_collection,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileCreateCollectionConstMeta,
-      argValues: [name],
+      argValues: [session, name],
       apiImpl: this,
     ));
   }
@@ -444,29 +522,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileCreateCollectionConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_create_collection",
-        argNames: ["name"],
+        argNames: ["session", "name"],
       );
 
   @override
   Future<MobileIssuedInviteCode> crateFrbApiMobileCreateInviteCode(
-      {required String collectionId,
+      {required MobileSessionLease session,
+      required String collectionId,
       required U8Array32 collectionKey,
       required int ttlMinutes}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(collectionId, serializer);
         sse_encode_u_8_array_32(collectionKey, serializer);
         sse_encode_u_32(ttlMinutes, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 10, port: port_);
+            funcId: 11, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_issued_invite_code,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileCreateInviteCodeConstMeta,
-      argValues: [collectionId, collectionKey, ttlMinutes],
+      argValues: [session, collectionId, collectionKey, ttlMinutes],
       apiImpl: this,
     ));
   }
@@ -474,12 +554,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileCreateInviteCodeConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_create_invite_code",
-        argNames: ["collectionId", "collectionKey", "ttlMinutes"],
+        argNames: ["session", "collectionId", "collectionKey", "ttlMinutes"],
       );
 
   @override
   Future<void> crateFrbApiMobileDeletePimItem(
-      {required String spaceId,
+      {required MobileSessionLease session,
+      required String spaceId,
       required String resourceId,
       required String projectionId,
       required String headOperationId,
@@ -487,13 +568,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(spaceId, serializer);
         sse_encode_String(resourceId, serializer);
         sse_encode_String(projectionId, serializer);
         sse_encode_String(headOperationId, serializer);
         sse_encode_String(resourceKind, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 11, port: port_);
+            funcId: 12, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -501,6 +583,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ),
       constMeta: kCrateFrbApiMobileDeletePimItemConstMeta,
       argValues: [
+        session,
         spaceId,
         resourceId,
         projectionId,
@@ -515,6 +598,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "mobile_delete_pim_item",
         argNames: [
+          "session",
           "spaceId",
           "resourceId",
           "projectionId",
@@ -524,19 +608,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String?> crateFrbApiMobileExportRefreshRotationRequestId() {
+  Future<String?> crateFrbApiMobileExportRefreshRotationRequestId(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
+            funcId: 13, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
-        decodeErrorData: null,
+        decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileExportRefreshRotationRequestIdConstMeta,
-      argValues: [],
+      argValues: [session],
       apiImpl: this,
     ));
   }
@@ -544,23 +630,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileExportRefreshRotationRequestIdConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_export_refresh_rotation_request_id",
-        argNames: [],
+        argNames: ["session"],
       );
 
   @override
-  Future<String?> crateFrbApiMobileExportRefreshToken() {
+  Future<String?> crateFrbApiMobileExportRefreshToken(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 13, port: port_);
+            funcId: 14, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
-        decodeErrorData: null,
+        decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileExportRefreshTokenConstMeta,
-      argValues: [],
+      argValues: [session],
       apiImpl: this,
     ));
   }
@@ -568,7 +656,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileExportRefreshTokenConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_export_refresh_token",
-        argNames: [],
+        argNames: ["session"],
       );
 
   @override
@@ -577,7 +665,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 14, port: port_);
+            funcId: 15, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_device_secrets,
@@ -597,21 +685,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateFrbApiMobileImportRefreshToken(
-      {required String refreshToken, required String rotationRequestId}) {
+      {required MobileSessionLease session,
+      required String refreshToken,
+      required String rotationRequestId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(refreshToken, serializer);
         sse_encode_String(rotationRequestId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 15, port: port_);
+            funcId: 16, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileImportRefreshTokenConstMeta,
-      argValues: [refreshToken, rotationRequestId],
+      argValues: [session, refreshToken, rotationRequestId],
       apiImpl: this,
     ));
   }
@@ -619,23 +710,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileImportRefreshTokenConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_import_refresh_token",
-        argNames: ["refreshToken", "rotationRequestId"],
+        argNames: ["session", "refreshToken", "rotationRequestId"],
       );
 
   @override
-  Future<List<MobilePimItem>> crateFrbApiMobileListPimItems() {
+  Future<List<MobilePimItem>> crateFrbApiMobileListPimItems(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 16, port: port_);
+            funcId: 17, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_mobile_pim_item,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileListPimItemsConstMeta,
-      argValues: [],
+      argValues: [session],
       apiImpl: this,
     ));
   }
@@ -643,25 +736,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileListPimItemsConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_list_pim_items",
-        argNames: [],
+        argNames: ["session"],
       );
 
   @override
   Future<void> crateFrbApiMobileMoveCollectionToTrash(
-      {required String collectionId}) {
+      {required MobileSessionLease session, required String collectionId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(collectionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 17, port: port_);
+            funcId: 18, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileMoveCollectionToTrashConstMeta,
-      argValues: [collectionId],
+      argValues: [session, collectionId],
       apiImpl: this,
     ));
   }
@@ -669,31 +763,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileMoveCollectionToTrashConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_move_collection_to_trash",
-        argNames: ["collectionId"],
+        argNames: ["session", "collectionId"],
+      );
+
+  @override
+  MobileSessionLease crateFrbApiMobileNewSessionLease() {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_RustOpaque_MobileSessionLease,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateFrbApiMobileNewSessionLeaseConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFrbApiMobileNewSessionLeaseConstMeta =>
+      const TaskConstMeta(
+        debugName: "mobile_new_session_lease",
+        argNames: [],
       );
 
   @override
   Future<MobileLoginResult> crateFrbApiMobilePasswordLogin(
-      {required String cloudBaseUrl,
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
       required String username,
       required String password,
       String? totpCode}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(cloudBaseUrl, serializer);
         sse_encode_String(username, serializer);
         sse_encode_String(password, serializer);
         sse_encode_opt_String(totpCode, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 18, port: port_);
+            funcId: 20, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_login_result,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobilePasswordLoginConstMeta,
-      argValues: [cloudBaseUrl, username, password, totpCode],
+      argValues: [session, cloudBaseUrl, username, password, totpCode],
       apiImpl: this,
     ));
   }
@@ -701,12 +820,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobilePasswordLoginConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_password_login",
-        argNames: ["cloudBaseUrl", "username", "password", "totpCode"],
+        argNames: [
+          "session",
+          "cloudBaseUrl",
+          "username",
+          "password",
+          "totpCode"
+        ],
       );
 
   @override
   Future<MobileProvisionResult> crateFrbApiMobileProvisionDeviceAndSpaces(
-      {required String cloudBaseUrl,
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
       required String accessToken,
       required U8Array32 accountMasterKey,
       required String platform,
@@ -715,6 +841,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(cloudBaseUrl, serializer);
         sse_encode_String(accessToken, serializer);
         sse_encode_u_8_array_32(accountMasterKey, serializer);
@@ -723,7 +850,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_box_autoadd_mobile_device_secrets(
             existingDevice, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 19, port: port_);
+            funcId: 21, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_provision_result,
@@ -731,6 +858,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ),
       constMeta: kCrateFrbApiMobileProvisionDeviceAndSpacesConstMeta,
       argValues: [
+        session,
         cloudBaseUrl,
         accessToken,
         accountMasterKey,
@@ -746,6 +874,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "mobile_provision_device_and_spaces",
         argNames: [
+          "session",
           "cloudBaseUrl",
           "accessToken",
           "accountMasterKey",
@@ -757,20 +886,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<MobileRedeemedInvite> crateFrbApiMobileRedeemInviteCode(
-      {required String inviteCode}) {
+      {required MobileSessionLease session, required String inviteCode}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(inviteCode, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
+            funcId: 22, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_redeemed_invite,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileRedeemInviteCodeConstMeta,
-      argValues: [inviteCode],
+      argValues: [session, inviteCode],
       apiImpl: this,
     ));
   }
@@ -778,31 +908,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileRedeemInviteCodeConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_redeem_invite_code",
-        argNames: ["inviteCode"],
+        argNames: ["session", "inviteCode"],
       );
 
   @override
   Future<void> crateFrbApiMobileRegisterCollectionKey(
-      {required String collectionId,
+      {required MobileSessionLease session,
+      required String collectionId,
       required int keyEpoch,
       required BigInt syncStartSeq,
       required U8Array32 cmk}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(collectionId, serializer);
         sse_encode_u_32(keyEpoch, serializer);
         sse_encode_u_64(syncStartSeq, serializer);
         sse_encode_u_8_array_32(cmk, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 21, port: port_);
+            funcId: 23, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileRegisterCollectionKeyConstMeta,
-      argValues: [collectionId, keyEpoch, syncStartSeq, cmk],
+      argValues: [session, collectionId, keyEpoch, syncStartSeq, cmk],
       apiImpl: this,
     ));
   }
@@ -810,26 +942,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileRegisterCollectionKeyConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_register_collection_key",
-        argNames: ["collectionId", "keyEpoch", "syncStartSeq", "cmk"],
+        argNames: [
+          "session",
+          "collectionId",
+          "keyEpoch",
+          "syncStartSeq",
+          "cmk"
+        ],
       );
 
   @override
   Future<bool> crateFrbApiMobileRevokeRefreshSession(
-      {required String cloudBaseUrl, required String refreshToken}) {
+      {required MobileSessionLease session,
+      required String cloudBaseUrl,
+      required String refreshToken}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(cloudBaseUrl, serializer);
         sse_encode_String(refreshToken, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 22, port: port_);
+            funcId: 24, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileRevokeRefreshSessionConstMeta,
-      argValues: [cloudBaseUrl, refreshToken],
+      argValues: [session, cloudBaseUrl, refreshToken],
       apiImpl: this,
     ));
   }
@@ -837,30 +978,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileRevokeRefreshSessionConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_revoke_refresh_session",
-        argNames: ["cloudBaseUrl", "refreshToken"],
+        argNames: ["session", "cloudBaseUrl", "refreshToken"],
       );
 
   @override
-  Future<BigInt> crateFrbApiMobileSyncNow() {
+  Future<BigInt> crateFrbApiMobileSyncNow(
+      {required MobileSessionLease session}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 23, port: port_);
+            funcId: 25, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_u_64,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileSyncNowConstMeta,
-      argValues: [],
+      argValues: [session],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateFrbApiMobileSyncNowConstMeta => const TaskConstMeta(
         debugName: "mobile_sync_now",
-        argNames: [],
+        argNames: ["session"],
       );
 
   @override
@@ -869,7 +1012,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 24, port: port_);
+            funcId: 26, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_sync_runtime,
@@ -889,20 +1032,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateFrbApiMobileUnregisterCollectionKey(
-      {required String collectionId}) {
+      {required MobileSessionLease session, required String collectionId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_String(collectionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 25, port: port_);
+            funcId: 27, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileUnregisterCollectionKeyConstMeta,
-      argValues: [collectionId],
+      argValues: [session, collectionId],
       apiImpl: this,
     ));
   }
@@ -910,25 +1054,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileUnregisterCollectionKeyConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_unregister_collection_key",
-        argNames: ["collectionId"],
+        argNames: ["session", "collectionId"],
       );
 
   @override
   Future<MobilePimItem> crateFrbApiMobileUpsertPimItem(
-      {required MobilePimDraft draft}) {
+      {required MobileSessionLease session, required MobilePimDraft draft}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_RustOpaque_MobileSessionLease(session, serializer);
         sse_encode_box_autoadd_mobile_pim_draft(draft, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 26, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_mobile_pim_item,
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateFrbApiMobileUpsertPimItemConstMeta,
-      argValues: [draft],
+      argValues: [session, draft],
       apiImpl: this,
     ));
   }
@@ -936,8 +1081,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFrbApiMobileUpsertPimItemConstMeta =>
       const TaskConstMeta(
         debugName: "mobile_upsert_pim_item",
-        argNames: ["draft"],
+        argNames: ["session", "draft"],
       );
+
+  RustArcIncrementStrongCountFnType
+      get rust_arc_increment_strong_count_MobileSessionLease =>
+          wire.rust_arc_increment_strong_count_RustOpaque_MobileSessionLease;
+
+  RustArcDecrementStrongCountFnType
+      get rust_arc_decrement_strong_count_MobileSessionLease =>
+          wire.rust_arc_decrement_strong_count_RustOpaque_MobileSessionLease;
+
+  @protected
+  MobileSessionLease dco_decode_RustOpaque_MobileSessionLease(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return MobileSessionLeaseImpl.frbInternalDcoDecode(raw as List<dynamic>);
+  }
 
   @protected
   String dco_decode_String(dynamic raw) {
@@ -1075,10 +1234,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MobilePimTemporal> dco_decode_list_mobile_pim_temporal(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_mobile_pim_temporal).toList();
+  }
+
+  @protected
   List<MobilePostalAddress> dco_decode_list_mobile_postal_address(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
         .map(dco_decode_mobile_postal_address)
+        .toList();
+  }
+
+  @protected
+  List<MobileRecurrenceOverride> dco_decode_list_mobile_recurrence_override(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_mobile_recurrence_override)
         .toList();
   }
 
@@ -1213,8 +1387,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MobilePimItem dco_decode_mobile_pim_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 31)
-      throw Exception('unexpected arr length: expect 31 but see ${arr.length}');
+    if (arr.length != 35)
+      throw Exception('unexpected arr length: expect 35 but see ${arr.length}');
     return MobilePimItem(
       spaceId: dco_decode_String(arr[0]),
       resourceId: dco_decode_String(arr[1]),
@@ -1231,22 +1405,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       priority: dco_decode_i_64(arr[12]),
       location: dco_decode_opt_String(arr[13]),
       recurrenceRule: dco_decode_opt_String(arr[14]),
-      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[15]),
-      categories: dco_decode_list_String(arr[16]),
-      namePrefix: dco_decode_String(arr[17]),
-      givenName: dco_decode_String(arr[18]),
-      middleName: dco_decode_String(arr[19]),
-      familyName: dco_decode_String(arr[20]),
-      nameSuffix: dco_decode_String(arr[21]),
-      emails: dco_decode_list_mobile_labeled_value(arr[22]),
-      phones: dco_decode_list_mobile_labeled_value(arr[23]),
-      addresses: dco_decode_list_mobile_postal_address(arr[24]),
-      organization: dco_decode_opt_String(arr[25]),
-      jobTitle: dco_decode_opt_String(arr[26]),
-      birthday: dco_decode_opt_String(arr[27]),
-      url: dco_decode_opt_String(arr[28]),
-      favorite: dco_decode_bool(arr[29]),
-      conflict: dco_decode_bool(arr[30]),
+      recurrenceExdates: dco_decode_list_mobile_pim_temporal(arr[15]),
+      recurrenceRdates: dco_decode_list_mobile_pim_temporal(arr[16]),
+      recurrenceOverrides: dco_decode_list_mobile_recurrence_override(arr[17]),
+      recurrenceUnsupported: dco_decode_list_String(arr[18]),
+      reminderMinutes: dco_decode_opt_box_autoadd_i_64(arr[19]),
+      categories: dco_decode_list_String(arr[20]),
+      namePrefix: dco_decode_String(arr[21]),
+      givenName: dco_decode_String(arr[22]),
+      middleName: dco_decode_String(arr[23]),
+      familyName: dco_decode_String(arr[24]),
+      nameSuffix: dco_decode_String(arr[25]),
+      emails: dco_decode_list_mobile_labeled_value(arr[26]),
+      phones: dco_decode_list_mobile_labeled_value(arr[27]),
+      addresses: dco_decode_list_mobile_postal_address(arr[28]),
+      organization: dco_decode_opt_String(arr[29]),
+      jobTitle: dco_decode_opt_String(arr[30]),
+      birthday: dco_decode_opt_String(arr[31]),
+      url: dco_decode_opt_String(arr[32]),
+      favorite: dco_decode_bool(arr[33]),
+      conflict: dco_decode_bool(arr[34]),
     );
   }
 
@@ -1298,6 +1476,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobileRecurrenceOverride dco_decode_mobile_recurrence_override(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return MobileRecurrenceOverride(
+      recurrenceId: dco_decode_mobile_pim_temporal(arr[0]),
+      startsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[1]),
+      endsAt: dco_decode_opt_box_autoadd_mobile_pim_temporal(arr[2]),
+      title: dco_decode_opt_String(arr[3]),
+      notes: dco_decode_opt_String(arr[4]),
+      location: dco_decode_opt_String(arr[5]),
+      cancelled: dco_decode_bool(arr[6]),
+    );
+  }
+
+  @protected
   MobileRedeemedInvite dco_decode_mobile_redeemed_invite(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1317,13 +1512,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MobileSyncConfig dco_decode_mobile_sync_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return MobileSyncConfig(
-      cloudBaseUrl: dco_decode_String(arr[0]),
-      sqlitePath: dco_decode_String(arr[1]),
-      accessToken: dco_decode_String(arr[2]),
-      sqliteKey: dco_decode_u_8_array_32(arr[3]),
+      username: dco_decode_String(arr[0]),
+      cloudBaseUrl: dco_decode_String(arr[1]),
+      sqlitePath: dco_decode_String(arr[2]),
+      accessToken: dco_decode_String(arr[3]),
+      sqliteKey: dco_decode_u_8_array_32(arr[4]),
     );
   }
 
@@ -1406,6 +1602,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void dco_decode_unit(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return;
+  }
+
+  @protected
+  BigInt dco_decode_usize(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
+  }
+
+  @protected
+  MobileSessionLease sse_decode_RustOpaque_MobileSessionLease(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return MobileSessionLeaseImpl.frbInternalSseDecode(
+        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
   }
 
   @protected
@@ -1571,6 +1781,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MobilePimTemporal> sse_decode_list_mobile_pim_temporal(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobilePimTemporal>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_pim_temporal(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<MobilePostalAddress> sse_decode_list_mobile_postal_address(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1579,6 +1802,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <MobilePostalAddress>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_mobile_postal_address(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<MobileRecurrenceOverride> sse_decode_list_mobile_recurrence_override(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MobileRecurrenceOverride>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mobile_recurrence_override(deserializer));
     }
     return ans_;
   }
@@ -1769,6 +2005,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_priority = sse_decode_i_64(deserializer);
     var var_location = sse_decode_opt_String(deserializer);
     var var_recurrenceRule = sse_decode_opt_String(deserializer);
+    var var_recurrenceExdates =
+        sse_decode_list_mobile_pim_temporal(deserializer);
+    var var_recurrenceRdates =
+        sse_decode_list_mobile_pim_temporal(deserializer);
+    var var_recurrenceOverrides =
+        sse_decode_list_mobile_recurrence_override(deserializer);
+    var var_recurrenceUnsupported = sse_decode_list_String(deserializer);
     var var_reminderMinutes = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_categories = sse_decode_list_String(deserializer);
     var var_namePrefix = sse_decode_String(deserializer);
@@ -1801,6 +2044,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         priority: var_priority,
         location: var_location,
         recurrenceRule: var_recurrenceRule,
+        recurrenceExdates: var_recurrenceExdates,
+        recurrenceRdates: var_recurrenceRdates,
+        recurrenceOverrides: var_recurrenceOverrides,
+        recurrenceUnsupported: var_recurrenceUnsupported,
         reminderMinutes: var_reminderMinutes,
         categories: var_categories,
         namePrefix: var_namePrefix,
@@ -1875,6 +2122,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MobileRecurrenceOverride sse_decode_mobile_recurrence_override(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_recurrenceId = sse_decode_mobile_pim_temporal(deserializer);
+    var var_startsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_endsAt =
+        sse_decode_opt_box_autoadd_mobile_pim_temporal(deserializer);
+    var var_title = sse_decode_opt_String(deserializer);
+    var var_notes = sse_decode_opt_String(deserializer);
+    var var_location = sse_decode_opt_String(deserializer);
+    var var_cancelled = sse_decode_bool(deserializer);
+    return MobileRecurrenceOverride(
+        recurrenceId: var_recurrenceId,
+        startsAt: var_startsAt,
+        endsAt: var_endsAt,
+        title: var_title,
+        notes: var_notes,
+        location: var_location,
+        cancelled: var_cancelled);
+  }
+
+  @protected
   MobileRedeemedInvite sse_decode_mobile_redeemed_invite(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1896,11 +2166,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   MobileSyncConfig sse_decode_mobile_sync_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_username = sse_decode_String(deserializer);
     var var_cloudBaseUrl = sse_decode_String(deserializer);
     var var_sqlitePath = sse_decode_String(deserializer);
     var var_accessToken = sse_decode_String(deserializer);
     var var_sqliteKey = sse_decode_u_8_array_32(deserializer);
     return MobileSyncConfig(
+        username: var_username,
         cloudBaseUrl: var_cloudBaseUrl,
         sqlitePath: var_sqlitePath,
         accessToken: var_accessToken,
@@ -2013,6 +2285,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_decode_unit(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+  }
+
+  @protected
+  BigInt sse_decode_usize(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
+  }
+
+  @protected
+  void sse_encode_RustOpaque_MobileSessionLease(
+      MobileSessionLease self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+        (self as MobileSessionLeaseImpl).frbInternalSseEncode(move: null),
+        serializer);
   }
 
   @protected
@@ -2160,12 +2447,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_mobile_pim_temporal(
+      List<MobilePimTemporal> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_pim_temporal(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_mobile_postal_address(
       List<MobilePostalAddress> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_mobile_postal_address(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_mobile_recurrence_override(
+      List<MobileRecurrenceOverride> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mobile_recurrence_override(item, serializer);
     }
   }
 
@@ -2296,6 +2603,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.priority, serializer);
     sse_encode_opt_String(self.location, serializer);
     sse_encode_opt_String(self.recurrenceRule, serializer);
+    sse_encode_list_mobile_pim_temporal(self.recurrenceExdates, serializer);
+    sse_encode_list_mobile_pim_temporal(self.recurrenceRdates, serializer);
+    sse_encode_list_mobile_recurrence_override(
+        self.recurrenceOverrides, serializer);
+    sse_encode_list_String(self.recurrenceUnsupported, serializer);
     sse_encode_opt_box_autoadd_i_64(self.reminderMinutes, serializer);
     sse_encode_list_String(self.categories, serializer);
     sse_encode_String(self.namePrefix, serializer);
@@ -2350,6 +2662,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_mobile_recurrence_override(
+      MobileRecurrenceOverride self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_mobile_pim_temporal(self.recurrenceId, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.startsAt, serializer);
+    sse_encode_opt_box_autoadd_mobile_pim_temporal(self.endsAt, serializer);
+    sse_encode_opt_String(self.title, serializer);
+    sse_encode_opt_String(self.notes, serializer);
+    sse_encode_opt_String(self.location, serializer);
+    sse_encode_bool(self.cancelled, serializer);
+  }
+
+  @protected
   void sse_encode_mobile_redeemed_invite(
       MobileRedeemedInvite self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -2365,6 +2690,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_mobile_sync_config(
       MobileSyncConfig self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.username, serializer);
     sse_encode_String(self.cloudBaseUrl, serializer);
     sse_encode_String(self.sqlitePath, serializer);
     sse_encode_String(self.accessToken, serializer);
@@ -2470,4 +2796,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
   }
+
+  @protected
+  void sse_encode_usize(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
+  }
+}
+
+@sealed
+class MobileSessionLeaseImpl extends RustOpaque implements MobileSessionLease {
+  // Not to be used by end users
+  MobileSessionLeaseImpl.frbInternalDcoDecode(List<dynamic> wire)
+      : super.frbInternalDcoDecode(wire, _kStaticData);
+
+  // Not to be used by end users
+  MobileSessionLeaseImpl.frbInternalSseDecode(
+      BigInt ptr, int externalSizeOnNative)
+      : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
+
+  static final _kStaticData = RustArcStaticData(
+    rustArcIncrementStrongCount:
+        RustLib.instance.api.rust_arc_increment_strong_count_MobileSessionLease,
+    rustArcDecrementStrongCount:
+        RustLib.instance.api.rust_arc_decrement_strong_count_MobileSessionLease,
+    rustArcDecrementStrongCountPtr: RustLib
+        .instance.api.rust_arc_decrement_strong_count_MobileSessionLeasePtr,
+  );
 }

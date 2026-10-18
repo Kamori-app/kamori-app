@@ -64,42 +64,52 @@ SQL
 
 work_dir=$(mktemp -d /tmp/kamori-blob-replication.XXXXXX)
 cleanup() { find "$work_dir" -mindepth 1 -delete; rmdir "$work_dir"; }
-trap cleanup EXIT
+job_status=running
+failure_detail="copy and inventory verification failed"
+finish() {
+  local exit_status=$?
+  trap - EXIT
+  if [[ "$job_status" == running ]] && (( exit_status != 0 )); then
+    heartbeat failed "$failure_detail"
+  fi
+  cleanup || true
+  exit "$exit_status"
+}
+trap finish EXIT
 heartbeat running "copy and inventory verification started"
 
-if ! rclone copy "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
+failure_detail="ciphertext copy failed"
+rclone copy "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
   --immutable --check-first --transfers 4 --checkers 8 --retries 5 \
-  --low-level-retries 20 --log-level INFO; then
-  heartbeat failed "ciphertext copy failed"
-  exit 1
-fi
-if ! rclone check "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
-  --one-way --size-only --checkers 16; then
-  heartbeat failed "size inventory check failed"
-  exit 1
-fi
+  --low-level-retries 20 --log-level INFO
+failure_detail="size inventory check failed"
+rclone check "primary:${PRIMARY_S3_BUCKET}" "dr:${DR_S3_BUCKET}" \
+  --one-way --size-only --checkers 16
 
+failure_detail="object inventory failed"
 rclone lsf "primary:${PRIMARY_S3_BUCKET}" --recursive --files-only --format ps \
   | LC_ALL=C sort > "$work_dir/primary.inventory"
 rclone lsf "dr:${DR_S3_BUCKET}" --recursive --files-only --format ps \
   | LC_ALL=C sort > "$work_dir/dr.inventory"
-awk 'NR == FNR { destination[$0] = 1; next } !destination[$0] { print }' \
+awk 'FILENAME == ARGV[1] { destination[$0] = 1; next } !destination[$0] { print }' \
   "$work_dir/dr.inventory" "$work_dir/primary.inventory" > "$work_dir/missing.inventory"
 if [[ -s "$work_dir/missing.inventory" ]]; then
-  heartbeat failed "DR inventory is missing primary objects"
+  failure_detail="DR inventory is missing primary objects"
   exit 1
 fi
 
+failure_detail="sampled ciphertext hash verification failed"
 cut -d';' -f1 "$work_dir/primary.inventory" | shuf -n "$sample_count" > "$work_dir/sample"
 while IFS= read -r object_key; do
   [[ -n "$object_key" ]] || continue
   primary_hash=$(rclone cat "primary:${PRIMARY_S3_BUCKET}/${object_key}" | sha256sum | cut -d' ' -f1)
   dr_hash=$(rclone cat "dr:${DR_S3_BUCKET}/${object_key}" | sha256sum | cut -d' ' -f1)
   if [[ "$primary_hash" != "$dr_hash" ]]; then
-    heartbeat failed "sampled ciphertext hash mismatch"
+    failure_detail="sampled ciphertext hash mismatch"
     exit 1
   fi
 done < "$work_dir/sample"
 
 primary_count=$(wc -l < "$work_dir/primary.inventory")
 heartbeat ok "copy verified; primary object count ${primary_count}; sampled ${sample_count} hashes"
+job_status=ok

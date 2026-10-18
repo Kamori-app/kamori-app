@@ -1,0 +1,207 @@
+{
+  "source_sha": "7de8436c110c7744c695e4be72f0b8b1def796a6",
+  "artifacts": "/private/tmp/kamori-readiness-20261015/restore/20261015T173931.291140Z",
+  "result": "PASS including owned cleanup",
+  "command": "python3 tests/release-readiness/restore/run.py",
+  "recovery_target": "2026-10-15 17:39:49.043069+00",
+  "last_replayed_commit_utc": "2026-10-15 17:39:48.93567+00",
+  "excluded_commit_utc": "2026-10-15 17:39:49.424485+00",
+  "excluded_transaction": 790,
+  "migrations": {
+    "count": 23,
+    "maximum_version": 202610150003,
+    "all_source_sha384_equal": true
+  },
+  "canaries": {
+    "users": [
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "username": "restore-canary",
+        "ciphertext": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operation_bytes": 292,
+        "blob_storage_bytes": 69760,
+        "auth_generation": 0
+      }
+    ],
+    "spaces": [
+      {
+        "id": "00000000-0000-0000-0000-000000000004",
+        "next_sequence": 1,
+        "current_state_start_seq": 0,
+        "operation_bytes": 292
+      }
+    ],
+    "operations": [
+      {
+        "space_seq": 1,
+        "nonce": "333333333333333333333333333333333333333333333333",
+        "ciphertext": "000102ff0080aabbccddeeff",
+        "signature": "44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444"
+      }
+    ],
+    "blobs": [
+      {
+        "object_key": "ciphertext-1.bin",
+        "size_padded": 128,
+        "sha256": "c71ee91a9200444068be34706bd36cf01064d78df67f3045e5a871acd436394b"
+      },
+      {
+        "object_key": "ciphertext-2.bin",
+        "size_padded": 4096,
+        "sha256": "1e3a50b7f39f9465a1e692ba01ed7d1dc11474d7ae5595e957f6131944054ae5"
+      },
+      {
+        "object_key": "ciphertext-3.bin",
+        "size_padded": 65536,
+        "sha256": "67a84e51b021b2970f68f49d27df2415b4d0ebe266eb2f30f0db19072a6739cc"
+      }
+    ],
+    "markers": [
+      {
+        "name": "before",
+        "committed_at": "2026-10-15T17:39:48.935568+00:00"
+      }
+    ]
+  },
+  "page_checksums": {
+    "files_scanned": 1436,
+    "blocks_scanned": 3991,
+    "bad_checksums": 0,
+    "version": 1
+  },
+  "negative_cases": {
+    "wrong_key_restore": {
+      "exit": 75,
+      "diagnostic": "FormatError unable to load encrypted backup.info; PG_VERSION absent"
+    },
+    "put_only_replication": {
+      "exit": 1,
+      "diagnostic": "403 AccessDenied; failed heartbeat"
+    },
+    "missing_object": {
+      "exit": 1,
+      "diagnostic": "size mismatch: ciphertext-1.bin"
+    },
+    "same_size_corruption": {
+      "exit": 1,
+      "diagnostic": "SHA-256 mismatch: ciphertext-1.bin"
+    }
+  },
+  "green_cases": [
+    "bucket-scoped ListBucket/GetBucketLocation/GetObject/PutObject/AbortMultipartUpload replication, ok heartbeat",
+    "DR-only read with primary stopped",
+    "full DR-only read after each fault repair"
+  ],
+  "measurements": {
+    "backup_and_production_job_seconds": 6.5499835,
+    "restore_start_and_integrity_seconds": 1.6488763330000005,
+    "replication_and_verification_seconds": 0.5023401249999999,
+    "dr_only_read_integrity_seconds": 0.22997154200000125,
+    "exercise_seconds": 32.526338959,
+    "scope": "Local synthetic recovery under concurrent native/container builds; not production RPO/RTO or provider certification.",
+    "cleanup_command_seconds": 32.989
+  },
+  "load_note": "Development iterations overlapped native/container build work; final run was on the same shared host with Go/static checks. No controlled benchmark or production RPO/RTO claim.",
+  "images": [
+    {
+      "id": "72b4283d2c0423b6cde047d2309063e80af1bcf1e93dc38b6d103f46e7157096",
+      "tags": [
+        "localhost/kamori-readiness-restore:20261015"
+      ],
+      "digests": [
+        "localhost/kamori-readiness-restore@sha256:c952cac493042348a97504d0866f7cc3020b2e92f4a73af23a2905a8040fc399"
+      ]
+    },
+    {
+      "id": "8f08aee614800a237906bd48114d733e5ac5bfac4ccdf731f141b0e880d7a253",
+      "tags": [],
+      "digests": [
+        "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+        "quay.io/minio/minio@sha256:9966a92a734f9411e32f4f41d7d9d826fcdc0f68c4e20b70295bd4e7c11f8a2f"
+      ]
+    },
+    {
+      "id": "2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981",
+      "tags": [
+        "docker.io/kamori/cloud-server:acceptance"
+      ],
+      "digests": [
+        "docker.io/kamori/cloud-server@sha256:4d512271e6472cc6fd80ff5fa13589d236c66e4a61c04a3c743b77cfde62bfe6"
+      ]
+    }
+  ],
+  "versions": [
+    "postgres (PostgreSQL) 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "pgBackRest 2.50",
+    "rclone v1.60.1-DEV",
+    "- os/version: ubuntu 24.04 (64 bit)",
+    "- os/kernel: 6.19.7-200.fc43.aarch64 (aarch64)",
+    "- os/type: linux",
+    "- os/arch: arm64",
+    "- go/version: go1.22.2",
+    "- go/linking: dynamic",
+    "- go/tags: none",
+    "mc version RELEASE.2025-08-13T08-35-41Z (commit-id=7394ce0dd2a80935aded936b09fa12cbb3cb8096)",
+    "Runtime: go1.24.6 linux/arm64",
+    "Copyright (c) 2015-2025 MinIO, Inc.",
+    "License GNU AGPLv3 <https://www.gnu.org/licenses/agpl-3.0.html>",
+    "ShellCheck - shell script analysis tool",
+    "version: 0.9.0",
+    "license: GNU General Public License, version 3",
+    "website: https://www.shellcheck.net",
+    "openssl\t3.0.13-0ubuntu3.16",
+    "pgbackrest\t2.50-1build2",
+    "postgresql-16\t16.15-0ubuntu0.24.04.1",
+    "python3\t3.12.3-0ubuntu2.1",
+    "rclone\t1.60.1+dfsg-3ubuntu0.24.04.6",
+    "shellcheck\t0.9.0-1"
+  ],
+  "host_tools": {
+    "python": "3.9.6",
+    "openssl": "LibreSSL 3.3.6",
+    "go": "go1.25.11 darwin/arm64",
+    "engine": "Podman client/server 5.8.2"
+  },
+  "gates": {
+    "go_test": "GOTOOLCHAIN=local /Users/yujin/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.11.darwin-arm64/bin/go test -count=1 ./... \u2014 PASS (12.914s)",
+    "go_vet": "same pinned binary go vet ./... \u2014 PASS",
+    "shellcheck": "0.9.0 PASS; SC1091 external paths, SC2119 optional argument and SC2209 literal diff exclusions documented only on unchanged backup job",
+    "bash_syntax": "PASS",
+    "python_syntax": "PASS"
+  },
+  "cleanup": {
+    "errors": [],
+    "remaining": {
+      "container": [],
+      "volume": [],
+      "network": []
+    }
+  },
+  "limits": [
+    "local POSIX pgBackRest repository, not remote S3/TLS/retention",
+    "local MinIO policy analog, not actual B2/Hetzner credential scope or network",
+    "synthetic byte canaries, not signed valid app envelopes or app-level restore",
+    "no systemd/provisioning or production SLA certification"
+  ],
+  "orchestration_fix_round_1": {
+    "base_sha": "0b1cc7fd6960e01241f8ab7ea5ed66fd86238b5d",
+    "command": "python3 -B tests/release-readiness/restore/test_controls.py",
+    "result": "5 tests PASS in 1.301s; endpoint test includes four selector combinations",
+    "red_artifacts": "/private/tmp/kamori-readiness-20261015/restore/controls-a07685hd",
+    "green_artifacts": "/private/tmp/kamori-readiness-20261015/restore/controls-xmbfp44h",
+    "endpoint_red": "inherited nonexistent local CONTAINER_HOST/CONTAINER_CONNECTION redirects/fails version exit125; arbitrary RESTORE_ENGINE accepted",
+    "endpoint_green": "absolute /opt/podman/bin/podman --url reserved Unix socket; seven inherited Podman/Docker endpoint selectors removed; alternate backend rejected before execution",
+    "failed_start_red": "real run exit127 from nonexistent executable leaves owned tools container Status=created; old cleanup omits container and network removal fails in-use",
+    "failed_start_green": "same run exit127 propagates; attempt tracked before dispatch; container presence and labels reconciled, then removed; empty cleanup inventories",
+    "additional_controls": [
+      "failure before allocation exit125 leaves clean inventory",
+      "ownership mismatch refuses removal, preserves failure inventory; restored contract permits scoped cleanup"
+    ],
+    "cleanup": {
+      "container": [],
+      "volume": [],
+      "network": []
+    },
+    "scope": "Only reserved labeled tools container/network; no volumes, image builds, shared stack changes or remote services. Full restore/Go/native tests not repeated; original evidence retains its source provenance."
+  }
+}

@@ -30,11 +30,18 @@ ON CONFLICT (job_name) DO UPDATE SET
 SQL
 }
 
+job_status=running
+finish() {
+  local exit_status=$?
+  trap - EXIT
+  if [[ "$job_status" == running ]] && (( exit_status != 0 )); then
+    heartbeat failed "${backup_type} backup or archive check failed; inspect pgBackRest logs"
+  fi
+  exit "$exit_status"
+}
+trap finish EXIT
 heartbeat running "${backup_type} backup started"
-if runuser -u postgres -- pgbackrest --stanza=kamori --type="$backup_type" backup; then
-  runuser -u postgres -- pgbackrest --stanza=kamori check
-  heartbeat ok "${backup_type} backup and archive check completed"
-else
-  heartbeat failed "${backup_type} backup failed; inspect pgBackRest logs"
-  exit 1
-fi
+runuser -u postgres -- pgbackrest --stanza=kamori --type="$backup_type" backup
+runuser -u postgres -- pgbackrest --stanza=kamori check
+heartbeat ok "${backup_type} backup and archive check completed"
+job_status=ok

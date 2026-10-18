@@ -98,11 +98,17 @@
             return;
         }
         try {
+            const originalDue = editing?.fields.due_at;
+            const originalZone = originalDue?.type === "record" && originalDue.value.kind === "zoned_datetime"
+                ? originalDue.value.timezone
+                : undefined;
             const fields: Record<string, PimValue> = {
                 title: { type: "text", value: normalizedTitle },
                 notes: notes.trim() ? { type: "text", value: notes.trim() } : { type: "null" },
                 due_at: dueAt
-                    ? { type: "record", value: localDateTimeToTemporal(dueAt) }
+                    ? dueAt === temporalToInputValue(originalDue)
+                        ? originalDue ?? { type: "null" }
+                        : { type: "record", value: localDateTimeToTemporal(dueAt, originalZone) }
                     : { type: "null" },
                 priority: { type: "integer", value: Number(priority) },
                 reminder_minutes: reminderMinutes

@@ -9,19 +9,19 @@ use super::repositories::{
 };
 use crate::features::spaces::{dto::SpaceRole, repositories::list_spaces};
 
+use crate::platform::test_support::required_test_database_url;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
-async fn test_pool() -> Option<PgPool> {
-    let database_url = std::env::var("KAMORI_DATABASE_URL")
-        .ok()
-        .or_else(|| std::env::var("DATABASE_URL").ok())?;
+async fn test_pool() -> PgPool {
+    let database_url = required_test_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
         .await
         .expect("connect postgres");
     MIGRATOR.run(&pool).await.expect("run migrations");
-    Some(pool)
+    pool
 }
 
 async fn insert_user(pool: &PgPool, user_id: Uuid, label: &str) {
@@ -76,10 +76,7 @@ fn unique_code_hash() -> [u8; 32] {
 
 #[tokio::test]
 async fn invite_creation_and_redemption_preserve_authorization_invariants() {
-    let Some(pool) = test_pool().await else {
-        eprintln!("skipping invite integration test: DATABASE_URL is not set");
-        return;
-    };
+    let pool = test_pool().await;
     let owner_id = Uuid::new_v4();
     let editor_id = Uuid::new_v4();
     let reader_id = Uuid::new_v4();
@@ -275,4 +272,398 @@ async fn invite_creation_and_redemption_preserve_authorization_invariants() {
     assert_eq!(summary.current_state_start_seq, 2);
 
     pool.close().await;
+}
+
+async fn redemption_fixture(
+    pool: &PgPool,
+    recipient: Uuid,
+    existing_role: Option<&str>,
+) -> (Uuid, Uuid, [u8; 32]) {
+    let owner = Uuid::new_v4();
+    insert_user(pool, owner, "retry-owner").await;
+    insert_user(pool, recipient, "retry-recipient").await;
+    let workspace = Uuid::new_v4();
+    let space = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspaces (id, owner_user_id, kind, encrypted_metadata) VALUES ($1, $2, 'personal', $3)")
+        .bind(workspace).bind(owner).bind(b"metadata".as_slice()).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO security_spaces (id, workspace_id, owner_user_id, created_by, encrypted_metadata, current_key_epoch, next_sequence, current_state_start_seq) VALUES ($1, $2, $3, $3, $4, 2, 7, 5)")
+        .bind(space).bind(workspace).bind(owner).bind(b"metadata".as_slice()).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO security_space_members (id, space_id, user_id, role, key_epoch) VALUES ($1, $2, $3, 'owner', 2)")
+        .bind(Uuid::new_v4()).bind(space).bind(owner).execute(pool).await.unwrap();
+    if let Some(role) = existing_role {
+        sqlx::query("INSERT INTO security_space_members (id, space_id, user_id, role, key_epoch, history_start_seq) VALUES ($1, $2, $3, $4, 2, 1)")
+            .bind(Uuid::new_v4()).bind(space).bind(recipient).bind(role).execute(pool).await.unwrap();
+    }
+    let rotation = Uuid::new_v4();
+    sqlx::query("INSERT INTO security_space_epochs (space_id, key_epoch, rotation_id, status, created_by, committed_at) VALUES ($1, 2, $2, 'committed', $3, now())")
+        .bind(space).bind(rotation).bind(owner).execute(pool).await.unwrap();
+    let hash = unique_code_hash();
+    let mut input = invite(
+        Uuid::new_v4(),
+        space,
+        rotation,
+        owner,
+        SpaceRole::Reader,
+        &hash,
+    );
+    input.encrypted_note = Some(b"retry note");
+    assert!(matches!(
+        insert_invite_code(pool, input).await.unwrap(),
+        InviteCodeInsertResult::Stored(_)
+    ));
+    (owner, space, hash)
+}
+
+fn redeemed(outcome: RedeemInviteOutcome) -> super::repositories::RedeemedInvite {
+    match outcome {
+        RedeemInviteOutcome::Redeemed(value) => value,
+        _ => panic!("expected successful exact invite redemption"),
+    }
+}
+
+fn assert_same_redemption(
+    left: &super::repositories::RedeemedInvite,
+    right: &super::repositories::RedeemedInvite,
+) {
+    assert_eq!(left.space_id, right.space_id);
+    assert_eq!(left.role, right.role);
+    assert_eq!(left.key_epoch, right.key_epoch);
+    assert_eq!(left.history_start_seq, right.history_start_seq);
+    assert_eq!(left.current_state_start_seq, right.current_state_start_seq);
+    assert_eq!(left.encrypted_key_package, right.encrypted_key_package);
+    assert_eq!(left.encrypted_note, right.encrypted_note);
+}
+
+#[tokio::test]
+async fn lost_redemption_response_retries_preserve_original_response_and_entitlement() {
+    let pool = test_pool().await;
+    for existing_role in [None, Some("editor")] {
+        let actor = Uuid::new_v4();
+        let (owner, space, hash) = redemption_fixture(&pool, actor, existing_role).await;
+        let first = redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());
+        assert_eq!(
+            first.role,
+            if existing_role.is_some() {
+                SpaceRole::Editor
+            } else {
+                SpaceRole::Reader
+            }
+        );
+        assert_eq!(
+            first.history_start_seq,
+            if existing_role.is_some() { 1 } else { 5 }
+        );
+        let before: (Uuid, String, i32, i64) = sqlx::query_as("SELECT id, role, key_epoch, history_start_seq FROM security_space_members WHERE space_id=$1 AND user_id=$2")
+            .bind(space).bind(actor).fetch_one(&pool).await.unwrap();
+        // Completion is durable even after the unused-code admission deadline.
+        sqlx::query("UPDATE security_space_invites SET expires_at=now()-interval '1 second' WHERE code_hash=$1")
+            .bind(hash.as_slice()).execute(&pool).await.unwrap();
+        // The original response floor is durable, even if server metadata later
+        // advances within this epoch. A retry does not rewrite the entitlement.
+        sqlx::query("UPDATE security_spaces SET current_state_start_seq=6 WHERE id=$1")
+            .bind(space)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let retry = redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());
+        assert_same_redemption(&first, &retry);
+        let after: (Uuid, String, i32, i64) = sqlx::query_as("SELECT id, role, key_epoch, history_start_seq FROM security_space_members WHERE space_id=$1 AND user_id=$2")
+            .bind(space).bind(actor).fetch_one(&pool).await.unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            sqlx::query_scalar::<_, i32>(
+                "SELECT used_count FROM security_space_invites WHERE code_hash=$1"
+            )
+            .bind(hash.as_slice())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id IN ($1,$2)")
+            .bind(owner)
+            .bind(actor)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn concurrent_same_recipient_redemptions_return_identical_response() {
+    let pool = test_pool().await;
+    let actor = Uuid::new_v4();
+    let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
+    let (left, right) = tokio::join!(
+        redeem_invite_code_tx(&pool, &hash, actor),
+        redeem_invite_code_tx(&pool, &hash, actor)
+    );
+    assert_same_redemption(&redeemed(left.unwrap()), &redeemed(right.unwrap()));
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>(
+            "SELECT used_count FROM security_space_invites WHERE code_hash=$1"
+        )
+        .bind(hash.as_slice())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM security_space_members WHERE space_id=$1 AND user_id=$2"
+        )
+        .bind(space)
+        .bind(actor)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id IN ($1,$2)")
+        .bind(owner)
+        .bind(actor)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_different_recipients_cannot_share_single_use_invite() {
+    let pool = test_pool().await;
+    let actor = Uuid::new_v4();
+    let other = Uuid::new_v4();
+    let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
+    insert_user(&pool, other, "other").await;
+    let (left, right) = tokio::join!(
+        redeem_invite_code_tx(&pool, &hash, actor),
+        redeem_invite_code_tx(&pool, &hash, other)
+    );
+    let outcomes = [left.unwrap(), right.unwrap()];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|v| matches!(v, RedeemInviteOutcome::Redeemed(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|v| matches!(v, RedeemInviteOutcome::InvalidOrExpired))
+            .count(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>(
+            "SELECT used_count FROM security_space_invites WHERE code_hash=$1"
+        )
+        .bind(hash.as_slice())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM security_space_members WHERE space_id=$1 AND user_id IN ($2,$3)"
+        )
+        .bind(space)
+        .bind(actor)
+        .bind(other)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id IN ($1,$2,$3)")
+        .bind(owner)
+        .bind(actor)
+        .bind(other)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn retries_reject_removed_members_stale_epochs_and_inactive_spaces() {
+    let pool = test_pool().await;
+    for mutation in ["removed", "epoch", "space", "revoked"] {
+        let actor = Uuid::new_v4();
+        let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
+        redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());
+        match mutation {
+            "removed" => {
+                sqlx::query("UPDATE security_space_members SET status='revoked', revoked_at=now() WHERE space_id=$1 AND user_id=$2").bind(space).bind(actor).execute(&pool).await.unwrap();
+            }
+            "epoch" => {
+                sqlx::query("UPDATE security_spaces SET current_key_epoch=3 WHERE id=$1")
+                    .bind(space)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            "space" => {
+                sqlx::query(
+                    "UPDATE security_spaces SET status='deleted', deleted_at=now() WHERE id=$1",
+                )
+                .bind(space)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            _ => {
+                sqlx::query(
+                    "UPDATE security_space_invites SET revoked_at=now() WHERE code_hash=$1",
+                )
+                .bind(hash.as_slice())
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+        }
+        assert!(matches!(
+            redeem_invite_code_tx(&pool, &hash, actor).await.unwrap(),
+            RedeemInviteOutcome::InvalidOrExpired
+        ));
+        assert_eq!(
+            sqlx::query_scalar::<_, i32>(
+                "SELECT used_count FROM security_space_invites WHERE code_hash=$1"
+            )
+            .bind(hash.as_slice())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id IN ($1,$2)")
+            .bind(owner)
+            .bind(actor)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn expired_unused_invite_never_activates_membership() {
+    let pool = test_pool().await;
+    let actor = Uuid::new_v4();
+    let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
+    sqlx::query(
+        "UPDATE security_space_invites SET expires_at=now()-interval '1 second' WHERE code_hash=$1",
+    )
+    .bind(hash.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        redeem_invite_code_tx(&pool, &hash, actor).await.unwrap(),
+        RedeemInviteOutcome::InvalidOrExpired
+    ));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM security_space_members WHERE space_id=$1 AND user_id=$2"
+        )
+        .bind(space)
+        .bind(actor)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i32>(
+            "SELECT used_count FROM security_space_invites WHERE code_hash=$1"
+        )
+        .bind(hash.as_slice())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0
+    );
+    sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id IN ($1,$2)")
+        .bind(owner)
+        .bind(actor)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn redemption_retry_preserves_entitlement_after_recipient_becomes_owner() {
+    use crate::features::ownership::{
+        dto::OwnershipResourceKind,
+        repositories::{AcceptOfferResult, CreateOfferResult, accept_offer, create_offer},
+    };
+    let pool = test_pool().await;
+    let actor = Uuid::new_v4();
+    let (owner, space, hash) = redemption_fixture(&pool, actor, None).await;
+    let original = redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());
+    let CreateOfferResult::Created(offer) = create_offer(
+        &pool,
+        owner,
+        OwnershipResourceKind::SecuritySpace,
+        space,
+        actor,
+    )
+    .await
+    .unwrap() else {
+        panic!("offer must be created");
+    };
+    assert!(matches!(
+        accept_offer(&pool, actor, offer.transfer_id, i64::MAX, i64::MAX)
+            .await
+            .unwrap(),
+        AcceptOfferResult::Accepted
+    ));
+    let retry = redeemed(redeem_invite_code_tx(&pool, &hash, actor).await.unwrap());
+    assert_same_redemption(&original, &retry);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT role FROM security_space_members WHERE space_id=$1 AND user_id=$2"
+        )
+        .bind(space)
+        .bind(actor)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        "owner"
+    );
+    sqlx::query("DELETE FROM workspaces WHERE owner_user_id=$1")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE id IN ($1,$2)")
+        .bind(owner)
+        .bind(actor)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
