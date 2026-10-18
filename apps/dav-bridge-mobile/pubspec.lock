@@ -865,7 +865,7 @@ packages:
     source: hosted
     version: "0.10.9"
   workmanager_android:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: workmanager_android
       sha256: "187d1d34864f57f9e388b33b88c001c494093c53679831a3dec2e8176e8829d1"
@@ -873,7 +873,7 @@ packages:
     source: hosted
     version: "0.10.8"
   workmanager_apple:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: workmanager_apple
       sha256: "15558fb54415a010910c3529eaf8f61f94d23903dac620331895c472602d6f6e"
