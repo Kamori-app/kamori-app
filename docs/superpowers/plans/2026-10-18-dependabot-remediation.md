@@ -92,11 +92,13 @@
 **Files:** docs/audits/2026-10-18-dependabot-remediation.md and thisplancheckboxes; sourcefixes only after provenintegrationfailure, via boundedreviewloop.
 **Produces:** Complete14PRdisposition/effectiveversion map and exact current-source localverification record.
 
-- [ ] Inspect finaldiff/root graph and coherentactivepins. Run appropriate complete Rustworkspace/FRB/fmt/strictClippy withsyntheticDB, Flutteranalyze/tests, frontend checks/tests/builds and bothunchangedsecurityaudits. Reuse completedresults only if actualrelevantinputs identical; document overlap and sourcebounds.
-- [ ] Build freshfinal productionapplicationimages and execute full46acceptance suite with zero retry masking; record imageIDs and exact9deployedstack/37mountedcomponent populations. Restorefocusedcontrols if changedtooling affects them; do not claim historicalfullPITRrerun.
-- [ ] Verify original16E2EEdocs unchanged; run existingstructuralchecker and pinnedstandaloneprobe if relevant to effectiveRustchange, no protocoleffectclaim.
-- [ ] Write concise committedaudit linking14originalPRs, originalfailures/fixes, effectiveversions, actualcommands/outcomes and unexecutedphysical/release/providerbounds. Report CI publicationpending accurately.
-- [ ] Self-review, commitreport/plan and taskreport for finalwholebranchreview.
+- [x] Inspect finaldiff/root graph and coherentactivepins. Run appropriate complete Rustworkspace/FRB/fmt/strictClippy withsyntheticDB, Flutteranalyze/tests, frontend checks/tests/builds and bothunchangedsecurityaudits. Reuse completedresults only if actualrelevantinputs identical; document overlap and sourcebounds.
+- [x] Build freshfinal productionapplicationimages and execute full49acceptance suite with zero retry masking; record imageIDs and actual8productionstack/41mounted-or-syntheticshell populations; separate7NodeHTTPcontracts. Restorefocusedcontrols if changedtooling affects them; do not claim historicalfullPITRrerun.
+- [x] Verify original16E2EEdocs unchanged; run existingstructuralchecker and pinnedstandaloneprobe if relevant to effectiveRustchange, no protocoleffectclaim.
+- [x] Write concise committedaudit linking14originalPRs, originalfailures/fixes, effectiveversions, actualcommands/outcomes and unexecutedphysical/release/providerbounds. Report CI publicationpending accurately.
+- [x] Self-review, commitreport/plan and taskreport for finalwholebranchreview.
+
+Population ruling (SDD ledger): original46baseline is5production+41mounted, not9+37; all4pim-temporal cases use a synthetic NodeHTTPshell. Three new productionmigration cases yield49=8+41. Preserve every assertion and oldsource-qualifiedreport. Final49 passed with0retries/skips/flaky; remoteCI/publication remainpending.
 
 ## Controller integration
 
