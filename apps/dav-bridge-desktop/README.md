@@ -66,7 +66,7 @@ Server-side token TTL policy is configured in `cloud-server`:
 ## Local Development
 
 Prerequisites:
-- Bun `1.3.14`
+- Bun `1.4.3`
 - Rust toolchain
 - Tauri prerequisites for your OS
 

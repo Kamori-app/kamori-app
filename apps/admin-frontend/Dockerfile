@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM oven/bun:1.3.14-alpine AS dependencies
+FROM oven/bun:1.4.3-alpine AS dependencies
 
 WORKDIR /workspace
 COPY package.json bun.lock ./
@@ -28,6 +28,7 @@ WORKDIR /workspace/apps/admin-frontend
 COPY --from=runtime-dependencies /workspace/node_modules /workspace/node_modules
 COPY --from=runtime-dependencies /workspace/apps/admin-frontend/node_modules ./node_modules
 COPY --from=builder /workspace/apps/admin-frontend/build ./build
+COPY scripts/frontend-server.mjs ./server.mjs
 USER 1000:1000
 EXPOSE 3000
-CMD ["node", "build/index.js"]
+CMD ["node", "server.mjs"]

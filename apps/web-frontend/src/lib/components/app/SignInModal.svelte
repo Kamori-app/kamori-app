@@ -1,16 +1,16 @@
 <script lang="ts">
-    import { cloudApi } from "$lib/api/cloud";
-    import { tokenStore } from "$lib/auth/tokenStore";
-    import { appState } from "$lib/stores/app";
-    import Button from "$lib/components/ui/Button.svelte";
-    import Input from "$lib/components/ui/Input.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
+    import { cloudApi } from "#lib/api/cloud.ts";
+    import { tokenStore } from "#lib/auth/tokenStore.ts";
+    import { appState } from "#lib/stores/app.ts";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Input from "#lib/components/ui/Input.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
     import {
         opaqueSigninFinish,
         opaqueSigninStart,
         unwrapAccountMasterKey,
         encryptVaultBytes,
-    } from "$lib/opaqueClient";
+    } from "#lib/opaqueClient.ts";
     import {
         forgetMasterKeyForLocalUnlock,
         lockWebVault,
@@ -18,14 +18,14 @@
         unlockOrCreateWebVault,
         unlockWebVaultFromLocalUnlock,
         withActiveMasterKey,
-    } from "$lib/cryptoVault";
+    } from "#lib/cryptoVault.ts";
     import {
         parseRequestOptions,
         serializeAssertionCredential,
         toUtf8Bytes,
-    } from "$lib/webauthn";
-    import { locale } from "$lib/i18n";
-    import { notify } from "$lib/stores/notifications";
+    } from "#lib/webauthn.ts";
+    import { locale } from "#lib/i18n.ts";
+    import { notify } from "#lib/stores/notifications.ts";
 
     const signinCopy = {
         en: {

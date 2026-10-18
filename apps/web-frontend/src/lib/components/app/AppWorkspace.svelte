@@ -1,11 +1,13 @@
 <script lang="ts">
     import { onDestroy, onMount } from "svelte";
-    import { page } from "$app/stores";
-    import { cloudApi, type SpaceMemberSummary } from "$lib/api/cloud";
+    import { page as pageState } from "$app/state";
+    import { toStore } from "svelte/store";
+    const page = toStore(() => ({ url: pageState.url }));
+    import { cloudApi, type SpaceMemberSummary } from "#lib/api/cloud.ts";
     import { decode, encode } from "@msgpack/msgpack";
-    import { normalizeByteArray } from "$lib/binary";
-    import { tokenStore } from "$lib/auth/tokenStore";
-    import { runWithAccessRefreshRetry } from "$lib/auth/session-flow.js";
+    import { normalizeByteArray } from "#lib/binary.ts";
+    import { tokenStore } from "#lib/auth/tokenStore.ts";
+    import { runWithAccessRefreshRetry } from "#lib/auth/session-flow.js";
     import {
         generateInviteCode,
         hashInviteCode,
@@ -13,8 +15,8 @@
         unwrapCollectionKeyWithInviteCode,
         wrapBytesWithInviteCode,
         wrapCollectionKeyWithInviteCode,
-    } from "$lib/inviteCodeCrypto";
-    import { appState, type SpaceEntry } from "$lib/stores/app";
+    } from "#lib/inviteCodeCrypto.ts";
+    import { appState, type SpaceEntry } from "#lib/stores/app.ts";
     import {
         getActiveWebDevice,
         captureWebVaultLifetime,
@@ -29,7 +31,7 @@
         storeSpaceKey,
         storeMaterializedPimState,
         withActiveMasterKey,
-    } from "$lib/cryptoVault";
+    } from "#lib/cryptoVault.ts";
     import {
         decryptVaultBytes,
         encryptAccountMasterKeyForDevice,
@@ -43,7 +45,7 @@
         verifyOperationEnvelope,
         wrapSpaceKeyForDevice,
         wrapSpaceKeyForAccountRecovery,
-    } from "$lib/opaqueClient";
+    } from "#lib/opaqueClient.ts";
     import {
         decodePimOperation,
         decodePimSnapshot,
@@ -59,22 +61,22 @@
         type PimValue,
         type PimSnapshotBranchV2,
         type PimSnapshotV2,
-    } from "$lib/pim";
-    import Button from "$lib/components/ui/Button.svelte";
-    import Card from "$lib/components/ui/Card.svelte";
-    import Input from "$lib/components/ui/Input.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
-    import TaskWorkspace from "$lib/components/app/TaskWorkspace.svelte";
-    import CalendarWorkspace from "$lib/components/app/CalendarWorkspace.svelte";
-    import ContactsWorkspace from "$lib/components/app/ContactsWorkspace.svelte";
-    import TrashWorkspace from "$lib/components/app/TrashWorkspace.svelte";
+    } from "#lib/pim.ts";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Card from "#lib/components/ui/Card.svelte";
+    import Input from "#lib/components/ui/Input.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
+    import TaskWorkspace from "#lib/components/app/TaskWorkspace.svelte";
+    import CalendarWorkspace from "#lib/components/app/CalendarWorkspace.svelte";
+    import ContactsWorkspace from "#lib/components/app/ContactsWorkspace.svelte";
+    import TrashWorkspace from "#lib/components/app/TrashWorkspace.svelte";
     import {
         buildRestorePimOperation,
         listDeletedPimItems,
         type DeletedPimItem,
-    } from "$lib/pimHistory";
-    import { locale } from "$lib/i18n";
-    import { notify } from "$lib/stores/notifications";
+    } from "#lib/pimHistory.ts";
+    import { locale } from "#lib/i18n.ts";
+    import { notify } from "#lib/stores/notifications.ts";
     import {
         markSyncFailure,
         markSyncSuccess,
@@ -82,11 +84,11 @@
         registerManualSync,
         setPendingOperations,
         syncState,
-    } from "$lib/stores/sync";
+    } from "#lib/stores/sync.ts";
     import {
         AutoSyncCoordinator,
         type SyncReason,
-    } from "$lib/sync/autoSyncCoordinator";
+    } from "#lib/sync/autoSyncCoordinator.ts";
 
     const ruCopy: Record<string, string> = {
         "Confirm this code in your desktop app": "Сверьте этот код с кодом в приложении для компьютера",
@@ -2356,7 +2358,7 @@
             canWrite={canWriteSelectedCollection}
             items={pimItems}
             busy={loadingAction}
-            onSave={(item, fields) => savePimItem("task", item, fields)}
+            onSave={(item: MaterializedPimItem | undefined, fields: Record<string, PimValue>) => savePimItem("task", item, fields)}
             onToggle={setTaskCompleted}
             onDelete={deletePimItem}
         />
@@ -2371,7 +2373,7 @@
             canWrite={canWriteSelectedCollection}
             items={pimItems}
             busy={loadingAction}
-            onSave={(item, fields) => savePimItem("calendar_event", item, fields)}
+            onSave={(item: MaterializedPimItem | undefined, fields: Record<string, PimValue>) => savePimItem("calendar_event", item, fields)}
             onDelete={deletePimItem}
         />
     </Card>
@@ -2385,7 +2387,7 @@
             canWrite={canWriteSelectedCollection}
             items={pimItems}
             busy={loadingAction}
-            onSave={(item, fields) => savePimItem("contact", item, fields)}
+            onSave={(item: MaterializedPimItem | undefined, fields: Record<string, PimValue>) => savePimItem("contact", item, fields)}
             onDelete={deletePimItem}
         />
     </Card>

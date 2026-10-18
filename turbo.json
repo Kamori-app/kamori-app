@@ -90,6 +90,50 @@
         "$TURBO_ROOT$/tests/fixtures/pim/**"
       ]
     },
+    "web-frontend#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/.gitkeep",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/.cargo/config",
+        "$TURBO_ROOT$/.cargo/config.toml",
+        "$TURBO_ROOT$/apps/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/crypto-core-lib/src/**/*.rs",
+        "$TURBO_ROOT$/packages/crypto-core-lib/build.rs",
+        "$TURBO_ROOT$/scripts/web-crypto-wasm.mjs"
+      ],
+      "outputs": [
+        "dist/**",
+        "build/**",
+        ".svelte-kit/**",
+        "pkg/**"
+      ]
+    },
+    "web-frontend#lint": {
+      "dependsOn": [
+        "^lint"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/.cargo/config",
+        "$TURBO_ROOT$/.cargo/config.toml",
+        "$TURBO_ROOT$/apps/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/crypto-core-lib/src/**/*.rs",
+        "$TURBO_ROOT$/packages/crypto-core-lib/build.rs",
+        "$TURBO_ROOT$/scripts/web-crypto-wasm.mjs"
+      ],
+      "outputs": []
+    },
     "web-frontend#test": {
       "dependsOn": ["^test"],
       "inputs": [
@@ -99,7 +143,17 @@
         "$TURBO_ROOT$/tests/acceptance/package.json",
         "$TURBO_ROOT$/tests/acceptance/specs/pim-recurrence.spec.ts",
         "$TURBO_ROOT$/tests/acceptance/fixtures/calendarCorpus.js",
-        "$TURBO_ROOT$/tests/acceptance/fixtures/taskEditor.bundle.mjs"
+        "$TURBO_ROOT$/tests/acceptance/fixtures/taskEditor.bundle.mjs",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/.cargo/config",
+        "$TURBO_ROOT$/.cargo/config.toml",
+        "$TURBO_ROOT$/apps/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/**/Cargo.toml",
+        "$TURBO_ROOT$/packages/crypto-core-lib/src/**/*.rs",
+        "$TURBO_ROOT$/packages/crypto-core-lib/build.rs",
+        "$TURBO_ROOT$/scripts/web-crypto-wasm.mjs"
       ]
     }
   }

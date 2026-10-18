@@ -2,12 +2,12 @@ import { deleteMsgpack, getMsgpack, postMsgpack } from "./msgpack";
 import {
   CSRF_HEADER,
   REFRESH_TRANSPORT_HEADER,
-} from "$lib/auth/cookie-csrf.js";
-import type { OperationEnvelopeV1 } from "$lib/opaqueClient";
+} from "#lib/auth/cookie-csrf.js";
+import type { OperationEnvelopeV1 } from "#lib/opaqueClient.ts";
 import {
   clearRefreshAttempt,
   loadOrCreateRefreshAttempt,
-} from "$lib/auth/refresh-attempt.js";
+} from "#lib/auth/refresh-attempt.js";
 
 const COOKIE_REFRESH_TRANSPORT_OPTIONS = {
   headers: { [REFRESH_TRANSPORT_HEADER]: "cookie" },

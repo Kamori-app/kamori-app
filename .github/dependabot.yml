@@ -60,11 +60,17 @@ updates:
     directory: /apps/web-frontend
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: node
+        versions: ["~> 25.0"]
 
   - package-ecosystem: docker
     directory: /apps/admin-frontend
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: node
+        versions: ["~> 25.0"]
 
   - package-ecosystem: docker
     directory: /deploy/edge

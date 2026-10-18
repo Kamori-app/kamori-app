@@ -33,7 +33,7 @@ From repo root:
 - `bun run verify`: full strict workspace verification (`bun run lint && bun run test`).
 - `bun run lint`: run workspace lint pipeline.
 - `bun run test`: run workspace test pipeline.
-- Tooling baseline: `bun@1.3.14` (root `packageManager` pin).
+- Tooling baseline: `bun@1.4.3` (root `packageManager` pin).
 
 Rust-focused commands:
 - `cargo fmt --all -- --check`: formatting check (CI-enforced).

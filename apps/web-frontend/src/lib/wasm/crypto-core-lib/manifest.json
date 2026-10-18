@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "recipe": {
+    "rust": "1.99.0",
+    "wasmBindgen": "0.2.127",
+    "profile": "release",
+    "target": "wasm32-unknown-unknown",
+    "cargoArgs": [
+      "build",
+      "-p",
+      "crypto-core-lib",
+      "--locked",
+      "--release",
+      "--target",
+      "wasm32-unknown-unknown",
+      "--features",
+      "wasm",
+      "--no-default-features",
+      "--target-dir",
+      "<target-directory>"
+    ],
+    "targetDirectory": {
+      "environment": "CARGO_TARGET_DIR",
+      "fallback": "target",
+      "relativeTo": "repository-root"
+    },
+    "bindgenArgs": [
+      "--target",
+      "web"
+    ]
+  },
+  "inputs": {
+    "Cargo.lock": "6e0256b88410b5a4f5409d653538a15600998390c24eb170f0b388d150acdc07",
+    "Cargo.toml": "f9dabfb8ca4b32ee8114b3434bf12362a78c7a2bd08cc07abb64aee9aefcf35d",
+    "apps/cloud-server/Cargo.toml": "1e8fecd83844d133e5b6c42db415427becad5cb168dbd0b5644a615de85cac27",
+    "apps/dav-bridge-desktop/src-tauri/Cargo.toml": "118c50cc32c46a28f17cee5839414d4654bec615640d1a0028d6cfa24741915b",
+    "packages/crypto-core-lib/Cargo.toml": "256dde813fa044a1521a2ad44a776252b83bee02bbd99aa0bfca8cbc06cd2469",
+    "packages/crypto-core-lib/src/account_keys.rs": "12f0c987b878852b2ba118673b70ded7beeb73edb1ae4079f128572318a3b6bb",
+    "packages/crypto-core-lib/src/crypto.rs": "739ddc259980b7dcbac37ff77525ce83c2fed71a9bfc892eb1e7161291c3b274",
+    "packages/crypto-core-lib/src/frb_api.rs": "be31361c608460ebf1b3b08549ce9dad229f69ea4fa78c2043e602bcdee39a91",
+    "packages/crypto-core-lib/src/frb_api/auth.rs": "3506a5aaeae11df02ea7c445672b5e52eb91ea2961b8da721869cc5eb58897a3",
+    "packages/crypto-core-lib/src/frb_api/bridge.rs": "3bc59f6afd19faa77494a6277110b292059c6898891665d14ae7e4ee931019ae",
+    "packages/crypto-core-lib/src/frb_api/bridge_corpus_tests.rs": "48f13dbe084db4f447da09ad7a7f7ba89d597e698f5e3a24400c748f167c9438",
+    "packages/crypto-core-lib/src/frb_api/credential_tests.rs": "140b8f35324d4a774f048ee43e5df62c771678af6d80a6c1d2f309cb76f29bf2",
+    "packages/crypto-core-lib/src/frb_api/crypto_exports.rs": "a817d0576e2f5f01616d297461d25bc70d8615fd1cbe2065243621871cce210d",
+    "packages/crypto-core-lib/src/frb_api/devices.rs": "afbd914c8497c3cba4e26f8384cd77c87c39c5f733a42077e977adbc0128b765",
+    "packages/crypto-core-lib/src/frb_api/invites.rs": "4a2af62f0ff9732c185cb0d95920a1d91834bafc8499bc7f6cc700bbb55ec1c2",
+    "packages/crypto-core-lib/src/frb_api/state.rs": "f4474c01eb4327f31d20fbf4c8bc637a3ed21d57e2b94b62c31b409cf8e42ede",
+    "packages/crypto-core-lib/src/frb_api/transport.rs": "50885c2ba4baf00d2c8234d5e37b1e90103ff57055a3cca0f7d2e8d69dc14a14",
+    "packages/crypto-core-lib/src/frb_api/types.rs": "86f6c23ffa7a442d33b3813ab737b6c41643ce05fb559d0b82096937c1e86452",
+    "packages/crypto-core-lib/src/frb_generated.rs": "e112577f4b21c6568cfec631bff60808f0fab97a250926e2924e9b402674fa29",
+    "packages/crypto-core-lib/src/lib.rs": "efd3321eedc149e28ce2982fc131fd57f22d73598855117344d57e9d6a655187",
+    "packages/crypto-core-lib/src/local_bridge_runner/cache.rs": "fd8585f61140cf8e9f5a7ffb71b4e619adb9dc740423c54a8c78cbb72bec6b4b",
+    "packages/crypto-core-lib/src/local_bridge_runner/cloud.rs": "83a07c45a72e481eed0ba91cbb1ef3d671bf685642ca0a246f6762c721745b96",
+    "packages/crypto-core-lib/src/local_bridge_runner/dav.rs": "8ff05d8a32920d76e50a31441edcb04134de6daaf011babc8d71550272c96269",
+    "packages/crypto-core-lib/src/local_bridge_runner/durability_tests.rs": "1ea3e868f6dcd17bb041e90037f792a2645bf6e35e3c605e08246db0e61a5943",
+    "packages/crypto-core-lib/src/local_bridge_runner/mod.rs": "16f7640242e046c1aba99d5c8bce0a333ec767fa1c78a83352975bd8c7e0d6d2",
+    "packages/crypto-core-lib/src/local_bridge_runner/types.rs": "ca811ec36a6fd9b5b79b8fe537a6db52a319654972f55a7fbaa6989c4efda70b",
+    "packages/crypto-core-lib/src/native_http.rs": "05c7ddb580220ab5c85e29898f05fe20f1bf826d34f559fbb318f0c74fb46401",
+    "packages/crypto-core-lib/src/operation_envelope.rs": "8500ac9aa3828fd53da2628229532b9b73190eb2f302340220836efdc1d299de",
+    "packages/crypto-core-lib/src/pim.rs": "e939a495893c4a91a9250dfa3598e7933d84c484357a1b4a1c9ca148c273c220",
+    "packages/crypto-core-lib/src/recovery.rs": "93bfa1b239ef107ccf070f8999016bb1bba9dc139e8d13bb82aa554a9e0ad276",
+    "packages/crypto-core-lib/src/secret_vault.rs": "37ef2d50f9d943556d278fe93feeb29f271e55652bf38a21a5c2ee17ab87480b",
+    "packages/crypto-core-lib/src/tests.rs": "091bf3c74a531e6d1d0bb09baee45e940f51e4094d123d2cbfd9c76430de7a9a",
+    "packages/crypto-core-lib/src/wasm_bindings.rs": "38d463494955d98e5d50053f84bc61f9ac4a0690324862fbf1d658d8a64fa837",
+    "rust-toolchain.toml": "6b3fed79caf57866773208d46c4015c65185bf450446506252bf7ad47e453419",
+    "scripts/web-crypto-wasm.mjs": "a3b67e2c7f159bbb0e4b72427fc554c3da95ec7079e48b07973954c651f9c06e"
+  },
+  "outputs": {
+    "apps/web-frontend/src/lib/wasm/crypto-core-lib/crypto_core_lib.d.ts": "84171ed063d795698c02751188c54363bd3e861cad288990361ab5b2bb37e4d7",
+    "apps/web-frontend/src/lib/wasm/crypto-core-lib/crypto_core_lib.js": "8efb328563a2b8b46610c5ca0f174a90f3bb002af8694357deaa1b940df0ddc7",
+    "apps/web-frontend/src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm": "d49cc1e910cc06877fbefbe490c87d43673a33da27f1aa7f90194269852f618f",
+    "apps/web-frontend/src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm.d.ts": "70a41a014bc9be07b97cf9d37c3bd475861cdb8b19278ce5e3490407d8c86bcd"
+  }
+}

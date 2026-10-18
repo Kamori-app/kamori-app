@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { locale } from "$lib/i18n";
-    import { syncState } from "$lib/stores/sync";
+    import { locale } from "#lib/i18n.ts";
+    import { syncState } from "#lib/stores/sync.ts";
 
     export let onSync: () => void = () => {};
 

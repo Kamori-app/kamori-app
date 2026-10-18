@@ -539,7 +539,9 @@ fn parse_report(body: &[u8]) -> Result<DavReport> {
         ));
     }
     let mut reader = Reader::from_reader(body);
-    reader.config_mut().trim_text(true);
+    // Trim completed values only: references and CDATA split text into events
+    // whose surrounding whitespace is significant inside hrefs and sync tokens.
+    reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     let mut root = None;
     let mut capture = None::<String>;
@@ -549,7 +551,7 @@ fn parse_report(body: &[u8]) -> Result<DavReport> {
     loop {
         match reader.read_event_into(&mut buffer)? {
             Event::Start(start) => {
-                let local = String::from_utf8_lossy(start.local_name().as_ref()).into_owned();
+                let local = start.local_name().as_ref().to_owned();
                 root.get_or_insert_with(|| local.clone());
                 if local == "href" || local == "sync-token" {
                     capture = Some(local);
@@ -557,12 +559,22 @@ fn parse_report(body: &[u8]) -> Result<DavReport> {
                 }
             }
             Event::Text(text) if capture.is_some() => {
-                let decoded = text.decode()?;
-                captured.push_str(&quick_xml::escape::unescape(&decoded)?);
+                captured.push_str(&text);
             }
-            Event::CData(text) if capture.is_some() => captured.push_str(&text.decode()?),
+            Event::CData(text) if capture.is_some() => captured.push_str(&text),
+            Event::GeneralRef(reference) if capture.is_some() => {
+                // quick-xml emits references separately from text. Decode exactly
+                // once here; CDATA must remain literal, including entity-like text.
+                if let Some(character) = reference.resolve_char_ref()? {
+                    captured.push(character);
+                } else {
+                    let entity = quick_xml::escape::resolve_xml_entity(&reference)
+                        .ok_or_else(|| anyhow!("unknown XML entity: {}", &*reference))?;
+                    captured.push_str(entity);
+                }
+            }
             Event::End(end) => {
-                let local = String::from_utf8_lossy(end.local_name().as_ref()).into_owned();
+                let local = end.local_name().as_ref().to_owned();
                 if capture.as_deref() == Some(local.as_str()) {
                     let value = captured.trim().to_string();
                     if local == "href" && !value.is_empty() {
@@ -1106,6 +1118,86 @@ mod tests {
             report,
             DavReport::MultiGet(vec!["/caldav/a/one.ics".to_string()])
         );
+    }
+
+    #[test]
+    fn report_parser_decodes_entities_once_and_preserves_cdata_hrefs() {
+        let report = parse_report(
+            br#"<c:calendar-multiget xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:">
+                <d:href>/caldav/team/A&amp;B&#x20;&#67;&lt;&gt;&quot;&apos;&amp;amp;.ics</d:href>
+                <d:href><![CDATA[/caldav/team/literal&amp;<tag>.ics]]></d:href>
+                <d:href>/caldav/team/mixed<![CDATA[&raw]]>&amp;tail.ics</d:href>
+            </c:calendar-multiget>"#,
+        )
+        .expect("parse report hrefs");
+        assert_eq!(
+            report,
+            DavReport::MultiGet(vec![
+                "/caldav/team/A&B C<>\"'&amp;.ics".to_string(),
+                "/caldav/team/literal&amp;<tag>.ics".to_string(),
+                "/caldav/team/mixed&raw&tail.ics".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn report_parser_decodes_sync_token_entities_and_preserves_cdata() {
+        for xml in [
+            br#"<d:sync-collection xmlns:d="DAV:"><d:sync-token>http://kamori.app/ns/sync/caldav/tea&amp;m/&#52;2</d:sync-token></d:sync-collection>"#.as_slice(),
+            br#"<d:sync-collection xmlns:d="DAV:"><d:sync-token><![CDATA[http://kamori.app/ns/sync/caldav/tea&m/42]]></d:sync-token></d:sync-collection>"#.as_slice(),
+        ] {
+            assert_eq!(parse_report(xml).expect("parse sync token"),
+                DavReport::SyncCollection(Some("http://kamori.app/ns/sync/caldav/tea&m/42".to_string())));
+        }
+    }
+
+    #[test]
+    fn report_parser_preserves_href_spaces_at_reference_and_cdata_boundaries() {
+        let report = parse_report(
+            br#"<c:calendar-multiget xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:">
+                <d:href>
+                    /caldav/team/prefix &amp; suffix.ics
+                </d:href>
+                <d:href> /caldav/team/prefix <![CDATA[&raw]]> suffix.ics </d:href>
+                <d:href> /caldav/team/prefix &#32; suffix.ics </d:href>
+                <d:href> /caldav/team/prefix  &#x20;  suffix.ics </d:href>
+                <d:href> 	 </d:href>
+            </c:calendar-multiget>"#,
+        )
+        .expect("parse indented report hrefs");
+        assert_eq!(
+            report,
+            DavReport::MultiGet(vec![
+                "/caldav/team/prefix & suffix.ics".to_string(),
+                "/caldav/team/prefix &raw suffix.ics".to_string(),
+                "/caldav/team/prefix   suffix.ics".to_string(),
+                "/caldav/team/prefix     suffix.ics".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn report_parser_preserves_sync_token_spaces_at_reference_and_cdata_boundaries() {
+        for (token_xml, expected) in [
+            ("prefix &amp; suffix", "prefix & suffix"),
+            ("prefix <![CDATA[&raw]]> suffix", "prefix &raw suffix"),
+            ("prefix &#32; suffix", "prefix   suffix"),
+            ("prefix  &#x20;  suffix", "prefix     suffix"),
+        ] {
+            let xml = format!(
+                "<d:sync-collection xmlns:d=\"DAV:\">\n  <d:sync-token>\n    {token_xml}\n  </d:sync-token>\n</d:sync-collection>"
+            );
+            assert_eq!(
+                parse_report(xml.as_bytes()).expect("parse indented sync token"),
+                DavReport::SyncCollection(Some(expected.to_string())),
+                "token XML: {token_xml}"
+            );
+        }
+    }
+
+    #[test]
+    fn report_parser_rejects_undeclared_entities() {
+        assert!(parse_report(br#"<d:sync-collection xmlns:d="DAV:"><d:sync-token>&unknown;</d:sync-token></d:sync-collection>"#).is_err());
     }
 
     #[test]

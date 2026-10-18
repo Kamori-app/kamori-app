@@ -1,9 +1,9 @@
 <script lang="ts">
-    import Button from "$lib/components/ui/Button.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
-    import type { MaterializedPimItem, PimValue } from "$lib/pim";
-    import { localDateTimeToTemporal, temporalToDate, temporalToInputValue } from "$lib/pim";
-    import { locale } from "$lib/i18n";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
+    import type { MaterializedPimItem, PimValue } from "#lib/pim.ts";
+    import { localDateTimeToTemporal, temporalToDate, temporalToInputValue } from "#lib/pim.ts";
+    import { locale } from "#lib/i18n.ts";
 
     export let spaces: { id: string; name: string }[] = [];
     export let selectedSpaceId = "";

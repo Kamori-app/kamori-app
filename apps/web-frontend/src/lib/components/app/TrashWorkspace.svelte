@@ -1,7 +1,7 @@
 <script lang="ts">
-    import Button from "$lib/components/ui/Button.svelte";
-    import { locale } from "$lib/i18n";
-    import type { DeletedPimItem } from "$lib/pimHistory";
+    import Button from "#lib/components/ui/Button.svelte";
+    import { locale } from "#lib/i18n.ts";
+    import type { DeletedPimItem } from "#lib/pimHistory.ts";
 
     type Space = {
         id: string;

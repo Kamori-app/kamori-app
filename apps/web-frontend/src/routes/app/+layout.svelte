@@ -1,29 +1,31 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { browser } from "$app/environment";
+    import { browser } from "$app/env";
     import { goto } from "$app/navigation";
-    import { page } from "$app/stores";
-    import { cloudApi } from "$lib/api/cloud";
-    import { bestEffortLogoutWithRefresh } from "$lib/auth/session-flow.js";
-    import { tokenStore } from "$lib/auth/tokenStore";
-    import BrandMark from "$lib/components/BrandMark.svelte";
-    import LocaleSwitch from "$lib/components/LocaleSwitch.svelte";
-    import AccountRecovery from "$lib/components/app/AccountRecovery.svelte";
-    import AppWorkspace from "$lib/components/app/AppWorkspace.svelte";
-    import SettingsModal from "$lib/components/app/SettingsModal.svelte";
-    import SignInModal from "$lib/components/app/SignInModal.svelte";
-    import SignUpModal from "$lib/components/app/SignUpModal.svelte";
-    import SyncStatus from "$lib/components/app/SyncStatus.svelte";
-    import Badge from "$lib/components/ui/Badge.svelte";
-    import Button from "$lib/components/ui/Button.svelte";
+    import { page as pageState } from "$app/state";
+    import { toStore } from "svelte/store";
+    const page = toStore(() => ({ url: pageState.url }));
+    import { cloudApi } from "#lib/api/cloud.ts";
+    import { bestEffortLogoutWithRefresh } from "#lib/auth/session-flow.js";
+    import { tokenStore } from "#lib/auth/tokenStore.ts";
+    import BrandMark from "#lib/components/BrandMark.svelte";
+    import LocaleSwitch from "#lib/components/LocaleSwitch.svelte";
+    import AccountRecovery from "#lib/components/app/AccountRecovery.svelte";
+    import AppWorkspace from "#lib/components/app/AppWorkspace.svelte";
+    import SettingsModal from "#lib/components/app/SettingsModal.svelte";
+    import SignInModal from "#lib/components/app/SignInModal.svelte";
+    import SignUpModal from "#lib/components/app/SignUpModal.svelte";
+    import SyncStatus from "#lib/components/app/SyncStatus.svelte";
+    import Badge from "#lib/components/ui/Badge.svelte";
+    import Button from "#lib/components/ui/Button.svelte";
     import {
         lockWebVault,
         unlockWebVaultFromLocalUnlock,
-    } from "$lib/cryptoVault";
-    import { locale } from "$lib/i18n";
-    import { appState } from "$lib/stores/app";
-    import { notify } from "$lib/stores/notifications";
-    import { requestManualSync, resetSyncState } from "$lib/stores/sync";
+    } from "#lib/cryptoVault.ts";
+    import { locale } from "#lib/i18n.ts";
+    import { appState } from "#lib/stores/app.ts";
+    import { notify } from "#lib/stores/notifications.ts";
+    import { requestManualSync, resetSyncState } from "#lib/stores/sync.ts";
 
     const copy = {
         en: {

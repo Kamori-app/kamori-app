@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, extname } from "node:path";
 
 const requireWeb = createRequire(new URL("../../../apps/web-frontend/package.json", import.meta.url));
 const { compile } = requireWeb("svelte/compiler");
@@ -18,10 +18,10 @@ const bundle = await Bun.build({
       build.onResolve({ filter: /^svelte$/ }, () => ({
         path: resolve(dirname(requireWeb.resolve("svelte/package.json")), "src/index-client.js"),
       }));
-      build.onResolve({ filter: /^\$lib\// }, ({ path }) => ({
-        path: resolve(lib, path.slice(5)) + (path.endsWith(".svelte") ? "" : ".ts"),
+      build.onResolve({ filter: /^(?:\$lib|#lib)\// }, ({ path }) => ({
+        path: resolve(lib, path.slice(5)) + (extname(path) ? "" : ".ts"),
       }));
-      build.onResolve({ filter: /^\$app\/environment$/ }, () => ({ path: "environment", namespace: "environment" }));
+      build.onResolve({ filter: /^\$app\/(?:environment|env)$/ }, () => ({ path: "environment", namespace: "environment" }));
       build.onLoad({ filter: /.*/, namespace: "environment" }, () => ({ contents: "export const browser = false;", loader: "js" }));
       build.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({
         contents: compile(await readFile(path, "utf8"), { filename: path, generate: "client" }).js.code,

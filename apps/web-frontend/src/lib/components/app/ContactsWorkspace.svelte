@@ -1,8 +1,8 @@
 <script lang="ts">
-    import Button from "$lib/components/ui/Button.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
-    import type { MaterializedPimItem, PimValue } from "$lib/pim";
-    import { locale } from "$lib/i18n";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
+    import type { MaterializedPimItem, PimValue } from "#lib/pim.ts";
+    import { locale } from "#lib/i18n.ts";
 
     type LabeledValue = { label: string; value: string; raw_head?: string };
     type AddressValue = { label: string; po_box?: string; extended?: string; street: string; locality: string; region: string; postal_code: string; country: string; raw_head?: string };

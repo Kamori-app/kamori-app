@@ -210,7 +210,7 @@ Layers:
 - Generated Rust wasm-bindgen artifacts in `src/lib/wasm/crypto-core-lib/`.
 
 Current adapter:
-- `@sveltejs/adapter-node` in [`svelte.config.js`](./svelte.config.js).
+- `@sveltejs/adapter-node` in [`vite.config.ts`](./vite.config.ts).
 
 ## API Dependencies
 
@@ -267,34 +267,36 @@ Default dev URL:
 
 The web app uses generated bindings from `packages/crypto-core-lib` with `feature = "wasm"`.
 
-One-time setup:
+Use the Rust version in `rust-toolchain.toml` and the exact `wasm-bindgen`
+version in `Cargo.lock` (currently 1.99.0 and 0.2.127):
 
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.127
+rustup target add wasm32-unknown-unknown --toolchain 1.99.0
+cargo +1.99.0 install wasm-bindgen-cli --version 0.2.127 --locked
 ```
 
-From repository root:
+From the repository root, with the selected toolchain first in `PATH`:
 
 ```bash
-CARGO_TARGET_DIR=/tmp/kamori-wasm-target \
-  cargo build -p crypto-core-lib --release --target wasm32-unknown-unknown --features wasm --no-default-features
-
-wasm-bindgen \
-  --target web \
-  --out-dir apps/web-frontend/src/lib/wasm/crypto-core-lib \
-  /tmp/kamori-wasm-target/wasm32-unknown-unknown/release/crypto_core_lib.wasm
+export PATH="$(rustup which --toolchain 1.99.0 rustc | xargs dirname):$PATH"
+CARGO_TARGET_DIR=/tmp/kamori-wasm-target bun run wasm:build
+bun run wasm:check
 ```
 
-The `wasm-bindgen-cli` version must exactly match the `wasm-bindgen` version
-resolved in `Cargo.lock`. Keep the generated browser artifact on the release
-profile: debug generation makes the shipped WASM several times larger.
+The canonical build verifies the actual Rust/Cargo and wasm-bindgen versions,
+uses the locked release WASM feature build, stages generated outputs, then writes
+`src/lib/wasm/crypto-core-lib/manifest.json`. It resolves `CARGO_TARGET_DIR`
+(relative to the repository root) or defaults to the repository `target`, passes
+that directory explicitly to Cargo with `--target-dir`, and reads the same path
+for binding generation. This overrides Cargo configuration `build.target-dir`.
+Commit the manifest and all four
+`crypto_core_lib*` generated files together. Do not edit the manifest by hand.
 
-Generated files:
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib.js`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib.d.ts`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm`
-- `src/lib/wasm/crypto-core-lib/crypto_core_lib_bg.wasm.d.ts`
+Ordinary web `check` and `build` (including the Docker build) reject missing or
+stale artifacts. The manifest hashes the Cargo graph, toolchain, generator, core
+Rust sources and generated outputs, including added/deleted files. It detects
+unintentional staleness; it is not a cryptographic build attestation. Guard tests
+run in frontend CI with `node --test scripts/web-crypto-wasm.test.mjs`.
 
 ## Quality and Test Commands
 
@@ -329,3 +331,30 @@ Release checklist:
 1. Build the app in CI (`bun run --filter web-frontend build`).
 2. Verify CORS policy on `cloud-server` allows web origin.
 3. Validate auth + invite-code flows against production backend.
+
+
+### Production frontend runtime
+
+The web and admin images build with Bun 1.4.3 and run on Node 24 LTS using
+[`scripts/frontend-server.mjs`](../../scripts/frontend-server.mjs). SvelteKit 3
+configuration lives in each application's Vite plugin. The launcher preserves
+runtime `ORIGIN` overrides used by production and acceptance: use an absolute
+HTTP(S) origin with no credentials, path, query or fragment. It overwrites private
+origin headers before the adapter sees a request and retains the client's
+`Origin` header for SvelteKit CSRF checks. Without `ORIGIN`, adapter proxy headers
+remain configurable.
+
+The launcher supports `HOST`, `PORT`, `BODY_SIZE_LIMIT`, `ADDRESS_HEADER`,
+`XFF_DEPTH`, `PROTOCOL_HEADER`, `HOST_HEADER`, `PORT_HEADER`, `SHUTDOWN_TIMEOUT`
+(default 30 seconds), `KEEP_ALIVE_TIMEOUT` and `HEADERS_TIMEOUT` (seconds).
+SIGTERM/SIGINT drain requests, close idle connections and emit `sveltekit:shutdown`;
+the shutdown deadline closes remaining connections. Unix sockets, systemd socket
+activation and `IDLE_TIMEOUT` are not supported by this launcher; checked-in
+container deployments use TCP. The web shell uses absolute paths so its cached
+`/app` document can hydrate at an uncached deep URL while offline.
+
+After building both frontends, run `node --test scripts/frontend-server.test.mjs`
+for real HTTP origin, body-limit and lifecycle checks (also run in frontend CI).
+`tests/acceptance/specs/kit-migration.spec.ts` runs against production images in
+both PR smoke and full acceptance to cover the real router and module worker.
+The web `check` script separately typechecks `src/service-worker/tsconfig.json`.

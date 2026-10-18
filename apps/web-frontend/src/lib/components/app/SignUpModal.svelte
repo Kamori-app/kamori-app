@@ -1,23 +1,23 @@
 <script lang="ts">
-    import { cloudApi } from "$lib/api/cloud";
-    import { appState } from "$lib/stores/app";
-    import Button from "$lib/components/ui/Button.svelte";
-    import Input from "$lib/components/ui/Input.svelte";
-    import Modal from "$lib/components/ui/Modal.svelte";
+    import { cloudApi } from "#lib/api/cloud.ts";
+    import { appState } from "#lib/stores/app.ts";
+    import Button from "#lib/components/ui/Button.svelte";
+    import Input from "#lib/components/ui/Input.svelte";
+    import Modal from "#lib/components/ui/Modal.svelte";
     import {
         deriveAccountRecoveryKeypair,
         masterKeyToRecoveryPhrase,
         opaqueSignupFinish,
         opaqueSignupStart,
-    } from "$lib/opaqueClient";
+    } from "#lib/opaqueClient.ts";
     import { encode } from "@msgpack/msgpack";
-    import { deriveDataRecoveryVerifier } from "$lib/cryptoVault";
-    import { wrapAccountMasterKey } from "$lib/opaqueClient";
-    import { locale } from "$lib/i18n";
-    import { notify } from "$lib/stores/notifications";
+    import { deriveDataRecoveryVerifier } from "#lib/cryptoVault.ts";
+    import { wrapAccountMasterKey } from "#lib/opaqueClient.ts";
+    import { locale } from "#lib/i18n.ts";
+    import { notify } from "#lib/stores/notifications.ts";
     import {
         downloadRecoveryKitFile,
-    } from "$lib/recoveryKitFile";
+    } from "#lib/recoveryKitFile.ts";
 
     const signupCopy = {
         en: {

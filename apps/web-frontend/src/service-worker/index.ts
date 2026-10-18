@@ -1,10 +1,16 @@
 /// <reference lib="webworker" />
 
-import { build, files, version } from "$service-worker";
+import { version } from "$app/env";
+import { immutable, assets } from "$app/manifest";
+import type { PathnameWithSearchOrHash } from "$app/types";
+import { resolve } from "$app/paths";
+import { self as worker } from "$app/service-worker";
 
-const worker = self as unknown as ServiceWorkerGlobalScope;
 const cacheName = `kamori-shell-${version}`;
-const shellAssets = [...build, ...files];
+// Generated immutable asset paths are strings, outside the generated route union.
+const shellAssets: string[] = [...immutable, ...assets].map(({ path }) =>
+  resolve(path as PathnameWithSearchOrHash),
+);
 
 worker.addEventListener("install", (event) => {
   event.waitUntil(
