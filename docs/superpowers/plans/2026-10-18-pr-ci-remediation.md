@@ -32,13 +32,13 @@
 **Inputs:** /private/tmp/kamori-pr-fixes-20261018/mobile-ci.log and mobile-diagnosis.md.
 **Produces:** Meaningful host-independent tests of existing iOS/Android scheduling; no production service change unless a distinct bug is proved.
 
-- [ ] Reproduce the wrong-adapter behavior with a focused test before editing. Current Linux CI has 92 passed / 3 failed in this file; the broad PlatformException matcher also permits a false positive.
-- [ ] Explicitly register/select the real appropriate federated Workmanager adapter in tests, independently of dart:io.Platform, using upstream plugin API.
-- [ ] Restore test-global state after each test; assert iOS admission is called only after one native registration and Android skips the iOS channel.
-- [ ] Strengthen channel-error assertions to require the exact configured PlatformException code/message and actual check count; unexpected assertions must not satisfy the test.
-- [ ] Keep both positive and rejected-admission cases meaningful; no production plugin fallback.
-- [ ] Run flutter analyze and flutter test; save exact commands/output in the task report. If emulating Linux selection locally, state exactly what is simulated and leave real Linux validation to GitHub.
-- [ ] Self-review and commit only task files plus this plan, under mobile scope; report source/test counts and limitations.
+- [x] Reproduce the wrong-adapter behavior with a focused test before editing. Current Linux CI has 92 passed / 3 failed in this file; the broad PlatformException matcher also permits a false positive.
+- [x] Explicitly register/select the real appropriate federated Workmanager adapter in tests, independently of dart:io.Platform, using upstream plugin API.
+- [x] Restore test-global state after each test; assert iOS admission is called only after one native registration and Android skips the iOS channel.
+- [x] Strengthen channel-error assertions to require the exact configured PlatformException code/message and actual check count; unexpected assertions must not satisfy the test.
+- [x] Keep both positive and rejected-admission cases meaningful; no production plugin fallback.
+- [x] Run flutter analyze and flutter test; save exact commands/output in the task report. If emulating Linux selection locally, state exactly what is simulated and leave real Linux validation to GitHub.
+- [x] Self-review and commit only task files plus this plan, under mobile scope; report source/test counts and limitations.
 
 ### Task 2: Clear dependency audit failures with maintained packages
 
@@ -46,15 +46,15 @@
 **Inputs:** Rust primary-source diagnosis /private/tmp/kamori-pr-fixes-20261018/rust-deps-diagnosis.md and GitHub audit run 39117486416.
 **Produces:** Reproducible locked graph passing existing production Bun/RustSec policy.
 
-- [ ] Record baseline failures of bun audit --production and bash scripts/cargo-audit.sh. Do not add tests duplicating package-manager audit logic.
-- [ ] Resolve devalue to at least 5.9.3 and source-map-js to at least 1.2.2. Prefer a narrow lock update compatible with all parent ranges; existing root override pattern is permitted if needed.
-- [ ] Resolve quinn-proto to at least 0.11.18 and rustls to at least 0.23.46. Avoid unrelated ecosystem upgrades.
-- [ ] Remove both zbus5 roots using keyring-core1.0.0 and explicit native stores: apple-native-keyring-store1.0.2 with keychain feature, windows-native-keyring-store1.1.0, and Linux dbus-secret-service-keyring-store1.0.1 with crypto-rust + vendored. Remove keyring wrapper entirely from all target manifests, initialize the corresponding real store once before Entry creation, and preserve every service/account value, serialized payload and failure behavior. See primary-source diagnosis for exact APIs and reverse paths. No production mock/default plaintext fallback.
-- [ ] Remove tauri-plugin-opener and its registration; use open5.4.1-compatible with shellexecute-on-windows for the existing browser-login launch, preserving pending-login cleanup on launch failure. Keep the existing fixed LICENSE link working via a narrow fixed-URL application command and existing IPC adapter, rather than exposing unrestricted shell opening. Add real production-component IPC expectations and negative launch/error controls at existing test seams; do not weaken assertions.
-- [ ] Verify maintained Linux Secret Service compatibility through an isolated test session when feasible: service/username search attributes, persistence across adapter reopen, read/write/delete, and unavailable/locked-store error propagation. An old-namespace credential seeded by secret-tool is suitable and avoids reintroducing unmaintained Rust dev dependencies. No actual user keychain reads/writes. Distinguish compiled platform paths from executed integration evidence.
-- [ ] Regenerate lockfiles with pinned tooling, verify frozen/locked install, and run unchanged audit scripts. No new ignored advisory or global gate weakening.
-- [ ] Run affected frontend checks/tests/builds, Rust workspace/FRB checks as appropriate to the real source delta, and meaningful native boundary regression tests for any backend changes. Report unavailable environment checks honestly; GitHub CI remains final Linux/platform evidence.
-- [ ] Self-review and commit task changes with exact evidence report. No push from worker.
+- [x] Record baseline failures of bun audit --production and bash scripts/cargo-audit.sh. Do not add tests duplicating package-manager audit logic.
+- [x] Resolve devalue to at least 5.9.3 and source-map-js to at least 1.2.2. Prefer a narrow lock update compatible with all parent ranges; existing root override pattern is permitted if needed.
+- [x] Resolve quinn-proto to at least 0.11.18 and rustls to at least 0.23.46. Avoid unrelated ecosystem upgrades.
+- [x] Remove both zbus5 roots using keyring-core1.0.0 and explicit native stores: apple-native-keyring-store1.0.2 with keychain feature, windows-native-keyring-store1.1.0, and Linux dbus-secret-service-keyring-store1.0.1 with crypto-rust + vendored. Remove keyring wrapper entirely from all target manifests, initialize the corresponding real store once before Entry creation, and preserve every service/account value, serialized payload and failure behavior. See primary-source diagnosis for exact APIs and reverse paths. No production mock/default plaintext fallback.
+- [x] Remove tauri-plugin-opener and its registration; use open5.4.1-compatible with shellexecute-on-windows for the existing browser-login launch, preserving pending-login cleanup on launch failure. Keep the existing fixed LICENSE link working via a narrow fixed-URL application command and existing IPC adapter, rather than exposing unrestricted shell opening. Add real production-component IPC expectations and negative launch/error controls at existing test seams; do not weaken assertions.
+- [x] Verify maintained Linux Secret Service compatibility through an isolated test session when feasible: service/username search attributes, persistence across adapter reopen, read/write/delete, and unavailable/locked-store error propagation. An old-namespace credential seeded by secret-tool is suitable and avoids reintroducing unmaintained Rust dev dependencies. No actual user keychain reads/writes. Distinguish compiled platform paths from executed integration evidence.
+- [x] Regenerate lockfiles with pinned tooling, verify frozen/locked install, and run unchanged audit scripts. No new ignored advisory or global gate weakening.
+- [x] Run affected frontend checks/tests/builds, Rust workspace/FRB checks as appropriate to the real source delta, and meaningful native boundary regression tests for any backend changes. Report unavailable environment checks honestly; GitHub CI remains final Linux/platform evidence.
+- [x] Self-review and commit task changes with exact evidence report. No push from worker.
 
 ### Task 3: Restore public reproducible S3 acceptance fixtures
 
@@ -62,14 +62,14 @@
 **Inputs:** /private/tmp/kamori-pr-fixes-20261018/container-diagnosis.md and containers-ci.log.
 **Produces:** Public digest-pinned MinIO fixture and init client that work without registry credentials.
 
-- [ ] Confirm existing quay.io server and mc pins fail anonymous pull; distinguish registry authorization from application or bucket permissions.
-- [ ] Replace both acceptance-only image references with ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9 after independently confirming report manifest/layer evidence.
-- [ ] Replace the same active MinIO server constant in restore/run.py and mc build-stage image in restore/Dockerfile, preserving /usr/bin/mc COPY and existing restore behavior. Keep historical source-qualified manifests unchanged.
-- [ ] Keep service names, server command, init shell/mc script, bucket permissions, synthetic credentials, ports and volume declarations unchanged. The image embeds the existing RELEASE.2025-08-13T08-35-41Z mc client and provides /bin/sh, sleep and bash.
-- [ ] Document community rebuild source/provenance, upstream security-release change, immutable multiarch digest and acceptance-only scope. Do not imply official MinIO provenance, production certification or security scanning not performed.
-- [ ] Exercise anonymous pull, init, S3 put/get and private bucket behavior on an isolated owned fixture namespace; use only synthetic data. Confirm failures remain failures; preserve init status gating.
-- [ ] Run affected acceptance smoke/full suite once on final package inputs if available, or rely on actual new GitHub run and state which evidence came from it. Verify the restore tooling image still builds/copies the same mc binary and run its focused orchestration controls; do not falsely reattribute historical full PITR evidence to this update.
-- [ ] Clean up only exact owned containers/volumes/network; retain user caches/images. Self-review, scoped commit and report with observed commands/results.
+- [x] Confirm existing quay.io server and mc pins fail anonymous pull; distinguish registry authorization from application or bucket permissions.
+- [x] Replace both acceptance-only image references with ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9 after independently confirming report manifest/layer evidence.
+- [x] Replace the same active MinIO server constant in restore/run.py and mc build-stage image in restore/Dockerfile, preserving /usr/bin/mc COPY and existing restore behavior. Keep historical source-qualified manifests unchanged.
+- [x] Keep service names, server command, init shell/mc script, bucket permissions, synthetic credentials, ports and volume declarations unchanged. The image embeds the existing RELEASE.2025-08-13T08-35-41Z mc client and provides /bin/sh, sleep and bash.
+- [x] Document community rebuild source/provenance, upstream security-release change, immutable multiarch digest and acceptance-only scope. Do not imply official MinIO provenance, production certification or security scanning not performed.
+- [x] Exercise anonymous pull, init, S3 put/get and private bucket behavior on an isolated owned fixture namespace; use only synthetic data. Confirm failures remain failures; preserve init status gating.
+- [x] Run affected acceptance smoke/full suite once on final package inputs if available, or rely on actual new GitHub run and state which evidence came from it. Verify the restore tooling image still builds/copies the same mc binary and run its focused orchestration controls; do not falsely reattribute historical full PITR evidence to this update.
+- [x] Clean up only exact owned containers/volumes/network; retain user caches/images. Self-review, scoped commit and report with observed commands/results.
 
 ## Integration and acceptance
 
