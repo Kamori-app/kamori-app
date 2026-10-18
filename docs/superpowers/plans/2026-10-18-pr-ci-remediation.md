@@ -71,6 +71,18 @@
 - [x] Run affected acceptance smoke/full suite once on final package inputs if available, or rely on actual new GitHub run and state which evidence came from it. Verify the restore tooling image still builds/copies the same mc binary and run its focused orchestration controls; do not falsely reattribute historical full PITR evidence to this update.
 - [x] Clean up only exact owned containers/volumes/network; retain user caches/images. Self-review, scoped commit and report with observed commands/results.
 
+### Task 4: Bound expired zoned recurrence work on Linux
+
+**Files:** apps/web-frontend/src/lib/pim.ts and focused recurrence tests; remediation report/plan for source-qualified results only. Change other recurrence consumers only if a demonstrated shared defect requires it.
+**Input:** /private/tmp/kamori-pr-fixes-20261018/frontend-ci-new-failure.log, job117655524253, commit f0436aa. CI timed out after10s in existing long-duration expired SECONDLY recurrence test while other frontend gates passed.
+**Produces:** Correct bounded recurrence evaluation under actual pinned Bun1.3.14 on Linux and macOS, retaining long-overlap and timezone semantics. Do not increase/remove timeout to mask unbounded work.
+
+- [x] Diagnose/reproduce actual failure with pinned tooling; distinguish production algorithm defect, platform dependency and incorrect test assertion.
+- [x] Add or strengthen focused RED regression evidence for the proven root cause without duplicating implementation. Preserve short expired=false and long interval still overlaps=true, UTC/positive/negative offsets, DST, UNTIL and COUNT constraints.
+- [x] Implement the smallest behavior-preserving recurrence correction. No arbitrary silent truncation, unchecked empty result or weakened existing deadline.
+- [x] Run focused and full web unit/check/build/UI gates, actual Linux execution when feasible; keep exact commands/output and bounds in report. Use existing isolated container caches and synthetic data only; remove exact owned runtime resources and volumes, preserve user caches/images.
+- [x] Self-review, update remediation report with new finding/result, commit scoped files and report. No push/branch switching or worker subagents.
+
 ## Integration and acceptance
 
 Controller independently reviews each task against its brief and diff; scoped fixes receive scoped rereview. After task review, inspect any additional failed jobs and fix the actual root cause in a new bounded task if needed.

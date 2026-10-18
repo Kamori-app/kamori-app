@@ -414,16 +414,18 @@ describe("zoned recurrence UTC UNTIL and COUNT", () => {
 });
 
 describe("expired zoned recurrence bounded work", () => {
-  for (const [name, end, expected] of [
-    ["expired short interval", "20260828T033000Z", false],
-    ["last interval still overlaps despite old UNTIL", "26000828T033000Z", true],
+  for (const [name, end, until, expected] of [
+    ["expired short interval", "20260828T033000Z", "20260828T030000Z", []],
+    ["last interval still overlaps despite old UNTIL", "26000828T033000Z", "20260828T030000Z", ["2026-08-28T03:00:00.000Z"]],
+    ["retains every overlapping instance through inclusive UNTIL", "26000828T033000Z", "20260828T030001Z", ["2026-08-28T03:00:00.000Z", "2026-08-28T03:00:01.000Z"]],
   ]) {
     test(name, () => {
       const probe = `
-        import { recurringIntervalOccursOnDay } from ${JSON.stringify(new URL("./pim.ts", import.meta.url).pathname)};
+        import { calendarOccurrencesOnDay } from ${JSON.stringify(new URL("./pim.ts", import.meta.url).pathname)};
         const start = { type: "record", value: { kind: "zoned_datetime", local: "20260828T070000", timezone: "Asia/Tbilisi", utc: "20260828T030000Z" } };
         const end = { type: "record", value: { kind: "utc", utc: ${JSON.stringify(end)} } };
-        console.log(recurringIntervalOccursOnDay(start, end, "FREQ=SECONDLY;UNTIL=20260828T030000Z", new Date(2500, 7, 28)));
+        const fields = { starts_at: start, ends_at: end, recurrence_rule: { type: "text", value: "FREQ=SECONDLY;UNTIL=${until}" } };
+        console.log(JSON.stringify(calendarOccurrencesOnDay(fields, new Date(2500, 7, 28)).map(value => value.startsAt.toISOString())));
       `;
       // Hundreds of years of SECONDLY expansion cannot finish before this generous
       // process deadline. Correctly bounded work needs only the expired rule's tail.
@@ -432,7 +434,7 @@ describe("expired zoned recurrence bounded work", () => {
       });
       expect(result.error).toBeUndefined();
       expect(result.status).toBe(0);
-      expect(result.stdout.trim()).toBe(String(expected));
+      expect(JSON.parse(result.stdout)).toEqual(expected);
     }, 15000);
   }
 });
