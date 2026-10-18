@@ -1,0 +1,15 @@
+Command: python3 docs/security/verification/2026-10-16-e2ee/check_documents.py
+
+PASS: 6 UTF-8 Markdown files; 17 local file links
+PASS: whitespace, fenced blocks, placeholders and P01-P16 identifiers
+PASS: normative finding markers present
+SPEC SHA256: 1fa996f69ff98a22561e84dfe5948811e61935836d35c546f97762b67cf9baa7
+Scope: structural document checks, not protocol or product verification
+
+Exit status: 0
+
+Command: rustup run 1.97.1 cargo fmt --manifest-path docs/security/verification/2026-10-16-e2ee/bootstrap-probe/Cargo.toml -- --check
+Exit status: 0
+
+Command: git diff --check
+Exit status: 0
