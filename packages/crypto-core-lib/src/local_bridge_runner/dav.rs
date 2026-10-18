@@ -539,7 +539,9 @@ fn parse_report(body: &[u8]) -> Result<DavReport> {
         ));
     }
     let mut reader = Reader::from_reader(body);
-    reader.config_mut().trim_text(true);
+    // Trim completed values only: references and CDATA split text into events
+    // whose surrounding whitespace is significant inside hrefs and sync tokens.
+    reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     let mut root = None;
     let mut capture = None::<String>;
@@ -1146,6 +1148,50 @@ mod tests {
         ] {
             assert_eq!(parse_report(xml).expect("parse sync token"),
                 DavReport::SyncCollection(Some("http://kamori.app/ns/sync/caldav/tea&m/42".to_string())));
+        }
+    }
+
+    #[test]
+    fn report_parser_preserves_href_spaces_at_reference_and_cdata_boundaries() {
+        let report = parse_report(
+            br#"<c:calendar-multiget xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:">
+                <d:href>
+                    /caldav/team/prefix &amp; suffix.ics
+                </d:href>
+                <d:href> /caldav/team/prefix <![CDATA[&raw]]> suffix.ics </d:href>
+                <d:href> /caldav/team/prefix &#32; suffix.ics </d:href>
+                <d:href> /caldav/team/prefix  &#x20;  suffix.ics </d:href>
+                <d:href> 	 </d:href>
+            </c:calendar-multiget>"#,
+        )
+        .expect("parse indented report hrefs");
+        assert_eq!(
+            report,
+            DavReport::MultiGet(vec![
+                "/caldav/team/prefix & suffix.ics".to_string(),
+                "/caldav/team/prefix &raw suffix.ics".to_string(),
+                "/caldav/team/prefix   suffix.ics".to_string(),
+                "/caldav/team/prefix     suffix.ics".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn report_parser_preserves_sync_token_spaces_at_reference_and_cdata_boundaries() {
+        for (token_xml, expected) in [
+            ("prefix &amp; suffix", "prefix & suffix"),
+            ("prefix <![CDATA[&raw]]> suffix", "prefix &raw suffix"),
+            ("prefix &#32; suffix", "prefix   suffix"),
+            ("prefix  &#x20;  suffix", "prefix     suffix"),
+        ] {
+            let xml = format!(
+                "<d:sync-collection xmlns:d=\"DAV:\">\n  <d:sync-token>\n    {token_xml}\n  </d:sync-token>\n</d:sync-collection>"
+            );
+            assert_eq!(
+                parse_report(xml.as_bytes()).expect("parse indented sync token"),
+                DavReport::SyncCollection(Some(expected.to_string())),
+                "token XML: {token_xml}"
+            );
         }
     }
 
