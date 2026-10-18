@@ -22,7 +22,9 @@ export function recipe(root) {
   const toolchain = read(root, 'rust-toolchain.toml').match(/^channel\s*=\s*"([^"]+)"/m)?.[1];
   const bindgen = read(root, 'Cargo.lock').split('[[package]]').find(section => /^name = "wasm-bindgen"$/m.test(section))?.match(/^version = "([^"]+)"/m)?.[1];
   if (!toolchain || !bindgen) throw new Error('Cannot resolve Rust toolchain or wasm-bindgen version');
-  return { rust: toolchain, wasmBindgen: bindgen, profile: 'release', target: 'wasm32-unknown-unknown', cargoArgs: buildArgs, bindgenArgs: ['--target', 'web'] };
+  return { rust: toolchain, wasmBindgen: bindgen, profile: 'release', target: 'wasm32-unknown-unknown', cargoArgs: [...buildArgs, '--target-dir', '<target-directory>'],
+    targetDirectory: { environment: 'CARGO_TARGET_DIR', fallback: 'target', relativeTo: 'repository-root' },
+    bindgenArgs: ['--target', 'web'] };
 }
 
 export function inventory(root, kind) {
@@ -67,6 +69,7 @@ export function check(root) {
 
 export function build(root) {
   const expected = recipe(root);
+  const target = resolve(root, process.env.CARGO_TARGET_DIR || 'target');
   for (const [command, version] of [['rustc', expected.rust], ['cargo', expected.rust], ['wasm-bindgen', expected.wasmBindgen]]) {
     const actual = execFileSync(command, ['--version'], { cwd: root, encoding: 'utf8' }).trim();
     if (actual.split(/\s+/)[1] !== version) throw new Error(`${command} must be ${version}; found ${actual}`);
@@ -77,8 +80,8 @@ export function build(root) {
   const inputs = inventory(root, 'inputs');
   const staging = mkdtempSync(join(tmpdir(), 'kamori-wasm-build-'));
   try {
-    execFileSync('cargo', buildArgs, { cwd: root, stdio: 'inherit' });
-    const target = resolve(root, process.env.CARGO_TARGET_DIR || 'target');
+    // Override Cargo configuration so generation consumes this build's output.
+    execFileSync('cargo', [...buildArgs, '--target-dir', target], { cwd: root, stdio: 'inherit' });
     execFileSync('wasm-bindgen', ['--target', 'web', '--out-dir', staging, join(target, expected.target, 'release/crypto_core_lib.wasm')], { cwd: root, stdio: 'inherit' });
     if (JSON.stringify(inventory(root, 'inputs')) !== JSON.stringify(inputs)) throw new Error('Inputs changed during generation; rerun build');
     for (const name of outputs) {

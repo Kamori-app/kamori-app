@@ -285,7 +285,11 @@ bun run wasm:check
 
 The canonical build verifies the actual Rust/Cargo and wasm-bindgen versions,
 uses the locked release WASM feature build, stages generated outputs, then writes
-`src/lib/wasm/crypto-core-lib/manifest.json`. Commit the manifest and all four
+`src/lib/wasm/crypto-core-lib/manifest.json`. It resolves `CARGO_TARGET_DIR`
+(relative to the repository root) or defaults to the repository `target`, passes
+that directory explicitly to Cargo with `--target-dir`, and reads the same path
+for binding generation. This overrides Cargo configuration `build.target-dir`.
+Commit the manifest and all four
 `crypto_core_lib*` generated files together. Do not edit the manifest by hand.
 
 Ordinary web `check` and `build` (including the Docker build) reject missing or

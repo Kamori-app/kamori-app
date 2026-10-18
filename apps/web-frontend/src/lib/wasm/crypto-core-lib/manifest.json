@@ -15,8 +15,15 @@
       "wasm32-unknown-unknown",
       "--features",
       "wasm",
-      "--no-default-features"
+      "--no-default-features",
+      "--target-dir",
+      "<target-directory>"
     ],
+    "targetDirectory": {
+      "environment": "CARGO_TARGET_DIR",
+      "fallback": "target",
+      "relativeTo": "repository-root"
+    },
     "bindgenArgs": [
       "--target",
       "web"
@@ -57,7 +64,7 @@
     "packages/crypto-core-lib/src/tests.rs": "091bf3c74a531e6d1d0bb09baee45e940f51e4094d123d2cbfd9c76430de7a9a",
     "packages/crypto-core-lib/src/wasm_bindings.rs": "38d463494955d98e5d50053f84bc61f9ac4a0690324862fbf1d658d8a64fa837",
     "rust-toolchain.toml": "6b3fed79caf57866773208d46c4015c65185bf450446506252bf7ad47e453419",
-    "scripts/web-crypto-wasm.mjs": "b87e170a7883efa8cedd17e2bfc7fc2f8cafadd08d89a5e303cf0594fa9bbd27"
+    "scripts/web-crypto-wasm.mjs": "a3b67e2c7f159bbb0e4b72427fc554c3da95ec7079e48b07973954c651f9c06e"
   },
   "outputs": {
     "apps/web-frontend/src/lib/wasm/crypto-core-lib/crypto_core_lib.d.ts": "84171ed063d795698c02751188c54363bd3e861cad288990361ab5b2bb37e4d7",

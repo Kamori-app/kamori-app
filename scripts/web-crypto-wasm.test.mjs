@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, chmodSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { check, inventory, recipe, artifactDirectory, outputs } from './web-crypto-wasm.mjs';
@@ -45,3 +46,57 @@ for (const [name, mutate] of [
   const f = fixture(t); mutate(f);
   assert.throws(() => check(f.root), /bun run wasm:build/);
 });
+
+for (const explicitTarget of [undefined, 'explicit-cache']) {
+  test(`generator binds fresh Cargo output with configured target-dir (${explicitTarget ?? 'default'})`, t => {
+    const f = fixture(t);
+    f.put('scripts/web-crypto-wasm.mjs', readFileSync(new URL('./web-crypto-wasm.mjs', import.meta.url)));
+    f.put('.cargo/config.toml', '[build]\ntarget-dir = "configured-cache"\n');
+    const wasmRelativePath = 'wasm32-unknown-unknown/release/crypto_core_lib.wasm';
+    f.put(`target/${wasmRelativePath}`, 'stale default artifact');
+    f.put(`configured-cache/${wasmRelativePath}`, 'stale configured artifact');
+    f.put('packages/crypto-core-lib/src/lib.rs', 'fresh source bytes');
+    // Subprocess command fixtures model Cargo's output selection and bindgen's
+    // input consumption, while executing the real canonical generator CLI.
+    const command = String.raw`#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const name = path.basename(process.argv[1]);
+const args = process.argv.slice(2);
+if (args[0] === '--version') {
+  console.log(name + ' ' + (name === 'wasm-bindgen' ? '0.2.127' : '1.99.0'));
+} else if (name === 'cargo') {
+  const configured = fs.readFileSync('.cargo/config.toml', 'utf8').match(/target-dir = "([^"]+)"/)[1];
+  const target = path.resolve(args.includes('--target-dir') ? args[args.indexOf('--target-dir') + 1] : process.env.CARGO_TARGET_DIR || configured);
+  const output = path.join(target, 'wasm32-unknown-unknown/release/crypto_core_lib.wasm');
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, fs.readFileSync('packages/crypto-core-lib/src/lib.rs'));
+  fs.writeFileSync('cargo-invocation.json', JSON.stringify({ args, output }));
+} else if (name === 'wasm-bindgen') {
+  const input = args.at(-1);
+  const out = args[args.indexOf('--out-dir') + 1];
+  for (const file of ['crypto_core_lib.js', 'crypto_core_lib.d.ts', 'crypto_core_lib_bg.wasm', 'crypto_core_lib_bg.wasm.d.ts']) {
+    fs.writeFileSync(path.join(out, file), file.endsWith('.wasm') ? fs.readFileSync(input) : 'generated companion');
+  }
+  fs.writeFileSync('bindgen-input.txt', input);
+} else process.exit(1);
+`;
+    for (const name of ['rustc', 'cargo', 'wasm-bindgen']) {
+      f.put(`commands/${name}`, command);
+      chmodSync(join(f.root, 'commands', name), 0o755);
+    }
+    const env = { ...process.env, PATH: `${join(f.root, 'commands')}:${process.env.PATH}` };
+    delete env.CARGO_TARGET_DIR;
+    if (explicitTarget) env.CARGO_TARGET_DIR = explicitTarget;
+    const result = spawnSync(process.execPath, ['scripts/web-crypto-wasm.mjs', 'build'], { cwd: f.root, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    check(f.root);
+    assert.equal(f.read(`${artifactDirectory}/crypto_core_lib_bg.wasm`), 'fresh source bytes');
+    const cargo = JSON.parse(f.read('cargo-invocation.json'));
+    const canonical = join(f.root, explicitTarget ?? 'target');
+    assert.equal(f.read('bindgen-input.txt'), cargo.output);
+    assert.equal(realpathSync(cargo.output), realpathSync(join(canonical, wasmRelativePath)));
+    assert.equal(f.read(`configured-cache/${wasmRelativePath}`), 'stale configured artifact');
+    if (explicitTarget) assert.equal(f.read(`target/${wasmRelativePath}`), 'stale default artifact');
+  });
+}
