@@ -15,6 +15,16 @@
 
   const go = (next: Route) => navigate(next);
 
+  let licenseError = '';
+  const openLicense = async () => {
+    licenseError = '';
+    try {
+      await api.openLicense();
+    } catch (error) {
+      licenseError = error instanceof Error ? error.message : String(error);
+    }
+  };
+
   const logout = async () => {
     const result = await api.logout();
     loginNotice.set(result.warning ?? copy.loggedOut);
@@ -33,6 +43,7 @@
     <a
       class="text-xs text-slate/70 underline underline-offset-2"
       href="https://github.com/Kamori-app/kamori-app/blob/main/LICENSE.md"
+      on:click|preventDefault={openLicense}
       target="_blank"
       rel="noreferrer"
       title="AGPL-3.0-only corresponding source; no warranty"
@@ -41,3 +52,7 @@
     <Button variant="ghost" on:click={logout}>{copy.logout}</Button>
   </div>
 </nav>
+
+{#if licenseError}
+  <p role="alert" class="mb-3 text-sm text-red-700">{licenseError}</p>
+{/if}

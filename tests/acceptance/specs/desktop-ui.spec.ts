@@ -16,7 +16,7 @@ async function desktop(page: Page, restored = false, running = false) {
     if (failures.has(call.command)) throw new Error(failures.get(call.command));
     if (holds.has(call.command)) return new Promise((resolve, reject) => pending.set(call.command, { resolve, reject }));
     switch (call.command) {
-      case "configure_backend": case "apply_window_preferences": return;
+      case "configure_backend": case "apply_window_preferences": case "open_license": return;
       case "restore_session": return restored;
       case "password_login": restored = true; return { totp_verified: true };
       case "dashboard_snapshot": return { has_access_token: restored, server: { running, bind_addr: "127.0.0.1:8181" }, collections_total: collections.length, synced_items_total: 4 };
@@ -104,5 +104,22 @@ test("desktop space creation rejects whitespace and sends a trimmed name before 
   await expect(page.getByPlaceholder("Personal", { exact: true })).toHaveValue("");
   expect(ipc.calls.filter(c => c.command === "create_collection")).toEqual([
     { command: "create_collection", payload: { name: "Work calendar" } },
+  ]);
+});
+
+
+test("desktop license uses fixed native IPC and reports launch failure", async ({ page }) => {
+  const ipc = await desktop(page, true);
+  const link = page.getByRole("link", { name: "License", exact: true });
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("href", "https://github.com/Kamori-app/kamori-app/blob/main/LICENSE.md");
+  ipc.failures.set("open_license", "Synthetic browser unavailable");
+  await link.click();
+  await expect(page.getByRole("alert")).toHaveText("Synthetic browser unavailable");
+  ipc.failures.clear();
+  await link.click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(ipc.calls.filter(c => c.command === "open_license")).toEqual([
+    { command: "open_license", payload: {} }, { command: "open_license", payload: {} },
   ]);
 });

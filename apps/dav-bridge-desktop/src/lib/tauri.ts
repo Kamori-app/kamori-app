@@ -91,6 +91,8 @@ export const api = {
       totpCode,
     }),
 
+  openLicense: () => invoke<void>("open_license"),
+
   restoreSession: () => invoke<boolean>("restore_session"),
 
   browserLoginStart: () =>
