@@ -1,18 +1,18 @@
 cargo:
   debug:
-    toolchain: "1.97.1"
+    toolchain: "1.99.0"
     extra_flags:
       - --no-default-features
       - --features
       - frb
   profile:
-    toolchain: "1.97.1"
+    toolchain: "1.99.0"
     extra_flags:
       - --no-default-features
       - --features
       - frb
   release:
-    toolchain: "1.97.1"
+    toolchain: "1.99.0"
     extra_flags:
       - --no-default-features
       - --features

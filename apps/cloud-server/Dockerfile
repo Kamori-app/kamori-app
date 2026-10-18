@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.97.1-slim-bookworm AS builder
+FROM rust:1.99.0-slim-bookworm AS builder
 
 WORKDIR /workspace
-ENV RUSTUP_TOOLCHAIN=1.97.1
+ENV RUSTUP_TOOLCHAIN=1.99.0
 # Package revisions follow the pinned Debian base image so rebuilding the image
 # receives its current security updates instead of stale revision pins.
 # hadolint ignore=DL3008

@@ -46,11 +46,11 @@
 **Inputs:** pr-129/pr-118 diffs, rust-review.md and exact CIerrors; existing removedunmaintainedpath repair stays intact.
 **Produces:** All20requested Rustupdates under actual1.99.0, coherentbuilder/CI/localpins, correct quick-xml0.42 usage and retained oldrecoverydata compatibility.
 
-- [ ] Apply reviewed129 update set; upgrade activecompiler pins from1.97.1 to1.99.0 including DockerFROM/ENV and rust-toolchain/workflow fields. Install/reuse explicit native toolchain components without changing global defaults.
-- [ ] Observe original quick-xml compile failure; add/strengthen meaningful DAV REPORT tests for decoded entities/escapedhrefs/CDATA before parserrepair. Preserve parser behavior using tagged0.42 APIs.
-- [ ] Add fixed old-version recovery phrase/entropy compatibility vector, keep OPAQUE using opaque_ke::argon2 and existing HPKE suite/bytes unchanged.
-- [ ] Resolve minimal actual1.99 fmt/Clippy/compiler errors, retaining generatedbridge contract; no blind broad edits. Run affected core/DAV/recovery/FRB and strictRustchecks, unchangedRustSecaudit. Fullworkspace/backenddatabase CI remains finalgate.
-- [ ] Self-review, scopedcommit/report with RED/GREEN and exact effectiveversions; no push/switch.
+- [x] Apply reviewed129 update set; upgrade activecompiler pins from1.97.1 to1.99.0 including DockerFROM/ENV and rust-toolchain/workflow fields. Install/reuse explicit native toolchain components without changing global defaults.
+- [x] Observe original quick-xml compile failure; add/strengthen meaningful DAV REPORT tests for decoded entities/escapedhrefs/CDATA before parserrepair. Preserve parser behavior using tagged0.42 APIs.
+- [x] Add fixed old-version recovery phrase/entropy compatibility vector, keep OPAQUE using opaque_ke::argon2 and existing HPKE suite/bytes unchanged.
+- [x] Resolve minimal actual1.99 fmt/Clippy/compiler errors, retaining generatedbridge contract; no blind broad edits. Run affected core/DAV/recovery/FRB and strictRustchecks, unchangedRustSecaudit. Fullworkspace/backenddatabase CI remains finalgate.
+- [x] Self-review, scopedcommit/report with RED/GREEN and exact effectiveversions; no push/switch.
 
 ### Task 3: Upgrade Go infrastructure dependencies
 
