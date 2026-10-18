@@ -756,7 +756,20 @@ export const temporalToDate = (value: PimValue | undefined): Date | undefined =>
     : undefined;
 };
 
-const zonedCompactLocalToDate = (local: string, timezone: string): Date | undefined => {
+const zonedDateTimeFormatter = (timezone: string): Intl.DateTimeFormat => new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+const zonedCompactLocalToDate = (
+  local: string, timezone: string, sharedFormatter?: Intl.DateTimeFormat,
+): Date | undefined => {
   const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(local);
   if (!match) return undefined;
   const wanted = match.slice(1).map(Number);
@@ -770,16 +783,7 @@ const zonedCompactLocalToDate = (local: string, timezone: string): Date | undefi
   );
   let timestamp = desiredTimestamp;
   try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    });
+    const formatter = sharedFormatter ?? zonedDateTimeFormatter(timezone);
     for (let iteration = 0; iteration < 2; iteration += 1) {
       const parts = Object.fromEntries(
         formatter
@@ -915,10 +919,13 @@ export const calendarOccurrencesOnDay = (
       if (untilInstant) options.until = new Date(untilInstant.getTime() + margin);
       // Preserve bounded work for expired rules while allowing later RDATEs.
       if (!untilInstant || untilInstant.getTime() + duration > dayStart.getTime()) {
+        // A padded SECONDLY tail can contain thousands of candidates. Reuse ICU
+        // setup for this zone while resolving every candidate's own DST offset.
+        const formatter = timezone ? zonedDateTimeFormatter(timezone) : undefined;
         for (const floating of new RRule(options).between(
           new Date(dayStart.getTime() - duration - margin), new Date(dayEnd.getTime() + margin), true,
         )) {
-          const occurrence = timezone ? zonedCompactLocalToDate(dateToIcalendarUtc(floating).slice(0, -1), timezone) : floating;
+          const occurrence = timezone ? zonedCompactLocalToDate(dateToIcalendarUtc(floating).slice(0, -1), timezone, formatter) : floating;
           if (occurrence && (!untilInstant || occurrence <= untilInstant)) candidates.set(occurrence.getTime(), occurrence);
         }
       }

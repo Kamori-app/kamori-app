@@ -40,6 +40,18 @@ admin 1c170e06c2348e2d9f616395cca7c87a50cf3e5bfd6e1726c487d7ba1b4c03a5
 
 Private harness overrides меняли только namespace, image tags и output paths. Scenarios, auth, readiness, retries и workers сохранены. Существующие volumes/images/Playwright artifacts не перезаписывались.
 
+## Дополнительное исправление web recurrence после f0436aa
+
+На f0436aa actual Linux CI job117655524253 прервался по существующему 10s deadline в `expired zoned recurrence bounded work`: короткая истёкшая серия прошла, последний длинный интервал с UNTIL в2026 и DTEND в2600 не завершил проверку дня в2500. Предыдущие локальные web74/74 относились к macOS и не доказывали прохождение Linux.
+
+Диагностика показала конечный перебор до padded UNTIL, а не расширение SECONDLY на сотни лет. Для одного допустимого результата создавались **158401 Intl.DateTimeFormat** и выполнялись475203 вызова formatToParts. Исправление переиспользует один formatter в пределах одного календарного запроса. Все158401 кандидатов,475203 преобразования с их собственными DST offsets, COUNT, настоящий UTC UNTIL и overlap-фильтрация сохранены; глобального cache, произвольного лимита и изменения deadline нет.
+
+На cached Linux ARM64 Alpine, Bun1.3.14, реальный инструментированный запрос стал занимать1.08s вместо5.29s, создавая один formatter при идентичном результате. Это измерение allocation cost; число итераций не уменьшено. Для исходного timeout сохранён RED/GREEN на одном Linux CPU quota0.25: до изменения оба long-overlap контроля завершились ETIMEDOUT10s; после изменения все3 контроля прошли, long cases8.70–9.10s. Quota намеренно ограничивает локальный CPU и не описывает actual GitHub runner. Тесты теперь проверяют точный набор occurrence starts: пустой для short expired, один для старого UNTIL и оба законных интервала при inclusive UNTIL на секунду позже.
+
+На итоговом source delta относительно f0436aa: **web75/75 unit** на macOS ARM64 и Linux ARM64; **4/4 mounted recurrence UI**, check с0 errors/0 warnings и build на macOS. Linux full unit занял2.97s. Неизменённые timezone-isolation, positive/negative offsets, DST, UTC UNTIL/COUNT и corpus tests прошли. Все команды использовали закреплённый Bun1.3.14. Первый sandboxed macOS probe вернул пустой captured stdout при exit0; повтор с обычным разрешённым process execution прошёл без изменения test harness. Этот локальный tooling symptom отделён от настоящего Linux timeout.
+
+Логи и инструментирование сохранены в `/private/tmp/kamori-pr-fixes-20261018/task-4-*`. Шесть точных scratch containers удалены через rm -v после проверки Mounts: только readonly bind mounts, anonymous volumes не было. Пользовательские containers, volumes, images и caches сохранены. Это локальное Linux ARM64/Alpine evidence; actual Ubuntu amd64 CI нового head остаётся проверкой контроллера, успешный remote result здесь не заявлен. Ранние acceptance image IDs и46/46 выше относятся к предыдущему source state; новый полный deployed-stack acceptance для этого узкого изменения recurrence не запускался.
+
 ## Ревью, очистка и пределы доказательств
 
 Каждая задача проходит отдельное spec/quality review; общее ревью охватывает весь диапазон исправлений относительно c8fddb9. Детальные отчёты и scripts/logs сохранены локально в `/private/tmp/kamori-pr-fixes-20261018/`.
@@ -48,4 +60,4 @@ Private harness overrides меняли только namespace, image tags и out
 
 В логах intentional negative controls есть ожидаемые ошибки headless prompter/GTK и удалённого cleanup guard; локальный Node также сообщил конфликт NO_COLOR/FORCE_COLOR. Они сохранены как диагностические результаты, не объявлены ошибками финальной strict Rust lint или поводом менять application behavior.
 
-Локальные результаты относятся к macOS/ARM64 и отдельной Linux storage probe. Полная Linux Tauri compilation, Android/iOS packaging и actual amd64 acceptance проверяются GitHub CI после публикации; текущий результат фиксируется в PR. Windows runtime, физические устройства, реальные пользовательские keychains, production deployment и новое полное PITR/RPO/RTO этим изменением не сертифицируются. Описанный в PR#123 новый E2EE-протокол остаётся архитектурным проектом.
+Локальные результаты относятся к macOS/ARM64, Linux storage probe и отдельному Linux/ARM64 recurrence unit run, описанному выше. Полная Linux Tauri compilation, Android/iOS packaging и actual amd64 acceptance проверяются GitHub CI после публикации; текущий результат фиксируется в PR. Windows runtime, физические устройства, реальные пользовательские keychains, production deployment и новое полное PITR/RPO/RTO этим изменением не сертифицируются. Описанный в PR#123 новый E2EE-протокол остаётся архитектурным проектом.
