@@ -58,10 +58,10 @@
 **Inputs:** pr-105.diff, infrastructure-workflows-review.txt. Keep PulumiCLI/backend contract unchanged unless concretecompatibility requires a coordinated repair.
 **Produces:** Five requested SDK/crypto updates and Go1.26.6 with currentinfrastructure code/tests.
 
-- [ ] Apply intended go.mod/sum changes without removing localproviderreplace or priorliteral-secret/backupfailurerepairs.
-- [ ] Use actualGo1.26.6; verify module resolution, formatting/vet and complete localinfrastructure tests including existing mocks. No livecloud/productionstack operations.
-- [ ] Evaluate pinnedPulumiCLI3.259.0 compatibility from actual SDKcontract; versiondifference alone is not a defect. Exercise offline/mock behavior as appropriate, record lackoflivepreview without claimingproductionchanges.
-- [ ] Self-review, scopedcommit/report; no push/switch.
+- [x] Apply intended go.mod/sum changes without removing localproviderreplace or priorliteral-secret/backupfailurerepairs.
+- [x] Use actualGo1.26.6; verify module resolution, formatting/vet and complete localinfrastructure tests including existing mocks. No livecloud/productionstack operations.
+- [x] Evaluate pinnedPulumiCLI3.259.0 compatibility from actual SDKcontract; versiondifference alone is not a defect. Exercise offline/mock behavior as appropriate, record lackoflivepreview without claimingproductionchanges.
+- [x] Self-review, scopedcommit/report; no push/switch.
 
 ### Task 4: Migrate frontend dependencies and Bun baseline coherently
 
