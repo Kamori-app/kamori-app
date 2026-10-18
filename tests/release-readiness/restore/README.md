@@ -73,3 +73,17 @@ start cleanup, failure before allocation, and refusal on ownership mismatch.
 The tests use the same exclusive lock and preserve logs under `restore/controls-*`.
 Independent fixture cleanup rechecks labels even when the regression is RED.
 They do not rerun PostgreSQL/blob restore or contact remote services.
+
+## Active S3 fixture update
+
+The active server and tooling build stage now select the same digest-pinned
+community MinIO rebuild as the [acceptance fixtures](../../acceptance/README.md#disposable-s3-fixture-provenance).
+Its immutable multiarch index is
+`sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9`.
+The server uses upstream's October 2025 security release; `/usr/bin/mc` remains
+`RELEASE.2025-08-13T08-35-41Z` and is still copied to `/usr/local/bin/mc`.
+This community-published artifact is for disposable fixtures; production
+certification, image scanning and byte-for-byte source rebuilds are not claimed.
+Historical `evidence-2026-10-15.json` records retain their original source-qualified
+images and results. Updating active pins does not rerun or reattribute that PITR
+and blob recovery evidence; a new full exercise must produce its own artifacts.

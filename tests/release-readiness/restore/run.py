@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 NAMESPACE = 'kamori-readiness-restore-20261015'
 IMAGE = 'localhost/kamori-readiness-restore:20261015'
 MIGRATOR = os.environ.get('RESTORE_MIGRATOR_IMAGE', '2fa21cae60f4da730ca8c248612c453e56100d59fa33b6afa8cc3790f89b2981')
-MINIO = 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
+MINIO = 'ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9'
 # This environment's docker wrapper delegates to Podman, which ignores DOCKER_HOST.
 # Use the known backend directly and bind every invocation with its own --url flag.
 ENGINE = '/opt/podman/bin/podman'
