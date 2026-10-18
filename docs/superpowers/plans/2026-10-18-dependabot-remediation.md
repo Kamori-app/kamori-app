@@ -82,10 +82,10 @@
 **Files:** deploy/edge/Dockerfile from117, narrow .github/dependabot.yml rules for Node25 only in web/admin dockerentries; focused existingedge acceptance controls if meaningful.
 **Produces:** Caddy2.11.7 with validated config/proxy behavior; Node24 retained and unsupported25proposals excluded without blocking future supportedmajors/securityupdates.
 
-- [ ] Apply Caddy imagebump. Validate realnewimage with currentCaddyfile using synthetics, test meaningfulHTTP/header/WebSocket contract in isolatedownedfixture. No productionACME/DNS/networkmutation.
-- [ ] Verify officialDependabotversion-ignore syntax and narrowly exclude Node25.x only, preserving futureNodeLTSupdates and securityalerts. No broadmajorversionignore.
-- [ ] Inspect actualtaskcontainers/mounts and remove exact ownedresources using rm-v plus absencecheck; preserve preexistingvolumes/images/caches.
-- [ ] Self-review, scopedcommit/report; no push/switch/remotePRclosure.
+- [x] Apply Caddy imagebump. Validate realnewimage with currentCaddyfile using synthetics, test meaningfulHTTP/header/WebSocket contract in isolatedownedfixture. No productionACME/DNS/networkmutation.
+- [x] Verify officialDependabotversion-ignore syntax and narrowly exclude Node25.x only, preserving futureNodeLTSupdates and securityalerts. No broadmajorversionignore.
+- [x] Inspect actualtaskcontainers/mounts and remove exact ownedresources using rm-v plus absencecheck; preserve preexistingvolumes/images/caches.
+- [x] Self-review, scopedcommit/report; no push/switch/remotePRclosure.
 
 ### Task 6: Final integration verification and audit record
 
