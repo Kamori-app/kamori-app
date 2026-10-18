@@ -1,0 +1,10 @@
+[package]
+name = "kamori-e2ee-design-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+hpke = { version = "=0.14.0", default-features = false, features = ["alloc", "getrandom", "x25519", "hkdfsha2", "chacha"] }
