@@ -22,9 +22,9 @@
     "@sveltejs/adapter-node": "^6.0.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@typescript/native": "npm:typescript@7",
-    "svelte-check": "^4.7.6",
-    "typescript": "~6.0.3",
-    "vite": "^8.3.4"
+    "svelte-check": "^4.7.7",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
   },
   "imports": {
     "#lib/*": "./src/lib/*"

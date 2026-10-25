@@ -24,13 +24,13 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/postcss": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.3",
+    "@tauri-apps/cli": "^2.12.4",
     "@typescript/native": "npm:typescript@7",
     "autoprefixer": "^10.6.1",
-    "postcss": "^8.5.30",
-    "svelte-check": "^4.7.6",
+    "postcss": "^8.5.31",
+    "svelte-check": "^4.7.7",
     "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.3",
-    "vite": "^8.3.4"
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
   }
 }
