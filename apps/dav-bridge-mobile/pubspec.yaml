@@ -17,12 +17,12 @@ dependencies:
   # 11.x requires compile SDK 37; Android target SDK remains Flutter-managed.
   flutter_secure_storage: ^11.2.0
   flutter_contacts: ^2.6.0
-  device_calendar_plus: ^0.8.0
+  device_calendar_plus: ^0.8.1
   rrule: ^0.2.18
   timezone: ^0.11.2
 
   collection: any
-  crypto: ^3.0.6
+  crypto: ^3.0.8
   flutter_rust_bridge: ^2.13.0
   crypto_core_lib:
     path: rust_builder
@@ -31,7 +31,7 @@ dev_dependencies:
   workmanager_android: 0.10.9
   workmanager_apple: 0.9.11
   # Exercise the installed calendar provider channel without native OS access.
-  device_calendar_plus_android: 0.7.1
+  device_calendar_plus_android: 0.7.2
   integration_test:
     sdk: flutter
   flutter_test:
