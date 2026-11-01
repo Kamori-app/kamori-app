@@ -22,19 +22,19 @@
     "@noble/ciphers": "^2.4.0",
     "@sveltejs/kit": "^3.1.0",
     "rrule": "^2.8.1",
-    "svelte": "^5.57.2"
+    "svelte": "^5.57.3"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^6.0.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@typescript/native": "npm:typescript@7",
-    "autoprefixer": "^10.6.1",
-    "postcss": "^8.5.30",
-    "svelte-check": "^4.7.6",
+    "autoprefixer": "^10.6.2",
+    "postcss": "^8.5.32",
+    "svelte-check": "^4.7.7",
     "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.3",
-    "vite": "^8.3.4"
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
   },
   "imports": {
     "#lib/*": "./src/lib/*"
