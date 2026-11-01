@@ -69,10 +69,10 @@ packages:
     dependency: "direct main"
     description:
       name: crypto
-      sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
+      sha256: e3626ae6270383c9e3a549f34c9e4cd26c09ae6a9adaab2bf4737a00340efdc4
       url: "https://pub.dev"
     source: hosted
-    version: "3.0.7"
+    version: "3.0.8"
   crypto_core_lib:
     dependency: "direct main"
     description:
@@ -84,18 +84,18 @@ packages:
     dependency: "direct main"
     description:
       name: device_calendar_plus
-      sha256: "7f3418209e6678e8d9e8a8235e9beda34c1c0c35b0e071644283b300e7939a22"
+      sha256: "31bca1f0055741d5a7b7a8138936af4035f5ace81532ae00a755207899c22d81"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.0"
+    version: "0.8.1"
   device_calendar_plus_android:
     dependency: "direct dev"
     description:
       name: device_calendar_plus_android
-      sha256: "7143fa08a3e1b57a1c81f478af1f4c6a1c47eee768fd5d322a69ed7abb43dcf8"
+      sha256: "39b0bcfe31284a008dbecd9c5139be025164b9a49a5b6259b2dc27c78b7ab971"
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.1"
+    version: "0.7.2"
   device_calendar_plus_ios:
     dependency: transitive
     description:
