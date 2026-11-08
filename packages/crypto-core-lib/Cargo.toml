@@ -51,7 +51,7 @@ zeroize = { version = "1.9", features = ["derive"] }
 bip39 = { version = "3.0.0", default-features = false, features = ["alloc", "unicode-normalization"] }
 once_cell = "1.21"
 ed25519-dalek = "3.0.0"
-hpke = { version = "0.14.0", default-features = false, features = ["alloc", "getrandom", "x25519", "hkdfsha2", "chacha"] }
+hpke = { version = "0.15.1", default-features = false, features = ["alloc", "getrandom", "x25519", "hkdfsha2", "chacha"] }
 
 # WASM bindings
 wasm-bindgen = { version = "0.2", optional = true }
