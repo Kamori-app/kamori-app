@@ -37,6 +37,6 @@
     "wasm:check": "bun scripts/web-crypto-wasm.mjs check"
   },
   "devDependencies": {
-    "turbo": "^2.11.8"
+    "turbo": "^2.11.10"
   }
 }
