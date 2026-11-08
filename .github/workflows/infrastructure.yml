@@ -32,7 +32,7 @@ jobs:
         with:
           go-version-file: infra/go.mod
           cache-dependency-path: infra/go.sum
-      - uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+      - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
         if: inputs.command != 'repair-egress'
         with:
           command: ${{ inputs.command }}
@@ -55,7 +55,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
       - name: Install Pulumi CLI for restricted host recovery
         if: inputs.command == 'repair-egress'
-        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
         with:
           pulumi-version: 3.259.0
       - name: Configure hosts or repair egress
