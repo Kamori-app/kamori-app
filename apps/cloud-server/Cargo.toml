@@ -41,7 +41,7 @@ sha2_opaque = { package = "sha2", version = "0.10.9" }
 chacha20poly1305 = "0.11"
 hex = "0.4"
 url = "2.5.8"
-jsonwebtoken = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12.0", default-features = false, features = ["aws_lc_rs"] }
 redis = { version = "1.6", features = ["tokio-comp"] }
 async-trait = "0.1"
 object_store = { version = "0.14.1", default-features = false, features = ["aws"] }
